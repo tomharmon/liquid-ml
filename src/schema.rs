@@ -1,14 +1,14 @@
 //! A Schema module for managing the data types and row/column names of a
 //! DataFrame.
 
-use crate::dataframe::DataType;
+use sorer::schema::DataType;
 
 /// Represents a [`Schema`](::crate::schema::Schema) of a
 /// [`DataFrame`](::crate::dataframe::DataFrame)
 pub struct Schema {
-    schema: Vec<DataType>,
-    col_names: Vec<Option<String>>,
-    row_names: Vec<Option<String>>,
+    pub schema: Vec<DataType>,
+    pub col_names: Vec<Option<String>>,
+    pub row_names: Vec<Option<String>>,
 }
 
 impl Schema {
@@ -32,8 +32,8 @@ impl Schema {
     /// | 'F'       | Float    |
     /// | 'S'       | String   |
     pub fn from(types: &str) -> Self {
-        let schema = Vec::new();
-        let col_names = Vec::new();
+        let mut schema = Vec::new();
+        let mut col_names = Vec::new();
         for c in types.chars() {
             schema.push(Schema::char_to_data_type(c));
             col_names.push(None);
@@ -57,8 +57,8 @@ impl Schema {
     /// | 'F'       | Float    |
     /// | 'S'       | String   |
     pub fn add_column(mut self, data_type: char, col_name: Option<String>) {
-        match col_name {
-            Some(name) => {
+        match &col_name {
+            Some(_name) => {
                 if !self.col_names.contains(&col_name) {
                     self.schema.push(Schema::char_to_data_type(data_type));
                     self.col_names.push(col_name);
@@ -74,8 +74,8 @@ impl Schema {
     /// Add a row to this `Schema`. If `row_name` is `Some` and the name
     /// already exists in this `Schema`, the row will not be added.
     pub fn add_row(mut self, row_name: Option<String>) {
-        match row_name {
-            Some(name) => {
+        match &row_name {
+            Some(_name) => {
                 if !self.row_names.contains(&row_name) {
                     self.row_names.push(row_name);
                 }
@@ -132,8 +132,8 @@ impl Schema {
     }
 
     fn get_idx_of_optional_name(names: &Vec<Option<String>>, name: &str) -> i64 {
-        let idx = names.iter().position(|&n| match n {
-            Some(name) => name == name,
+        let idx = names.iter().position(|n| match n {
+            Some(col_name) => col_name == name,
             None => false,
         });
 
