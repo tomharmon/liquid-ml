@@ -2,8 +2,8 @@ use crate::row::Row;
 use crate::rower::Rower;
 use crate::schema::Schema;
 use num_cpus;
-use sorer::dataframe::{Column, Data};
-use sorer::schema::DataType;
+use sorer::dataframe::{Column, Data, from_file};
+use sorer::schema::{DataType, infer_schema_from_file};
 use std::thread;
 
 /// Represents a DataFrame which contains
@@ -21,6 +21,14 @@ pub struct DataFrame {
 const IDX_OUT_OF_BOUNDS: fn() = || panic!("Index out of bounds");
 
 impl DataFrame {
+
+    pub fn from_sor(filename: String, from: usize, to: usize) -> Self {
+        let schema = Schema::from(infer_schema_from_file(filename.clone()));
+        let data = from_file(filename, schema.schema.clone(), from as u64, to as u64);
+        DataFrame { schema, data, n_threads: num_cpus::get() }
+    
+    }
+
     pub fn new(s: Schema) -> Self {
         let mut data = Vec::new();
         for data_type in &s.schema {
@@ -173,7 +181,7 @@ impl DataFrame {
     /** Add a row at the end of this dataframe. The row is expected to have
      *  the right schema and be filled with values, otherwise undedined.  */
     pub fn add_row(&mut self, row: &Row) {
-        if row.schema.schema != self.schema.schema {
+        if row.schema != self.schema.schema {
             panic!("Err incompatible row")
         }
         for (data, column) in row.data.iter().zip(self.data.iter_mut()) {
@@ -197,8 +205,8 @@ impl DataFrame {
 
     // NOTE: crossbeam might remove the 'static
     pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
-        let rowers = Vec::new();
-        let threads = Vec::new();
+        let mut rowers = Vec::new();
+        let mut threads = Vec::new();
         rowers.push(rower);
         for i in 0..self.n_threads - 1 {
             rowers.push(&mut rower.clone());
