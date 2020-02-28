@@ -4,12 +4,12 @@ use sorer::dataframe::Data;
 use sorer::schema::DataType;
 
 /// Represents a single row in a [`DataFrame`](sorer::dataframe::DataFrame)
-struct Row<'a> {
+pub struct Row<'a> {
     /// A reference to the [`Schema`](::crate::schema::Schema) of this
     /// [`DataFrame`](sorer::dataframe::DataFrame)
-    schema: &'a Schema,
+    pub(crate) schema: &'a Schema,
     /// The data of this `Row` as boxed values
-    data: Vec<Data>,
+    pub(crate) data: Vec<Data>,
     /// The offset of this `Row` in the `DataFrame`
     idx: Option<usize>,
 }
@@ -86,6 +86,13 @@ impl<'a> Row<'a> {
         }
     }
 
+    pub fn set_null(&mut self, col_idx: usize) {
+        match self.data.get(col_idx) {
+            Some(_) => *self.data.get_mut(col_idx).unwrap() = Data::Null,
+            _ => panic!("Index out of bounds error"),
+        }
+    }
+
     pub fn set_idx(&mut self, idx: usize) {
         self.idx = Some(idx);
     }
@@ -115,7 +122,7 @@ impl<'a> Row<'a> {
             .unwrap_or_else(|| panic!("Error: index out of bounds"))
     }
 
-    pub fn accept<T: Fielder>(&self, f: T) {
+    pub fn accept<T: Fielder>(&self, f: &mut T) {
         let idx = self.get_idx();
         f.start(idx);
 

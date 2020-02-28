@@ -21,30 +21,6 @@ impl Schema {
         }
     }
 
-    /// Create a Schema from a `&str` of types. A string that contains
-    /// characters other that `B`, `I`, `F`, or `S` will panic. Initializes
-    /// the Column names to be `None`.
-    ///
-    /// | Character | DataType |
-    /// |-----------|----------|
-    /// | 'B'       | Bool     |
-    /// | 'I'       | Int      |
-    /// | 'F'       | Float    |
-    /// | 'S'       | String   |
-    pub fn from(types: &str) -> Self {
-        let mut schema = Vec::new();
-        let mut col_names = Vec::new();
-        for c in types.chars() {
-            schema.push(Schema::char_to_data_type(c));
-            col_names.push(None);
-        }
-        Schema {
-            schema,
-            col_names,
-            row_names: Vec::new(),
-        }
-    }
-
     /// Add a column with the given `data_type`, with an optional column name,
     /// to this Schema. Column names must be unique. If `col_name` is `Some`
     /// and the name already exists in this `Schema`, the column will not
@@ -56,16 +32,16 @@ impl Schema {
     /// | 'I'       | Int      |
     /// | 'F'       | Float    |
     /// | 'S'       | String   |
-    pub fn add_column(mut self, data_type: char, col_name: Option<String>) {
+    pub fn add_column(&mut self, data_type: DataType, col_name: Option<String>) {
         match &col_name {
             Some(_name) => {
                 if !self.col_names.contains(&col_name) {
-                    self.schema.push(Schema::char_to_data_type(data_type));
+                    self.schema.push(data_type);
                     self.col_names.push(col_name);
                 }
             }
             None => {
-                self.schema.push(Schema::char_to_data_type(data_type));
+                self.schema.push(data_type);
                 self.col_names.push(None);
             }
         }
@@ -73,7 +49,7 @@ impl Schema {
 
     /// Add a row to this `Schema`. If `row_name` is `Some` and the name
     /// already exists in this `Schema`, the row will not be added.
-    pub fn add_row(mut self, row_name: Option<String>) {
+    pub fn add_row(&mut self, row_name: Option<String>) {
         match &row_name {
             Some(_name) => {
                 if !self.row_names.contains(&row_name) {
@@ -109,15 +85,13 @@ impl Schema {
         self.schema.get(idx).unwrap()
     }
 
-    /// Given a column name, returns its index, or -1 if the name does not
-    /// exist in this Schema.
-    pub fn col_idx(&self, col_name: &str) -> i64 {
+    /// Given a column name, returns its index
+    pub fn col_idx(&self, col_name: &str) -> Option<usize> {
         Schema::get_idx_of_optional_name(&self.col_names, col_name)
     }
 
-    /// Given a row name, returns its index, or -1 if the name does not
-    /// exist in this Schema.
-    pub fn row_idx(&self, row_name: &str) -> i64 {
+    /// Given a row name, returns its index
+    pub fn row_idx(&self, row_name: &str) -> Option<usize> {
         Schema::get_idx_of_optional_name(&self.row_names, row_name)
     }
 
@@ -131,16 +105,11 @@ impl Schema {
         self.row_names.len()
     }
 
-    fn get_idx_of_optional_name(names: &Vec<Option<String>>, name: &str) -> i64 {
-        let idx = names.iter().position(|n| match n {
+    fn get_idx_of_optional_name(names: &Vec<Option<String>>, name: &str) -> Option<usize> {
+        names.iter().position(|n| match n {
             Some(col_name) => col_name == name,
             None => false,
-        });
-
-        match idx {
-            Some(index) => index as i64,
-            None => -1,
-        }
+        })
     }
 
     fn char_to_data_type(c: char) -> DataType {
@@ -150,6 +119,49 @@ impl Schema {
             'F' => DataType::Float,
             'S' => DataType::String,
             _ => panic!("Tried to make a bad Schema"),
+        }
+    }
+}
+
+impl From<&str> for Schema {
+    /// Create a Schema from a `&str` of types. A string that contains
+    /// characters other that `B`, `I`, `F`, or `S` will panic. Initializes
+    /// the Column names to be `None`.
+    ///
+    /// | Character | DataType |
+    /// |-----------|----------|
+    /// | 'B'       | Bool     |
+    /// | 'I'       | Int      |
+    /// | 'F'       | Float    |
+    /// | 'S'       | String   |
+    fn from(types: &str) -> Self {
+        let mut schema = Vec::new();
+        let mut col_names = Vec::new();
+        for c in types.chars() {
+            schema.push(Schema::char_to_data_type(c));
+            col_names.push(None);
+        }
+        Schema {
+            schema,
+            col_names,
+            row_names: Vec::new(),
+        }
+    }
+}
+
+impl From<Vec<DataType>> for Schema {
+    /// Create a Schema from a `Vec<DataType`
+    fn from(types: Vec<DataType>) -> Self {
+        let mut schema = Vec::new();
+        let mut col_names = Vec::new();
+        for t in types {
+            schema.push(t);
+            col_names.push(None);
+        }
+        Schema {
+            schema,
+            col_names,
+            row_names: Vec::new(),
         }
     }
 }
