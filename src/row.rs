@@ -2,27 +2,22 @@ use crate::fielder::Fielder;
 use crate::schema::Schema;
 use sorer::dataframe::Data;
 use sorer::schema::DataType;
+use crate::error::DFError;
 
-/// Represents a single row in a [`DataFrame`](sorer::dataframe::DataFrame)
+/// Represents a single row in a [`DataFrame`](::crate::dataframe::DataFrame)
 pub struct Row {
-    /// A reference to the [`Schema`](::crate::schema::Schema) of this
-    /// [`DataFrame`](sorer::dataframe::DataFrame)
+    /// A clone of the [`Schema`](::crate::schema::Schema) of this
+    /// [`DataFrame`](::crate::dataframe::DataFrame)
     pub(crate) schema: Vec<DataType>,
     /// The data of this `Row` as boxed values
     pub(crate) data: Vec<Data>,
-    /// The offset of this `Row` in the `DataFrame`
+    /// The offset of this `Row` in the `DataFrame`, should ideally be set for the row
     idx: Option<usize>,
-}
-
-fn out_of_bounds_or_bad_type(data_type: &str) -> String {
-    format!(
-        "Error: index out of bounds or the column's datatype was not {}",
-        data_type
-    )
 }
 
 impl Row {
     /// Constructs a new row with the given `Schema`
+    /// And fills it with default Null Values
     pub fn new(schema: &Schema) -> Self {
         let mut data: Vec<Data> = Vec::new();
         for _ in &schema.schema {
@@ -36,93 +31,107 @@ impl Row {
         }
     }
 
-    pub fn set_int(&mut self, col_idx: usize, data: i64) {
-        if let Some(DataType::Int) = self.schema.get(col_idx) {
-            match self.data.get(col_idx).unwrap() {
+    /// Set an integer field in the row 
+    pub fn set_int(&mut self, col_idx: usize, data: i64) -> Result<(), DFError>{
+        match self.schema.get(col_idx) {
+            Some(DataType::Int) => Ok(match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::Int(_) => *self.data.get_mut(col_idx).unwrap() = Data::Int(data),
-                _ => unreachable!("Something is horribly wrong"),
-            }
-        } else {
-            panic!(out_of_bounds_or_bad_type("int"))
+                _ => panic!("Something is horribly wrong"),
+            }),
+            None => Err(DFError::ColIndexOutOfBounds),
+            _ => Err(DFError::TypeMismatch)
         }
     }
 
-    pub fn set_float(&mut self, col_idx: usize, data: f64) {
-        if let Some(DataType::Float) = self.schema.get(col_idx) {
-            match self.data.get(col_idx).unwrap() {
-                Data::Null | Data::Float(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::Float(data)
-                }
-                _ => unreachable!("Something is horribly wrong"),
-            }
-        } else {
-            panic!(out_of_bounds_or_bad_type("float"))
+    /// Set an float field in the row 
+    pub fn set_float(&mut self, col_idx: usize, data: f64) -> Result<(), DFError>{
+        match self.schema.get(col_idx) {
+            Some(DataType::Float) => Ok(match self.data.get(col_idx).unwrap() {
+                Data::Null | Data::Float(_) => *self.data.get_mut(col_idx).unwrap() = Data::Float(data),
+                _ => panic!("Something is horribly wrong"),
+            }),
+            None => Err(DFError::ColIndexOutOfBounds),
+            _ => Err(DFError::TypeMismatch)
         }
     }
 
-    pub fn set_bool(&mut self, col_idx: usize, data: bool) {
-        if let Some(DataType::Bool) = self.schema.get(col_idx) {
-            match self.data.get(col_idx).unwrap() {
-                Data::Null | Data::Bool(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::Bool(data)
-                }
-                _ => unreachable!("Something is horribly wrong"),
-            }
-        } else {
-            panic!(out_of_bounds_or_bad_type("bool"))
+
+    /// Set an bool field in the row 
+    pub fn set_bool(&mut self, col_idx: usize, data: bool) -> Result<(), DFError>{
+        match self.schema.get(col_idx) {
+            Some(DataType::Bool) => Ok(match self.data.get(col_idx).unwrap() {
+                Data::Null | Data::Bool(_) => *self.data.get_mut(col_idx).unwrap() = Data::Bool(data),
+                _ => panic!("Something is horribly wrong"),
+            }),
+            None => Err(DFError::ColIndexOutOfBounds),
+            _ => Err(DFError::TypeMismatch)
         }
     }
 
-    pub fn set_string(&mut self, col_idx: usize, data: String) {
-        if let Some(DataType::String) = self.schema.get(col_idx) {
-            match self.data.get(col_idx).unwrap() {
-                Data::Null | Data::String(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::String(data)
-                }
-                _ => unreachable!("Something is horribly wrong"),
-            }
-        } else {
-            panic!(out_of_bounds_or_bad_type("String"))
+    /// Set an bool field in the row 
+    pub fn set_string(&mut self, col_idx: usize, data: String) -> Result<(), DFError>{
+        match self.schema.get(col_idx) {
+            Some(DataType::String) => Ok(match self.data.get(col_idx).unwrap() {
+                Data::Null | Data::String(_) => *self.data.get_mut(col_idx).unwrap() = Data::String(data),
+                _ => panic!("Something is horribly wrong"),
+            }),
+            None => Err(DFError::ColIndexOutOfBounds),
+            _ => Err(DFError::TypeMismatch)
         }
     }
 
-    pub fn set_null(&mut self, col_idx: usize) {
+    /// Set an field in the row to Null
+    /// Panics for out of bound indices 
+    pub fn set_null(&mut self, col_idx: usize) -> Result<(), DFError> {
         match self.data.get(col_idx) {
-            Some(_) => *self.data.get_mut(col_idx).unwrap() = Data::Null,
-            _ => panic!("Index out of bounds error"),
+            Some(_) => {*self.data.get_mut(col_idx).unwrap() = Data::Null;
+                Ok(())
+            },
+            _ => Err(DFError::ColIndexOutOfBounds),
         }
     }
 
+    /// Set the offset in the daaframe for this row
     pub fn set_idx(&mut self, idx: usize) {
         self.idx = Some(idx);
     }
 
-    pub fn get_idx(&self) -> usize {
+    /// Get the current index of this row
+    pub fn get_idx(&self) -> Result<usize, DFError> {
         match self.idx {
-            Some(index) => index,
-            None => panic!("Error: the index of this row has not been set"),
+            Some(index) => Ok(index),
+            None => Err(DFError::NotSet),
         }
     }
 
-    pub fn get(&self, idx: usize) -> &Data {
-        self.data
-            .get(idx)
-            .unwrap_or_else(|| panic!("Error: index out of bounds"))
+    /// Get a reference of the boxed value at the given index
+    pub fn get(&self, idx: usize) -> Result<&Data, DFError> {
+        match self.data.get(idx) {
+            Some(d) => Ok(d),
+            None => Err(DFError::ColIndexOutOfBounds),
+        }
     }
 
+    /// Get the number of columns in the row
     pub fn width(&self) -> usize {
         self.data.len()
     }
 
-    pub fn col_type(&self, idx: usize) -> &DataType {
-        // NOTE: official api returns a char lol
-        self.schema
-            .get(idx)
-            .unwrap_or_else(|| panic!("Error: index out of bounds"))
+    /// Get the type of the column at the given index
+    pub fn col_type(&self, idx: usize) -> Result<&DataType, DFError> {
+        match self.schema.get(idx) {
+            Some(d) => Ok(d),
+            None => Err(DFError::ColIndexOutOfBounds),
+        }
     }
 
-    pub fn accept<T: Fielder>(&self, f: &mut T) {
-        let idx = self.get_idx();
+
+    /// Accept a visitor for this row to iterate through all the elements
+    pub fn accept<T: Fielder>(&self, f: &mut T) -> Result<(), DFError> {
+        let idx = match self.get_idx() {
+            Ok(i) => i,
+            Err(e) => return Err(e),
+        };
         f.start(idx);
 
         for data in &self.data {
@@ -136,5 +145,6 @@ impl Row {
         }
 
         f.done();
+        Ok(())
     }
 }

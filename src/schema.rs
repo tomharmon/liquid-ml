@@ -2,6 +2,7 @@
 //! DataFrame.
 
 use sorer::schema::DataType;
+use crate::error::DFError;
 
 /// Represents a [`Schema`](::crate::schema::Schema) of a
 /// [`DataFrame`](::crate::dataframe::DataFrame)
@@ -25,13 +26,9 @@ impl Schema {
     /// to this Schema. Column names must be unique. If `col_name` is `Some`
     /// and the name already exists in this `Schema`, the column will not
     /// be added to this Schema.
-    ///
-    /// | Character | DataType |
-    /// |-----------|----------|
-    /// | 'B'       | Bool     |
-    /// | 'I'       | Int      |
-    /// | 'F'       | Float    |
-    /// | 'S'       | String   |
+    /// WARNING: This curently doesnt inform the user if the column was not added
+    ///          It might be worth implementing by retruning some sort of error to 
+    ///         let users know
     pub fn add_column(&mut self, data_type: DataType, col_name: Option<String>) {
         match &col_name {
             Some(_name) => {
@@ -49,6 +46,7 @@ impl Schema {
 
     /// Add a row to this `Schema`. If `row_name` is `Some` and the name
     /// already exists in this `Schema`, the row will not be added.
+    /// Warning: See add_column
     pub fn add_row(&mut self, row_name: Option<String>) {
         match &row_name {
             Some(_name) => {
@@ -61,28 +59,30 @@ impl Schema {
     }
 
     /// Gets the (optional) name of the row at the given `idx`.
-    ///
-    /// # Safety
-    /// Panics if `idx` is out of bounds.
-    pub fn row_name(&self, idx: usize) -> &Option<String> {
-        self.row_names.get(idx).unwrap()
+    pub fn row_name(&self, idx: usize) -> Result<&Option<String>, DFError> {
+        match self.row_names.get(idx) { 
+            Some(name) => Ok(name),
+            None => Err(DFError::RowIndexOutOfBounds)
+        }
     }
 
     /// Gets the (optional) name of the column at the given `idx`.
     ///
     /// # Safety
     /// Panics if `idx` is out of bounds.
-    pub fn col_name(&self, idx: usize) -> &Option<String> {
-        self.col_names.get(idx).unwrap()
+    pub fn col_name(&self, idx: usize) -> Result<&Option<String>, DFError> {
+        match self.col_names.get(idx) { 
+            Some(name) => Ok(name),
+            None => Err(DFError::ColIndexOutOfBounds)
+        }
     }
 
     /// Get the data type of the column at the given `idx`
-    ///
-    /// # Safety
-    /// Panics if `idx` is out of bounds.
-    pub fn col_type(&self, idx: usize) -> &DataType {
-        // NOTE: Official API returns a char, do we have to have that?
-        self.schema.get(idx).unwrap()
+    pub fn col_type(&self, idx: usize) -> Result<&DataType, DFError> {
+        match self.schema.get(idx) { 
+            Some(ty) => Ok(name),
+            None => Err(DFError::ColIndexOutOfBounds)
+        }
     }
 
     /// Given a column name, returns its index

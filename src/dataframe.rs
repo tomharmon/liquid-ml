@@ -204,38 +204,39 @@ impl DataFrame {
     }
 
     // NOTE: crossbeam might remove the 'static
-    pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
-        let mut rowers = Vec::new();
+    /*pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
+        //let mut rowers = Vec::new();
         let mut threads = Vec::new();
-        rowers.push(rower);
-        for i in 0..self.n_threads - 1 {
-            rowers.push(&mut rower.clone());
-        }
+        //for _ in 0..self.n_threads - 1 {
+        //    rowers.push(&mut rower.clone());
+        //}
+        //rowers.insert(0, rower);
 
+        let rowers = vec![*rower; self.n_threads];
         let step = self.nrows() / self.n_threads; // +1 for this thread
         let mut from = 0;
         for i in 0..self.n_threads - 1 {
             threads.push(thread::spawn(move || {
-                map_helper(&self, *rowers.get(i).unwrap(), from, from + step)
+                map_helper::<T>(&self, rowers.get_mut(i).unwrap(), from, from + step)
             }));
             from += step;
         }
 
-        map_helper(
+        map_helper::<T>(
             self,
-            *rowers.get(self.n_threads).unwrap(),
+            rowers.get_mut(self.n_threads).unwrap(),
             from,
             self.nrows(),
         );
 
         for thread in threads {
-            let x = thread.join().unwrap();
+            thread.join().unwrap();
         }
 
-        for (i, r) in rowers.iter_mut().enumerate().rev().skip(1) {
-            r.join(rowers.get_mut(i + 1).unwrap());
-        }
-    }
+        //for (i, r) in rowers.iter_mut().enumerate().rev().skip(1) {
+        //    r.join(rowers.get_mut(i + 1).unwrap());
+        //}
+    }*/
 
     pub fn nrows(&self) -> usize {
         self.schema.length()
