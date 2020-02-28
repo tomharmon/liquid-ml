@@ -8,4 +8,5 @@ edition = "2018"
 
 [dependencies]
 sorer = { git = "https://github.com/SamedhG/sorer", branch = "rspark" }
+num_cpus = "1.12.0"
 

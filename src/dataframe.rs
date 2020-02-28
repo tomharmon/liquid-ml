@@ -1,7 +1,10 @@
 use crate::row::Row;
+use crate::rower::Rower;
 use crate::schema::Schema;
+use num_cpus;
 use sorer::dataframe::{Column, Data};
 use sorer::schema::DataType;
+use std::thread;
 
 /// Represents a DataFrame which contains
 /// [columnar](sorer::dataframe::Column) `Data` and a
@@ -11,6 +14,8 @@ pub struct DataFrame {
     pub schema: Schema,
     /// The [columnar](::crate::dataframe::Column) data of this DataFrame.
     pub data: Vec<Column>,
+    /// Number of threads for this computer
+    pub n_threads: usize,
 }
 
 const IDX_OUT_OF_BOUNDS: fn() = || panic!("Index out of bounds");
@@ -32,7 +37,11 @@ impl DataFrame {
             row_names: Vec::new(),
         };
 
-        DataFrame { schema, data }
+        DataFrame {
+            schema,
+            data,
+            n_threads: num_cpus::get(),
+        }
     }
 
     pub fn get_schema(&self) -> &Schema {
@@ -182,11 +191,58 @@ impl DataFrame {
         }
     }
 
+    pub fn map<T: Rower>(&self, rower: &mut T) {
+        map_helper(self, rower, 0, self.nrows());
+    }
+
+    // NOTE: crossbeam might remove the 'static
+    pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
+        let rowers = Vec::new();
+        let threads = Vec::new();
+        rowers.push(rower);
+        for i in 0..self.n_threads - 1 {
+            rowers.push(&mut rower.clone());
+        }
+
+        let step = self.nrows() / self.n_threads; // +1 for this thread
+        let mut from = 0;
+        for i in 0..self.n_threads - 1 {
+            threads.push(thread::spawn(move || {
+                map_helper(&self, *rowers.get(i).unwrap(), from, from + step)
+            }));
+            from += step;
+        }
+
+        map_helper(
+            self,
+            *rowers.get(self.n_threads).unwrap(),
+            from,
+            self.nrows(),
+        );
+
+        for thread in threads {
+            let x = thread.join().unwrap();
+        }
+
+        for (i, r) in rowers.iter_mut().enumerate().rev().skip(1) {
+            r.join(rowers.get_mut(i + 1).unwrap());
+        }
+    }
+
     pub fn nrows(&self) -> usize {
         self.schema.length()
     }
 
     pub fn ncols(&self) -> usize {
         self.schema.width()
+    }
+}
+
+fn map_helper<T: Rower>(df: &DataFrame, rower: &mut T, start: usize, end: usize) {
+    let mut row = Row::new(&df.schema);
+    // NOTE: IS THIS THE ~10% slower way to do counted loop???? @tom
+    for i in start..end {
+        df.fill_row(i, &mut row);
+        rower.visit(&mut row);
     }
 }

@@ -14,5 +14,5 @@ pub trait Rower {
     /// Once traversal of the data frame is complete the rowers that were
     /// split off will be joined.  There will be one join per split. The
     /// original object will be the last to be called join on.
-    fn join(&mut self, other: Self);
+    fn join(&mut self, other: &Self);
 }
