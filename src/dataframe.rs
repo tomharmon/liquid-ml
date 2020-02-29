@@ -95,7 +95,7 @@ impl DataFrame {
         self.schema.row_idx(row_name)
     }
 
-    pub fn set_int(&mut self, col_idx: usize, row_idx: usize, data: i64) {
+    pub fn set_int(&mut self, col_idx: usize, row_idx: usize, data: i64) -> Result<(), DFError> {
         if let Some(DataType::Int) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
                 Some(Column::Int(col)) => {
