@@ -203,19 +203,19 @@ mod tests {
             self.start_idx = starting_row_index;
         }
 
-        fn visit_bool(&mut self, b: bool) {
+        fn visit_bool(&mut self, _b: bool) {
             self.num_bools += 1;
         }
 
-        fn visit_float(&mut self, f: f64) {
+        fn visit_float(&mut self, _f: f64) {
             self.num_floats += 1;
         }
 
-        fn visit_int(&mut self, i: i64) {
+        fn visit_int(&mut self, _i: i64) {
             self.num_ints += 1;
         }
 
-        fn visit_string(&mut self, s: &String) {
+        fn visit_string(&mut self, _s: &String) {
             self.num_strings += 1;
         }
 
@@ -226,27 +226,28 @@ mod tests {
         fn done(&mut self) {}
     }
 
-    fn init() -> (Vec::DataType, Schema, Row) {
+    fn init() -> (Vec<DataType>, Schema, Row) {
         let data_types = vec![
             DataType::Int,
             DataType::Bool,
             DataType::Float,
             DataType::String,
         ];
-        let s = Schema::from(data_types);
-        let r = Row::new(s);
+        let s = Schema::from(data_types.clone());
+        let r = Row::new(&s);
 
         (data_types, s, r)
     }
 
     #[test]
     fn test_accept() {
-        let (data_types, s, r) = init();
-        r.set_int(0, 42);
-        r.set_bool(1, true);
-        r.set_float(2, 420.69);
-        r.set_string(3, String::from("Finally a sane language"));
-        let f = Fielder {
+        let (_data_types, _s, mut r) = init();
+        r.set_int(0, 42).unwrap();
+        r.set_bool(1, true).unwrap();
+        r.set_float(2, 420.69).unwrap();
+        r.set_string(3, String::from("Finally a sane language"))
+            .unwrap();
+        let mut f = TestFielder {
             num_null: 0,
             num_ints: 0,
             num_bools: 0,
@@ -255,7 +256,7 @@ mod tests {
             start_idx: 1,
         };
         r.set_idx(1);
-        r.accept(f);
+        r.accept(&mut f).unwrap();
         assert_eq!(f.num_null, 0);
         assert_eq!(f.num_ints, 1);
         assert_eq!(f.num_bools, 1);
@@ -266,17 +267,17 @@ mod tests {
     #[test]
     fn test_width() {
         let mut s = Schema::new();
-        let r = Row::new(s);
+        let r = Row::new(&s);
         assert_eq!(r.width(), 0);
-        s.add_column(DataType::Int, None);
+        s.add_column(DataType::Int, None).unwrap();
         assert_eq!(r.width(), 1);
-        s.add_column(DataType::Bool, None);
+        s.add_column(DataType::Bool, None).unwrap();
         assert_eq!(r.width(), 2);
     }
 
     #[test]
     fn test_col_type() {
-        let (data_types, s, r) = init();
+        let (data_types, _s, r) = init();
         for (idx, data_type) in data_types.iter().enumerate() {
             assert_eq!(data_type, r.col_type(idx).unwrap());
         }
@@ -284,30 +285,30 @@ mod tests {
 
     #[test]
     fn test_get_set_idx() {
-        let (data_types, s, r) = init();
-        assert_true!(r.get_idx().is_err());
+        let (_data_types, _s, mut r) = init();
+        assert_eq!(r.get_idx().is_err(), true);
         r.set_idx(0);
         assert_eq!(r.get_idx().unwrap(), 0);
     }
 
     #[test]
     fn test_getters_and_setters() {
-        let (data_types, s, mut r) = init();
+        let (_data_types, _s, mut r) = init();
 
         for d in r.data.iter() {
-            assert_eq!(Data::Null, d);
+            assert_eq!(&Data::Null, d);
         }
 
-        r.set_int(0, 42);
-        assert_eq!(Data::Int(42), r.get(0));
-        r.set_bool(1, false);
-        assert_eq!(Data::Bool(false), r.get(1));
-        r.set_float(2, 3.14);
-        assert_eq!(Data::Float(3.14), r.get(2));
-        r.set_string(3, String::from("foo"));
-        assert_eq!(Data::string(String::from("foo")), r.get(3));
+        r.set_int(0, 42).unwrap();
+        assert_eq!(&Data::Int(42), r.get(0).unwrap());
+        r.set_bool(1, false).unwrap();
+        assert_eq!(&Data::Bool(false), r.get(1).unwrap());
+        r.set_float(2, 3.14).unwrap();
+        assert_eq!(&Data::Float(3.14), r.get(2).unwrap());
+        r.set_string(3, String::from("foo")).unwrap();
+        assert_eq!(&Data::String(String::from("foo")), r.get(3).unwrap());
 
-        r.set_null(3);
-        assert_eq!(Data::Null, r.get(3));
+        r.set_null(3).unwrap();
+        assert_eq!(&Data::Null, r.get(3).unwrap());
     }
 }

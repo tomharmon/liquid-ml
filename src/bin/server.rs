@@ -1,10 +1,10 @@
 use bincode;
-use serde::{Deserialize, Serialize};
-use std::env;
-use tokio::net::{TcpListener, TcpStream};
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt, BufStream};
+// use serde::{Deserialize, Serialize};
 use futures::stream::StreamExt;
-use tokio::prelude::*;
+use std::env;
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufStream};
+use tokio::net::{TcpListener, TcpStream};
+// use tokio::prelude::*;
 use rspark::network::DirEntry;
 use std::io::Write;
 
@@ -60,7 +60,6 @@ async fn main() {
             }
         }
     };
-
 
     // Start the server and block this async fn until `server` spins down.
     server.await;

@@ -1,4 +1,3 @@
-use crate::error::DFError;
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 

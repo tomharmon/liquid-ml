@@ -13,7 +13,6 @@ use anyhow::Result;
 use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema_from_file, DataType};
-use std::thread;
 
 /// Represents a DataFrame which contains
 /// [columnar](sorer::dataframe::Column) `Data` and a
@@ -45,7 +44,7 @@ impl DataFrame {
 
     /// Creates an empty `DataFrame` from the given
     /// [`Schema`](::crate::schema::Schema).
-    pub fn new(s: Schema) -> Self {
+    pub fn new(s: &Schema) -> Self {
         let mut data = Vec::new();
         for data_type in &s.schema {
             match data_type {
@@ -215,24 +214,25 @@ impl DataFrame {
     /// `DataFrame`, results are undefined.
     ///
     /// NOTE: do we wanna propogate errors from setters here every time? Performance?
+    /// NOTE: unwrapping thigns instead of propogating
     pub fn fill_row(&self, idx: usize, row: &mut Row) {
         for (c_idx, col) in self.data.iter().enumerate() {
             match col {
                 Column::Int(c) => match c.get(idx).unwrap() {
-                    Some(x) => row.set_int(c_idx, *x),
-                    None => row.set_null(c_idx),
+                    Some(x) => row.set_int(c_idx, *x).unwrap(),
+                    None => row.set_null(c_idx).unwrap(),
                 },
                 Column::Float(c) => match c.get(idx).unwrap() {
-                    Some(x) => row.set_float(c_idx, *x),
-                    None => row.set_null(c_idx),
+                    Some(x) => row.set_float(c_idx, *x).unwrap(),
+                    None => row.set_null(c_idx).unwrap(),
                 },
                 Column::Bool(c) => match c.get(idx).unwrap() {
-                    Some(x) => row.set_bool(c_idx, *x),
-                    None => row.set_null(c_idx),
+                    Some(x) => row.set_bool(c_idx, *x).unwrap(),
+                    None => row.set_null(c_idx).unwrap(),
                 },
                 Column::String(c) => match c.get(idx).unwrap() {
-                    Some(x) => row.set_string(c_idx, x.clone()),
-                    None => row.set_null(c_idx),
+                    Some(x) => row.set_string(c_idx, x.clone()).unwrap(),
+                    None => row.set_null(c_idx).unwrap(),
                 },
             };
         }
@@ -295,6 +295,22 @@ impl DataFrame {
         //}
     }*/
 
+    /// Create a new dataframe, constructed from rows for which the given Rower
+    /// returned true from its accept method.
+    pub fn filter<T: Rower>(&self, r: &mut T) -> Self {
+        let mut df = DataFrame::new(&self.schema);
+        let mut row = Row::new(&self.schema);
+
+        for i in 0..self.n_rows() {
+            self.fill_row(i, &mut row);
+            if r.visit(&row) {
+                df.add_row(&row);
+            }
+        }
+
+        df
+    }
+
     /// Return the number of rows in this `DataFrame`.
     pub fn n_rows(&self) -> usize {
         self.schema.length()
@@ -322,7 +338,67 @@ fn map_helper<T: Rower>(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::row::Row;
+    use crate::rower::Rower;
+
+    struct PosIntSummer {
+        sum: i64,
+    }
+
+    impl Rower for PosIntSummer {
+        fn visit(&mut self, r: &Row) -> bool {
+            let i = r.get(0).unwrap();
+            match i {
+                Data::Int(val) => {
+                    if *val < 0 {
+                        return false;
+                    }
+                    self.sum += *val;
+                    true
+                }
+                _ => panic!(),
+            }
+        }
+
+        fn join(&mut self, other: &Self) {
+            self.sum += other.sum;
+        }
+    }
+
+    fn init() -> DataFrame {
+        let s = Schema::from(vec![DataType::Int]);
+        let mut r = Row::new(&s);
+        let mut df = DataFrame::new(&s);
+
+        for i in 0..1000 {
+            if i % 2 == 0 {
+                r.set_int(0, i * -1).unwrap();
+            } else {
+                r.set_int(0, i).unwrap();
+            }
+            df.add_row(&r);
+        }
+
+        df
+    }
 
     #[test]
-    fn test_map() {}
+    fn test_map() {
+        let df = init();
+        let mut rower = PosIntSummer { sum: 0 };
+        df.map(&mut rower);
+        assert_eq!(1000 * 1000 / 4, rower.sum);
+        assert_eq!(1000, df.n_rows());
+    }
+
+    #[test]
+    fn test_filter() {
+        let df = init();
+        let mut rower = PosIntSummer { sum: 0 };
+        let df2 = df.filter(&mut rower);
+        assert_eq!(df2.n_rows(), 501);
+        assert_eq!(df2.n_cols(), 1);
+        assert_eq!(df2.get(0, 10).unwrap(), Data::Int(19));
+    }
 }

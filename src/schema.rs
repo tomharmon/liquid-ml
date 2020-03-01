@@ -187,7 +187,7 @@ mod tests {
     #[test]
     fn test_from_data_types() {
         let mut data_types = vec![];
-        let mut s = Schema::from(data_types);
+        let mut s = Schema::from(data_types.clone());
         assert_eq!(s.length(), 0);
         assert_eq!(s.width(), 0);
         data_types = vec![
@@ -197,7 +197,7 @@ mod tests {
             DataType::Bool,
             DataType::String,
         ];
-        s = Schema::from(data_types);
+        s = Schema::from(data_types.clone());
         for (idx, data_type) in data_types.iter().enumerate() {
             assert_eq!(data_type, s.col_type(idx).unwrap());
         }
@@ -234,23 +234,24 @@ mod tests {
         let mut s = Schema::new();
         assert_eq!(s.length(), 0);
         assert_eq!(s.width(), 0);
-        s.add_column(DataType::String, None);
+        s.add_column(DataType::String, None).unwrap();
         assert_eq!(s.width(), 1);
         assert_eq!(s.length(), 0);
-        s.add_column(DataType::Int, Some(String::from("foo")));
+        s.add_column(DataType::Int, Some(String::from("foo")))
+            .unwrap();
         assert_eq!(s.width(), 2);
         assert_eq!(s.length(), 0);
         assert_eq!(s.col_idx("foo"), Some(1));
-        assert_eq!(s.col_name(0), None);
+        assert_eq!(s.col_name(0).unwrap(), &None);
 
         // row getters/setters
-        s.add_row(None);
+        s.add_row(None).unwrap();
         assert_eq!(s.width(), 2);
         assert_eq!(s.length(), 1);
-        s.add_row(Some(String::from("bar")));
+        s.add_row(Some(String::from("bar"))).unwrap();
         assert_eq!(s.width(), 2);
         assert_eq!(s.length(), 2);
         assert_eq!(s.row_idx("bar"), Some(1));
-        assert_eq!(s.row_name(0), None);
+        assert_eq!(s.row_name(0).unwrap(), &None);
     }
 }
