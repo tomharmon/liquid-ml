@@ -26,19 +26,19 @@ pub struct DataFrame {
     pub n_threads: usize,
 }
 
-const IDX_OUT_OF_BOUNDS: fn() = || panic!("Index out of bounds");
-
 /// Traits defining a `DataFrame` inspired by those used in `pandas` and `R`.
 impl DataFrame {
     /// Creates a new `DataFrame` from the given file, only reads `len` bytes
     /// starting at the given byte offset `from`.
     pub fn from_sor(file_name: String, from: usize, len: usize) -> Self {
         let schema = Schema::from(infer_schema_from_file(file_name.clone()));
-        let data = from_file(file_name, schema.schema.clone(), from, len);
+        let n_threads = num_cpus::get();
+        let data =
+            from_file(file_name, schema.schema.clone(), from, len, n_threads);
         DataFrame {
             schema,
             data,
-            n_threads: num_cpus::get(),
+            n_threads,
         }
     }
 
@@ -213,7 +213,7 @@ impl DataFrame {
     /// the given `idx`.  If the row is not form the same schema as this
     /// `DataFrame`, results are undefined.
     ///
-    /// NOTE: do we rly wanna propogate erros up here every time? Performance?
+    /// NOTE: do we wanna propogate errors from setters here every time? Performance?
     pub fn fill_row(&self, idx: usize, row: &mut Row) {
         for (c_idx, col) in self.data.iter().enumerate() {
             match col {
@@ -264,44 +264,35 @@ impl DataFrame {
     }
 
     // NOTE: crossbeam might remove the 'static
-    pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
-        let mut rowers = Vec::new();
+    /*pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
+        //let mut rowers = Vec::new();
         let mut threads = Vec::new();
-        for _ in 0..self.n_threads - 1 {
-            rowers.push(&mut rower.clone());
-        }
-        rowers.insert(0, rower);
-
+        //for _ in 0..self.n_threads - 1 {
+        //    rowers.push(&mut rower.clone());
+        //}
+        //rowers.insert(0, rower);
         let rowers = vec![*rower; self.n_threads];
-        let step = self.n_rows() / self.n_threads; // +1 for this thread
+        let step = self.nrows() / self.n_threads; // +1 for this thread
         let mut from = 0;
         for i in 0..self.n_threads - 1 {
             threads.push(thread::spawn(move || {
-                map_helper::<T>(
-                    &self,
-                    rowers.get_mut(i).unwrap(),
-                    from,
-                    from + step,
-                )
+                map_helper::<T>(&self, rowers.get_mut(i).unwrap(), from, from + step)
             }));
             from += step;
         }
-
         map_helper::<T>(
             self,
             rowers.get_mut(self.n_threads).unwrap(),
             from,
-            self.n_rows(),
+            self.nrows(),
         );
-
         for thread in threads {
             thread.join().unwrap();
         }
-
-        for (i, r) in rowers.iter_mut().enumerate().rev().skip(1) {
-            r.join(rowers.get_mut(i + 1).unwrap());
-        }
-    }
+        //for (i, r) in rowers.iter_mut().enumerate().rev().skip(1) {
+        //    r.join(rowers.get_mut(i + 1).unwrap());
+        //}
+    }*/
 
     /// Return the number of rows in this `DataFrame`.
     pub fn n_rows(&self) -> usize {

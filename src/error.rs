@@ -16,14 +16,18 @@ pub enum DFError {
 impl fmt::Display for DFError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self {
-            RowIndexOutOfBounds => write!(f, "Row index out of bounds"),
-            ColIndexOutOfBounds => write!(f, "Col index out of bounds"),
-            NameAlreadyExists => write!(f, "Name already in use"),
-            TypeMismatch => write!(
+            DFError::RowIndexOutOfBounds => {
+                write!(f, "Row index out of bounds")
+            }
+            DFError::ColIndexOutOfBounds => {
+                write!(f, "Col index out of bounds")
+            }
+            DFError::NameAlreadyExists => write!(f, "Name already in use"),
+            DFError::TypeMismatch => write!(
                 f,
                 "The requested operation doesn't match the schema data type"
             ),
-            NotSet => write!(f, "Must set the index for the row"),
+            DFError::NotSet => write!(f, "Must set the index for the row"),
         }
     }
 }
