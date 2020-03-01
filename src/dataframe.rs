@@ -9,6 +9,7 @@ use crate::error::DFError;
 use crate::row::Row;
 use crate::rower::Rower;
 use crate::schema::Schema;
+use anyhow::Result;
 use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema_from_file, DataType};

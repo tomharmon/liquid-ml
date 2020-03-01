@@ -1,5 +1,4 @@
 //! The possible error types when using the `DataFrame` trait.
-
 use std::error;
 use std::fmt;
 
