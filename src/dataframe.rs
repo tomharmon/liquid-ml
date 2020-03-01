@@ -1,9 +1,17 @@
+//! A module for creating and manipulating
+//! [`DataFrame`s](::crate::dataframe::DataFrame). A `DataFrame` can be created
+//! from a [`SoR`](sorer) file, by adding [`Column`s](sorer::dataframe::Column),
+//! or by adding [`Row`s](::crate::row::Row). You may implement the
+//! [`Rower`](::crate::rower::Rower) trait to perform `map` operations on
+//! a `DataFrame`.
+
+use crate::error::DFError;
 use crate::row::Row;
 use crate::rower::Rower;
 use crate::schema::Schema;
 use num_cpus;
-use sorer::dataframe::{Column, Data, from_file};
-use sorer::schema::{DataType, infer_schema_from_file};
+use sorer::dataframe::{from_file, Column, Data};
+use sorer::schema::{infer_schema_from_file, DataType};
 use std::thread;
 
 /// Represents a DataFrame which contains
@@ -20,15 +28,22 @@ pub struct DataFrame {
 
 const IDX_OUT_OF_BOUNDS: fn() = || panic!("Index out of bounds");
 
+/// Traits defining a `DataFrame` inspired by those used in `pandas` and `R`.
 impl DataFrame {
-
-    pub fn from_sor(filename: String, from: usize, to: usize) -> Self {
-        let schema = Schema::from(infer_schema_from_file(filename.clone()));
-        let data = from_file(filename, schema.schema.clone(), from as u64, to as u64);
-        DataFrame { schema, data, n_threads: num_cpus::get() }
-    
+    /// Creates a new `DataFrame` from the given file, only reads `len` bytes
+    /// starting at the given byte offset `from`.
+    pub fn from_sor(file_name: String, from: usize, len: usize) -> Self {
+        let schema = Schema::from(infer_schema_from_file(file_name.clone()));
+        let data = from_file(file_name, schema.schema.clone(), from, len);
+        DataFrame {
+            schema,
+            data,
+            n_threads: num_cpus::get(),
+        }
     }
 
+    /// Creates an empty `DataFrame` from the given
+    /// [`Schema`](::crate::schema::Schema).
     pub fn new(s: Schema) -> Self {
         let mut data = Vec::new();
         for data_type in &s.schema {
@@ -52,10 +67,12 @@ impl DataFrame {
         }
     }
 
+    /// Obtains a reference to this `DataFrame`s schema.
     pub fn get_schema(&self) -> &Schema {
         &self.schema
     }
 
+    /// Adds a [`Column`](sorer::dataframe::Column) to this `DataFrame`.
     pub fn add_column(&mut self, col: Column, name: Option<String>) {
         match col {
             Column::Int(_) => self.schema.add_column(DataType::Int, name),
@@ -65,6 +82,8 @@ impl DataFrame {
         };
     }
 
+    /// Get the [`Data`](sorer::dataframe::Data) at the given `col_idx, row_idx`
+    /// offsets.
     pub fn get(&self, col_idx: usize, row_idx: usize) -> Data {
         match self.data.get(col_idx) {
             Some(Column::Int(col)) => match col.get(row_idx).unwrap() {
@@ -87,20 +106,32 @@ impl DataFrame {
         }
     }
 
+    /// Get the index of the `Column` with the given `col_name`. Returns `Some`
+    /// if a `Column` with the given name exists, or `None` otherwise.
     pub fn get_col(&self, col_name: &str) -> Option<usize> {
         self.schema.col_idx(col_name)
     }
 
+    /// Get the index of the `Row` with the given `row_name`. Returns `Some`
+    /// if a `Row` with the given name exists, or `None` otherwise.
     pub fn get_row(&self, row_name: &str) -> Option<usize> {
         self.schema.row_idx(row_name)
     }
 
-    pub fn set_int(&mut self, col_idx: usize, row_idx: usize, data: i64) -> Result<(), DFError> {
+    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
+    /// to be changed to the given `data`.
+    pub fn set_int(
+        &mut self,
+        col_idx: usize,
+        row_idx: usize,
+        data: i64,
+    ) -> Result<(), DFError> {
         if let Some(DataType::Int) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
                 Some(Column::Int(col)) => {
-                    *col.get_mut(row_idx)
-                        .unwrap_or_else(|| panic!("Err: row idx out of bounds")) = Some(data)
+                    *col.get_mut(row_idx).unwrap_or_else(|| {
+                        panic!("Err: row idx out of bounds")
+                    }) = Some(data)
                 }
                 _ => unreachable!("Something is horribly wrong"),
             }
@@ -109,12 +140,15 @@ impl DataFrame {
         }
     }
 
+    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
+    /// to be changed to the given `data`.
     pub fn set_float(&mut self, col_idx: usize, row_idx: usize, data: f64) {
         if let Some(DataType::Float) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
                 Some(Column::Float(col)) => {
-                    *col.get_mut(row_idx)
-                        .unwrap_or_else(|| panic!("Err: row idx out of bounds")) = Some(data)
+                    *col.get_mut(row_idx).unwrap_or_else(|| {
+                        panic!("Err: row idx out of bounds")
+                    }) = Some(data)
                 }
                 _ => unreachable!("Something is horribly wrong"),
             }
@@ -123,12 +157,15 @@ impl DataFrame {
         }
     }
 
+    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
+    /// to be changed to the given `data`.
     pub fn set_bool(&mut self, col_idx: usize, row_idx: usize, data: bool) {
         if let Some(DataType::Bool) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
                 Some(Column::Bool(col)) => {
-                    *col.get_mut(row_idx)
-                        .unwrap_or_else(|| panic!("Err: row idx out of bounds")) = Some(data)
+                    *col.get_mut(row_idx).unwrap_or_else(|| {
+                        panic!("Err: row idx out of bounds")
+                    }) = Some(data)
                 }
                 _ => unreachable!("Something is horribly wrong"),
             }
@@ -137,12 +174,15 @@ impl DataFrame {
         }
     }
 
+    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
+    /// to be changed to the given `data`.
     pub fn set_string(&mut self, col_idx: usize, row_idx: usize, data: String) {
         if let Some(DataType::String) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
                 Some(Column::String(col)) => {
-                    *col.get_mut(row_idx)
-                        .unwrap_or_else(|| panic!("Err: row idx out of bounds")) = Some(data)
+                    *col.get_mut(row_idx).unwrap_or_else(|| {
+                        panic!("Err: row idx out of bounds")
+                    }) = Some(data)
                 }
                 _ => unreachable!("Something is horribly wrong"),
             }
@@ -151,10 +191,9 @@ impl DataFrame {
         }
     }
 
-    /** Set the fields of the given row object with values from the columns at
-     * the given offset.  If the row is not form the same schema as the
-     * dataframe, results are undefined.
-     */
+    /// Set the fields of the given `Row` struct with values from the row at
+    /// the given `idx`.  If the row is not form the same schema as this
+    /// `DataFrame`, results are undefined.
     pub fn fill_row(&self, idx: usize, row: &mut Row) {
         for (c_idx, col) in self.data.iter().enumerate() {
             match col {
@@ -178,8 +217,8 @@ impl DataFrame {
         }
     }
 
-    /** Add a row at the end of this dataframe. The row is expected to have
-     *  the right schema and be filled with values, otherwise undedined.  */
+    /// Add a `Row` at the end of this `DataFrame`. Panics if the row has
+    /// a `Schema` different than the `Schema` for this `DataFrame`.
     pub fn add_row(&mut self, row: &Row) {
         if row.schema != self.schema.schema {
             panic!("Err incompatible row")
@@ -238,16 +277,23 @@ impl DataFrame {
         //}
     }*/
 
-    pub fn nrows(&self) -> usize {
+    /// Return the number of rows in this `DataFrame`.
+    pub fn n_rows(&self) -> usize {
         self.schema.length()
     }
 
-    pub fn ncols(&self) -> usize {
+    /// Return the number of columns in this `DataFrame`.
+    pub fn n_cols(&self) -> usize {
         self.schema.width()
     }
 }
 
-fn map_helper<T: Rower>(df: &DataFrame, rower: &mut T, start: usize, end: usize) {
+fn map_helper<T: Rower>(
+    df: &DataFrame,
+    rower: &mut T,
+    start: usize,
+    end: usize,
+) {
     let mut row = Row::new(&df.schema);
     // NOTE: IS THIS THE ~10% slower way to do counted loop???? @tom
     for i in start..end {

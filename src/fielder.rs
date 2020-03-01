@@ -1,3 +1,5 @@
+//! A visitor invoked by `Row`.
+
 /// A field visitor invoked by `Row`.
 pub trait Fielder {
     /// Must be called before visiting a row, the argument is the row offset

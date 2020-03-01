@@ -11,7 +11,7 @@ pub trait Rower {
     /// should be kept.
     fn visit(&mut self, r: &Row) -> bool;
 
-    /// Once traversal of the data frame is complete the rowers that were
+    /// Once traversal of the `DataFrame` is complete the rowers that were
     /// split off will be joined.  There will be one join per split. The
     /// original object will be the last to be called join on.
     fn join(&mut self, other: &Self);

@@ -1,8 +1,8 @@
 //! A Schema module for managing the data types and row/column names of a
 //! DataFrame.
 
-use sorer::schema::DataType;
 use crate::error::DFError;
+use sorer::schema::DataType;
 
 /// Represents a [`Schema`](::crate::schema::Schema) of a
 /// [`DataFrame`](::crate::dataframe::DataFrame)
@@ -25,63 +25,74 @@ impl Schema {
     /// Add a column with the given `data_type`, with an optional column name,
     /// to this Schema. Column names must be unique. If `col_name` is `Some`
     /// and the name already exists in this `Schema`, the column will not
-    /// be added to this Schema.
-    /// WARNING: This curently doesnt inform the user if the column was not added
-    ///          It might be worth implementing by retruning some sort of error to 
-    ///         let users know
-    pub fn add_column(&mut self, data_type: DataType, col_name: Option<String>) {
+    /// be added to this Schema and a `DFError::NameAlreadyExists` error
+    /// will be returned.
+    pub fn add_column(
+        &mut self,
+        data_type: DataType,
+        col_name: Option<String>,
+    ) -> Result<(), DFError> {
         match &col_name {
             Some(_name) => {
                 if !self.col_names.contains(&col_name) {
                     self.schema.push(data_type);
                     self.col_names.push(col_name);
+                    Ok(())
+                } else {
+                    Err(DFError::NameAlreadyExists)
                 }
             }
             None => {
                 self.schema.push(data_type);
                 self.col_names.push(None);
+                Ok(())
             }
         }
     }
 
     /// Add a row to this `Schema`. If `row_name` is `Some` and the name
     /// already exists in this `Schema`, the row will not be added.
-    /// Warning: See add_column
-    pub fn add_row(&mut self, row_name: Option<String>) {
+    pub fn add_row(&mut self, row_name: Option<String>) -> Result<(), DFError> {
         match &row_name {
             Some(_name) => {
                 if !self.row_names.contains(&row_name) {
                     self.row_names.push(row_name);
+                    Ok(())
+                } else {
+                    Err(DFError::NameAlreadyExists)
                 }
             }
-            None => self.row_names.push(None),
+            None => {
+                self.row_names.push(None);
+                Ok(())
+            }
         }
     }
 
     /// Gets the (optional) name of the row at the given `idx`.
+    /// Returns a result that will `Error` if the `idx` is out of bounds.
     pub fn row_name(&self, idx: usize) -> Result<&Option<String>, DFError> {
-        match self.row_names.get(idx) { 
+        match self.row_names.get(idx) {
             Some(name) => Ok(name),
-            None => Err(DFError::RowIndexOutOfBounds)
+            None => Err(DFError::RowIndexOutOfBounds),
         }
     }
 
     /// Gets the (optional) name of the column at the given `idx`.
-    ///
-    /// # Safety
-    /// Panics if `idx` is out of bounds.
+    /// Returns a result that will `Error` if the `idx` is out of bounds.
     pub fn col_name(&self, idx: usize) -> Result<&Option<String>, DFError> {
-        match self.col_names.get(idx) { 
+        match self.col_names.get(idx) {
             Some(name) => Ok(name),
-            None => Err(DFError::ColIndexOutOfBounds)
+            None => Err(DFError::ColIndexOutOfBounds),
         }
     }
 
     /// Get the data type of the column at the given `idx`
+    /// Returns a result that will `Error` if the `idx` is out of bounds.
     pub fn col_type(&self, idx: usize) -> Result<&DataType, DFError> {
-        match self.schema.get(idx) { 
-            Some(ty) => Ok(name),
-            None => Err(DFError::ColIndexOutOfBounds)
+        match self.schema.get(idx) {
+            Some(data_type) => Ok(data_type),
+            None => Err(DFError::ColIndexOutOfBounds),
         }
     }
 
@@ -105,7 +116,10 @@ impl Schema {
         self.row_names.len()
     }
 
-    fn get_idx_of_optional_name(names: &Vec<Option<String>>, name: &str) -> Option<usize> {
+    fn get_idx_of_optional_name(
+        names: &Vec<Option<String>>,
+        name: &str,
+    ) -> Option<usize> {
         names.iter().position(|n| match n {
             Some(col_name) => col_name == name,
             None => false,
