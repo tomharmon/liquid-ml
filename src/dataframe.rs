@@ -73,36 +73,43 @@ impl DataFrame {
     }
 
     /// Adds a [`Column`](sorer::dataframe::Column) to this `DataFrame`.
-    pub fn add_column(&mut self, col: Column, name: Option<String>) {
+    pub fn add_column(
+        &mut self,
+        col: Column,
+        name: Option<String>,
+    ) -> Result<(), DFError> {
         match col {
             Column::Int(_) => self.schema.add_column(DataType::Int, name),
             Column::Bool(_) => self.schema.add_column(DataType::Bool, name),
             Column::Float(_) => self.schema.add_column(DataType::Float, name),
             Column::String(_) => self.schema.add_column(DataType::String, name),
-        };
+        }
     }
 
     /// Get the [`Data`](sorer::dataframe::Data) at the given `col_idx, row_idx`
     /// offsets.
-    pub fn get(&self, col_idx: usize, row_idx: usize) -> Data {
+    ///
+    /// NOTE: This just panics instead of returning Err(RowIndexOutOfBounds)
+    /// since rn i'm lazy and this match will get gross AF
+    pub fn get(&self, col_idx: usize, row_idx: usize) -> Result<Data, DFError> {
         match self.data.get(col_idx) {
             Some(Column::Int(col)) => match col.get(row_idx).unwrap() {
-                Some(data) => Data::Int(*data),
-                None => Data::Null,
+                Some(data) => Ok(Data::Int(*data)),
+                None => Ok(Data::Null),
             },
             Some(Column::Bool(col)) => match col.get(row_idx).unwrap() {
-                Some(data) => Data::Bool(*data),
-                None => Data::Null,
+                Some(data) => Ok(Data::Bool(*data)),
+                None => Ok(Data::Null),
             },
             Some(Column::Float(col)) => match col.get(row_idx).unwrap() {
-                Some(data) => Data::Float(*data),
-                None => Data::Null,
+                Some(data) => Ok(Data::Float(*data)),
+                None => Ok(Data::Null),
             },
             Some(Column::String(col)) => match col.get(row_idx).unwrap() {
-                Some(data) => Data::String(data.clone()),
-                None => Data::Null,
+                Some(data) => Ok(Data::String(data.clone())),
+                None => Ok(Data::Null),
             },
-            None => panic!("Column index out of bounds"),
+            None => Err(DFError::ColIndexOutOfBounds),
         }
     }
 
@@ -120,12 +127,11 @@ impl DataFrame {
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
     /// to be changed to the given `data`.
-    pub fn set_int(
-        &mut self,
-        col_idx: usize,
-        row_idx: usize,
-        data: i64,
-    ) -> Result<(), DFError> {
+    ///
+    /// NOTE: do we really want to return result types for all the setters?
+    /// If someone is dumb enough to get index out of bounds error, should
+    /// they be helped?
+    pub fn set_int(&mut self, col_idx: usize, row_idx: usize, data: i64) {
         if let Some(DataType::Int) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
                 Some(Column::Int(col)) => {
@@ -142,6 +148,10 @@ impl DataFrame {
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
     /// to be changed to the given `data`.
+    ///
+    /// NOTE: do we really want to return result types for all the setters?
+    /// If someone is dumb enough to get index out of bounds error, should
+    /// they be helped?
     pub fn set_float(&mut self, col_idx: usize, row_idx: usize, data: f64) {
         if let Some(DataType::Float) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
@@ -159,6 +169,10 @@ impl DataFrame {
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
     /// to be changed to the given `data`.
+    ///
+    /// NOTE: do we really want to return result types for all the setters?
+    /// If someone is dumb enough to get index out of bounds error, should
+    /// they be helped?
     pub fn set_bool(&mut self, col_idx: usize, row_idx: usize, data: bool) {
         if let Some(DataType::Bool) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
@@ -176,6 +190,10 @@ impl DataFrame {
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
     /// to be changed to the given `data`.
+    ///
+    /// NOTE: do we really want to return result types for all the setters?
+    /// If someone is dumb enough to get index out of bounds error, should
+    /// they be helped?
     pub fn set_string(&mut self, col_idx: usize, row_idx: usize, data: String) {
         if let Some(DataType::String) = self.schema.schema.get(col_idx) {
             match self.data.get_mut(col_idx) {
@@ -194,6 +212,8 @@ impl DataFrame {
     /// Set the fields of the given `Row` struct with values from the row at
     /// the given `idx`.  If the row is not form the same schema as this
     /// `DataFrame`, results are undefined.
+    ///
+    /// NOTE: do we rly wanna propogate erros up here every time? Performance?
     pub fn fill_row(&self, idx: usize, row: &mut Row) {
         for (c_idx, col) in self.data.iter().enumerate() {
             match col {
@@ -213,7 +233,7 @@ impl DataFrame {
                     Some(x) => row.set_string(c_idx, x.clone()),
                     None => row.set_null(c_idx),
                 },
-            }
+            };
         }
     }
 
@@ -238,25 +258,31 @@ impl DataFrame {
         }
     }
 
+    /// Applies the given `rower` to every row in this `DataFrame`.
     pub fn map<T: Rower>(&self, rower: &mut T) {
-        map_helper(self, rower, 0, self.nrows());
+        map_helper(self, rower, 0, self.n_rows());
     }
 
     // NOTE: crossbeam might remove the 'static
-    /*pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
-        //let mut rowers = Vec::new();
+    pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
+        let mut rowers = Vec::new();
         let mut threads = Vec::new();
-        //for _ in 0..self.n_threads - 1 {
-        //    rowers.push(&mut rower.clone());
-        //}
-        //rowers.insert(0, rower);
+        for _ in 0..self.n_threads - 1 {
+            rowers.push(&mut rower.clone());
+        }
+        rowers.insert(0, rower);
 
         let rowers = vec![*rower; self.n_threads];
-        let step = self.nrows() / self.n_threads; // +1 for this thread
+        let step = self.n_rows() / self.n_threads; // +1 for this thread
         let mut from = 0;
         for i in 0..self.n_threads - 1 {
             threads.push(thread::spawn(move || {
-                map_helper::<T>(&self, rowers.get_mut(i).unwrap(), from, from + step)
+                map_helper::<T>(
+                    &self,
+                    rowers.get_mut(i).unwrap(),
+                    from,
+                    from + step,
+                )
             }));
             from += step;
         }
@@ -265,17 +291,17 @@ impl DataFrame {
             self,
             rowers.get_mut(self.n_threads).unwrap(),
             from,
-            self.nrows(),
+            self.n_rows(),
         );
 
         for thread in threads {
             thread.join().unwrap();
         }
 
-        //for (i, r) in rowers.iter_mut().enumerate().rev().skip(1) {
-        //    r.join(rowers.get_mut(i + 1).unwrap());
-        //}
-    }*/
+        for (i, r) in rowers.iter_mut().enumerate().rev().skip(1) {
+            r.join(rowers.get_mut(i + 1).unwrap());
+        }
+    }
 
     /// Return the number of rows in this `DataFrame`.
     pub fn n_rows(&self) -> usize {
@@ -300,4 +326,11 @@ fn map_helper<T: Rower>(
         df.fill_row(i, &mut row);
         rower.visit(&mut row);
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_map() {}
 }

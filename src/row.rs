@@ -182,3 +182,132 @@ impl Row {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fielder::Fielder;
+    use crate::schema::Schema;
+
+    struct TestFielder {
+        pub num_null: usize,
+        pub num_ints: usize,
+        pub num_bools: usize,
+        pub num_floats: usize,
+        pub num_strings: usize,
+        pub start_idx: usize,
+    }
+
+    impl Fielder for TestFielder {
+        fn start(&mut self, starting_row_index: usize) {
+            self.start_idx = starting_row_index;
+        }
+
+        fn visit_bool(&mut self, b: bool) {
+            self.num_bools += 1;
+        }
+
+        fn visit_float(&mut self, f: f64) {
+            self.num_floats += 1;
+        }
+
+        fn visit_int(&mut self, i: i64) {
+            self.num_ints += 1;
+        }
+
+        fn visit_string(&mut self, s: &String) {
+            self.num_strings += 1;
+        }
+
+        fn visit_null(&mut self) {
+            self.num_null += 1;
+        }
+
+        fn done(&mut self) {}
+    }
+
+    fn init() -> (Vec::DataType, Schema, Row) {
+        let data_types = vec![
+            DataType::Int,
+            DataType::Bool,
+            DataType::Float,
+            DataType::String,
+        ];
+        let s = Schema::from(data_types);
+        let r = Row::new(s);
+
+        (data_types, s, r)
+    }
+
+    #[test]
+    fn test_accept() {
+        let (data_types, s, r) = init();
+        r.set_int(0, 42);
+        r.set_bool(1, true);
+        r.set_float(2, 420.69);
+        r.set_string(3, String::from("Finally a sane language"));
+        let f = Fielder {
+            num_null: 0,
+            num_ints: 0,
+            num_bools: 0,
+            num_floats: 0,
+            num_strings: 0,
+            start_idx: 1,
+        };
+        r.set_idx(1);
+        r.accept(f);
+        assert_eq!(f.num_null, 0);
+        assert_eq!(f.num_ints, 1);
+        assert_eq!(f.num_bools, 1);
+        assert_eq!(f.num_floats, 1);
+        assert_eq!(f.num_strings, 1);
+    }
+
+    #[test]
+    fn test_width() {
+        let mut s = Schema::new();
+        let r = Row::new(s);
+        assert_eq!(r.width(), 0);
+        s.add_column(DataType::Int, None);
+        assert_eq!(r.width(), 1);
+        s.add_column(DataType::Bool, None);
+        assert_eq!(r.width(), 2);
+    }
+
+    #[test]
+    fn test_col_type() {
+        let (data_types, s, r) = init();
+        for (idx, data_type) in data_types.iter().enumerate() {
+            assert_eq!(data_type, r.col_type(idx).unwrap());
+        }
+    }
+
+    #[test]
+    fn test_get_set_idx() {
+        let (data_types, s, r) = init();
+        assert_true!(r.get_idx().is_err());
+        r.set_idx(0);
+        assert_eq!(r.get_idx().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_getters_and_setters() {
+        let (data_types, s, mut r) = init();
+
+        for d in r.data.iter() {
+            assert_eq!(Data::Null, d);
+        }
+
+        r.set_int(0, 42);
+        assert_eq!(Data::Int(42), r.get(0));
+        r.set_bool(1, false);
+        assert_eq!(Data::Bool(false), r.get(1));
+        r.set_float(2, 3.14);
+        assert_eq!(Data::Float(3.14), r.get(2));
+        r.set_string(3, String::from("foo"));
+        assert_eq!(Data::string(String::from("foo")), r.get(3));
+
+        r.set_null(3);
+        assert_eq!(Data::Null, r.get(3));
+    }
+}

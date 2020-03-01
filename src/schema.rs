@@ -179,3 +179,78 @@ impl From<Vec<DataType>> for Schema {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_data_types() {
+        let mut data_types = vec![];
+        let mut s = Schema::from(data_types);
+        assert_eq!(s.length(), 0);
+        assert_eq!(s.width(), 0);
+        data_types = vec![
+            DataType::Int,
+            DataType::Int,
+            DataType::Float,
+            DataType::Bool,
+            DataType::String,
+        ];
+        s = Schema::from(data_types);
+        for (idx, data_type) in data_types.iter().enumerate() {
+            assert_eq!(data_type, s.col_type(idx).unwrap());
+        }
+        assert_eq!(s.length(), 0);
+        assert_eq!(s.width(), data_types.len());
+    }
+
+    #[test]
+    fn test_from_str() {
+        let mut types_str = "";
+        let mut s = Schema::from(types_str);
+        assert_eq!(s.length(), 0);
+        assert_eq!(s.width(), 0);
+        types_str = "IIFBS";
+        s = Schema::from(types_str);
+        let data_types = vec![
+            DataType::Int,
+            DataType::Int,
+            DataType::Float,
+            DataType::Bool,
+            DataType::String,
+        ];
+        for (idx, data_type) in data_types.iter().enumerate() {
+            assert_eq!(data_type, s.col_type(idx).unwrap());
+        }
+        assert_eq!(s.length(), 0);
+        assert_eq!(s.width(), data_types.len());
+    }
+
+    // add_column/add_row
+    #[test]
+    fn test_row_col_getters_setters() {
+        // colummn getters/setters
+        let mut s = Schema::new();
+        assert_eq!(s.length(), 0);
+        assert_eq!(s.width(), 0);
+        s.add_column(DataType::String, None);
+        assert_eq!(s.width(), 1);
+        assert_eq!(s.length(), 0);
+        s.add_column(DataType::Int, Some(String::from("foo")));
+        assert_eq!(s.width(), 2);
+        assert_eq!(s.length(), 0);
+        assert_eq!(s.col_idx("foo"), Some(1));
+        assert_eq!(s.col_name(0), None);
+
+        // row getters/setters
+        s.add_row(None);
+        assert_eq!(s.width(), 2);
+        assert_eq!(s.length(), 1);
+        s.add_row(Some(String::from("bar")));
+        assert_eq!(s.width(), 2);
+        assert_eq!(s.length(), 2);
+        assert_eq!(s.row_idx("bar"), Some(1));
+        assert_eq!(s.row_name(0), None);
+    }
+}
