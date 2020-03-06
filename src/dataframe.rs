@@ -14,6 +14,8 @@ use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema_from_file, DataType};
 
+use crossbeam_utils::thread;
+
 /// Represents a DataFrame which contains
 /// [columnar](sorer::dataframe::Column) `Data` and a
 /// [Schema](::crate::schema::Schema).
@@ -30,17 +32,17 @@ pub struct DataFrame {
 impl DataFrame {
     /// Creates a new `DataFrame` from the given file, only reads `len` bytes
     /// starting at the given byte offset `from`.
-    pub fn from_sor(file_name: String, from: usize, len: usize) -> Self {
+    /*pub fn from_sor(file_name: String, from: usize, len: usize) -> Self {
         let schema = Schema::from(infer_schema_from_file(file_name.clone()));
         let n_threads = num_cpus::get();
         let data =
-            from_file(file_name, schema.schema.clone(), from, len, n_threads);
+            from_file(file_name, schema.schema.clone(), from, len);//, n_threads);
         DataFrame {
             schema,
             data,
             n_threads,
         }
-    }
+    }*/
 
     /// Creates an empty `DataFrame` from the given
     /// [`Schema`](::crate::schema::Schema).
@@ -255,45 +257,42 @@ impl DataFrame {
                 (Data::Null, Column::Bool(l)) => l.push(None),
                 (Data::Null, Column::String(l)) => l.push(None),
                 (_, _) => panic!("Err: incampatible row"),
-            }
+            };
         }
+        self.schema.row_names.push(None);
     }
 
     /// Applies the given `rower` to every row in this `DataFrame`.
-    pub fn map<T: Rower>(&self, rower: &mut T) {
-        map_helper(self, rower, 0, self.n_rows());
+    pub fn map<T: Rower>(&self, rower: T) -> T {
+        map_helper(self, rower, 0, self.n_rows())
     }
 
-    // NOTE: crossbeam might remove the 'static
-    /*pub fn pmap<T: Rower + Clone + Send>(&'static self, rower: &'static mut T) {
-        //let mut rowers = Vec::new();
-        let mut threads = Vec::new();
-        //for _ in 0..self.n_threads - 1 {
-        //    rowers.push(&mut rower.clone());
-        //}
-        //rowers.insert(0, rower);
-        let rowers = vec![*rower; self.n_threads];
-        let step = self.nrows() / self.n_threads; // +1 for this thread
+    // TODO: There is a division remainder error (we might be skipping some rows in the last
+    // thread) FIX THIS
+    pub fn pmap<T: Rower + Clone + Send>(&self, rower: T) -> T {
+        let rowers = vec![rower; self.n_threads];
+        let mut new_rowers = Vec::new();
+        let step = self.n_rows() / self.n_threads;
         let mut from = 0;
-        for i in 0..self.n_threads - 1 {
-            threads.push(thread::spawn(move || {
-                map_helper::<T>(&self, rowers.get_mut(i).unwrap(), from, from + step)
-            }));
-            from += step;
-        }
-        map_helper::<T>(
-            self,
-            rowers.get_mut(self.n_threads).unwrap(),
-            from,
-            self.nrows(),
-        );
-        for thread in threads {
-            thread.join().unwrap();
-        }
-        //for (i, r) in rowers.iter_mut().enumerate().rev().skip(1) {
-        //    r.join(rowers.get_mut(i + 1).unwrap());
-        //}
-    }*/
+        thread::scope(|s| {
+            let mut threads = Vec::new();
+            for r in rowers {
+                threads.push(
+                    s.spawn(move |_| map_helper(&self, r, from, from + step)),
+                );
+                from += step;
+            }
+            for thread in threads {
+                new_rowers.push(thread.join().unwrap());
+            }
+        })
+        .unwrap();
+        let acc = new_rowers.pop().unwrap();
+        new_rowers
+            .iter_mut()
+            .rev()
+            .fold(acc, |prev, x| x.join(&prev))
+    }
 
     /// Create a new dataframe, constructed from rows for which the given Rower
     /// returned true from its accept method.
@@ -324,16 +323,17 @@ impl DataFrame {
 
 fn map_helper<T: Rower>(
     df: &DataFrame,
-    rower: &mut T,
+    mut rower: T,
     start: usize,
     end: usize,
-) {
+) -> T {
     let mut row = Row::new(&df.schema);
     // NOTE: IS THIS THE ~10% slower way to do counted loop???? @tom
     for i in start..end {
         df.fill_row(i, &mut row);
         rower.visit(&mut row);
     }
+    rower
 }
 
 #[cfg(test)]
@@ -342,6 +342,7 @@ mod tests {
     use crate::row::Row;
     use crate::rower::Rower;
 
+    #[derive(Clone)]
     struct PosIntSummer {
         sum: i64,
     }
@@ -361,8 +362,9 @@ mod tests {
             }
         }
 
-        fn join(&mut self, other: &Self) {
+        fn join(&mut self, other: &Self) -> Self {
             self.sum += other.sum;
+            self.clone()
         }
     }
 
@@ -387,7 +389,16 @@ mod tests {
     fn test_map() {
         let df = init();
         let mut rower = PosIntSummer { sum: 0 };
-        df.map(&mut rower);
+        rower = df.map(rower);
+        assert_eq!(1000 * 1000 / 4, rower.sum);
+        assert_eq!(1000, df.n_rows());
+    }
+
+    #[test]
+    fn test_pmap() {
+        let df = init();
+        let mut rower = PosIntSummer { sum: 0 };
+        rower = df.pmap(rower);
         assert_eq!(1000 * 1000 / 4, rower.sum);
         assert_eq!(1000, df.n_rows());
     }
