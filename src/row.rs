@@ -270,9 +270,9 @@ mod tests {
         let r = Row::new(&s);
         assert_eq!(r.width(), 0);
         s.add_column(DataType::Int, None).unwrap();
-        assert_eq!(r.width(), 1);
-        s.add_column(DataType::Bool, None).unwrap();
-        assert_eq!(r.width(), 2);
+        assert_eq!(r.width(), 0);
+        let r2 = Row::new(&s);
+        assert_eq!(r2.width(), 1);
     }
 
     #[test]
