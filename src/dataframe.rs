@@ -32,17 +32,17 @@ pub struct DataFrame {
 impl DataFrame {
     /// Creates a new `DataFrame` from the given file, only reads `len` bytes
     /// starting at the given byte offset `from`.
-    /*pub fn from_sor(file_name: String, from: usize, len: usize) -> Self {
+    pub fn from_sor(file_name: String, from: usize, len: usize) -> Self {
         let schema = Schema::from(infer_schema_from_file(file_name.clone()));
         let n_threads = num_cpus::get();
         let data =
-            from_file(file_name, schema.schema.clone(), from, len);//, n_threads);
+            from_file(file_name, schema.schema.clone(), from, len, n_threads);
         DataFrame {
             schema,
             data,
             n_threads,
         }
-    }*/
+    }
 
     /// Creates an empty `DataFrame` from the given
     /// [`Schema`](::crate::schema::Schema).

@@ -7,8 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-#sorer = { git = "https://github.com/SamedhG/sorer", branch = "rspark" }
-sorer = { path = "../sorer" }
+sorer = { git = "https://github.com/SamedhG/sorer", branch = "master" }
 tokio = { version = "0.2.13", features = ["full"] }
 anyhow = "1.0.26"
 num_cpus = "1.12.0"
