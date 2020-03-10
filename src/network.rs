@@ -18,7 +18,12 @@ pub struct DirEntry {
 
 /*
 impl Client {
-    async fn send_to(&self, data: &[u8], id: usize) -> Result<(), DFError> {
+    fn new(master_addr: String, my_addr: String) -> Result<Self, Error> {
+        let mut master_stream(master_addr).await?
+
+    }
+
+    async fn send_to(&self, data: &[u8], id: usize) -> Result<(), Error> {
         match self.directory.get(id) {
             None => Err(DFError::RowIndexOutOfBounds),
             Some(x) => x.socket.write(data)

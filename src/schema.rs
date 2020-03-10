@@ -1,7 +1,7 @@
 //! A Schema module for managing the data types and row/column names of a
 //! DataFrame.
 
-use crate::error::DFError;
+use crate::error::LiquidError;
 use sorer::schema::DataType;
 
 /// Represents a [`Schema`](::crate::schema::Schema) of a
@@ -25,13 +25,13 @@ impl Schema {
     /// Add a column with the given `data_type`, with an optional column name,
     /// to this Schema. Column names must be unique. If `col_name` is `Some`
     /// and the name already exists in this `Schema`, the column will not
-    /// be added to this Schema and a `DFError::NameAlreadyExists` error
+    /// be added to this Schema and a `LiquidError::NameAlreadyExists` error
     /// will be returned.
     pub fn add_column(
         &mut self,
         data_type: DataType,
         col_name: Option<String>,
-    ) -> Result<(), DFError> {
+    ) -> Result<(), LiquidError> {
         match &col_name {
             Some(_name) => {
                 if !self.col_names.contains(&col_name) {
@@ -39,7 +39,7 @@ impl Schema {
                     self.col_names.push(col_name);
                     Ok(())
                 } else {
-                    Err(DFError::NameAlreadyExists)
+                    Err(LiquidError::NameAlreadyExists)
                 }
             }
             None => {
@@ -52,14 +52,14 @@ impl Schema {
 
     /// Add a row to this `Schema`. If `row_name` is `Some` and the name
     /// already exists in this `Schema`, the row will not be added.
-    pub fn add_row(&mut self, row_name: Option<String>) -> Result<(), DFError> {
+    pub fn add_row(&mut self, row_name: Option<String>) -> Result<(), LiquidError> {
         match &row_name {
             Some(_name) => {
                 if !self.row_names.contains(&row_name) {
                     self.row_names.push(row_name);
                     Ok(())
                 } else {
-                    Err(DFError::NameAlreadyExists)
+                    Err(LiquidError::NameAlreadyExists)
                 }
             }
             None => {
@@ -71,28 +71,28 @@ impl Schema {
 
     /// Gets the (optional) name of the row at the given `idx`.
     /// Returns a result that will `Error` if the `idx` is out of bounds.
-    pub fn row_name(&self, idx: usize) -> Result<&Option<String>, DFError> {
+    pub fn row_name(&self, idx: usize) -> Result<&Option<String>, LiquidError> {
         match self.row_names.get(idx) {
             Some(name) => Ok(name),
-            None => Err(DFError::RowIndexOutOfBounds),
+            None => Err(LiquidError::RowIndexOutOfBounds),
         }
     }
 
     /// Gets the (optional) name of the column at the given `idx`.
     /// Returns a result that will `Error` if the `idx` is out of bounds.
-    pub fn col_name(&self, idx: usize) -> Result<&Option<String>, DFError> {
+    pub fn col_name(&self, idx: usize) -> Result<&Option<String>, LiquidError> {
         match self.col_names.get(idx) {
             Some(name) => Ok(name),
-            None => Err(DFError::ColIndexOutOfBounds),
+            None => Err(LiquidError::ColIndexOutOfBounds),
         }
     }
 
     /// Get the data type of the column at the given `idx`
     /// Returns a result that will `Error` if the `idx` is out of bounds.
-    pub fn col_type(&self, idx: usize) -> Result<&DataType, DFError> {
+    pub fn col_type(&self, idx: usize) -> Result<&DataType, LiquidError> {
         match self.schema.get(idx) {
             Some(data_type) => Ok(data_type),
-            None => Err(DFError::ColIndexOutOfBounds),
+            None => Err(LiquidError::ColIndexOutOfBounds),
         }
     }
 

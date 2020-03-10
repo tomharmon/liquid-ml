@@ -5,11 +5,10 @@
 //! [`Rower`](::crate::rower::Rower) trait to perform `map` operations on
 //! a `DataFrame`.
 
-use crate::error::DFError;
+use crate::error::LiquidError;
 use crate::row::Row;
 use crate::rower::Rower;
 use crate::schema::Schema;
-use anyhow::Result;
 use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema_from_file, DataType};
@@ -79,7 +78,7 @@ impl DataFrame {
         &mut self,
         col: Column,
         name: Option<String>,
-    ) -> Result<(), DFError> {
+    ) -> Result<(), LiquidError> {
         match col {
             Column::Int(_) => self.schema.add_column(DataType::Int, name),
             Column::Bool(_) => self.schema.add_column(DataType::Bool, name),
@@ -90,7 +89,8 @@ impl DataFrame {
 
     /// Get the [`Data`](sorer::dataframe::Data) at the given `col_idx, row_idx`
     /// offsets.
-    pub fn get(&self, col_idx: usize, row_idx: usize) -> Result<Data, DFError> {
+    pub fn get(&self, col_idx: usize, row_idx: usize) -> 
+        Result<Data, LiquidError> {
         // Note that yes this is really ugly, but no it can't be abstracted
         // (must match on the types) and it is for performance so that we don't
         // have to box/unbox values when constructing the DataFrame and mapping
@@ -101,30 +101,30 @@ impl DataFrame {
                     Some(data) => Ok(Data::Int(*data)),
                     None => Ok(Data::Null),
                 },
-                None => Err(DFError::RowIndexOutOfBounds),
+                None => Err(LiquidError::RowIndexOutOfBounds),
             },
             Some(Column::Bool(col)) => match col.get(row_idx) {
                 Some(optional_data) => match optional_data {
                     Some(data) => Ok(Data::Bool(*data)),
                     None => Ok(Data::Null),
                 },
-                None => Err(DFError::RowIndexOutOfBounds),
+                None => Err(LiquidError::RowIndexOutOfBounds),
             },
             Some(Column::Float(col)) => match col.get(row_idx) {
                 Some(optional_data) => match optional_data {
                     Some(data) => Ok(Data::Float(*data)),
                     None => Ok(Data::Null),
                 },
-                None => Err(DFError::RowIndexOutOfBounds),
+                None => Err(LiquidError::RowIndexOutOfBounds),
             },
             Some(Column::String(col)) => match col.get(row_idx) {
                 Some(optional_data) => match optional_data {
                     Some(data) => Ok(Data::String(data.clone())),
                     None => Ok(Data::Null),
                 },
-                None => Err(DFError::RowIndexOutOfBounds),
+                None => Err(LiquidError::RowIndexOutOfBounds),
             },
-            None => Err(DFError::ColIndexOutOfBounds),
+            None => Err(LiquidError::ColIndexOutOfBounds),
         }
     }
 

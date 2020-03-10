@@ -1,6 +1,6 @@
 //! Structs and functions for working with rows of data in a `DataFrame`.
 
-use crate::error::DFError;
+use crate::error::LiquidError;
 use crate::fielder::Fielder;
 use crate::schema::Schema;
 use sorer::dataframe::Data;
@@ -40,7 +40,7 @@ impl Row {
         &mut self,
         col_idx: usize,
         data: i64,
-    ) -> Result<(), DFError> {
+    ) -> Result<(), LiquidError> {
         match self.schema.get(col_idx) {
             Some(DataType::Int) => Ok(match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::Int(_) => {
@@ -48,8 +48,8 @@ impl Row {
                 }
                 _ => panic!("Something is horribly wrong"),
             }),
-            None => Err(DFError::ColIndexOutOfBounds),
-            _ => Err(DFError::TypeMismatch),
+            None => Err(LiquidError::ColIndexOutOfBounds),
+            _ => Err(LiquidError::TypeMismatch),
         }
     }
 
@@ -59,7 +59,7 @@ impl Row {
         &mut self,
         col_idx: usize,
         data: f64,
-    ) -> Result<(), DFError> {
+    ) -> Result<(), LiquidError> {
         match self.schema.get(col_idx) {
             Some(DataType::Float) => {
                 Ok(match self.data.get(col_idx).unwrap() {
@@ -69,8 +69,8 @@ impl Row {
                     _ => panic!("Something is horribly wrong"),
                 })
             }
-            None => Err(DFError::ColIndexOutOfBounds),
-            _ => Err(DFError::TypeMismatch),
+            None => Err(LiquidError::ColIndexOutOfBounds),
+            _ => Err(LiquidError::TypeMismatch),
         }
     }
 
@@ -80,7 +80,7 @@ impl Row {
         &mut self,
         col_idx: usize,
         data: bool,
-    ) -> Result<(), DFError> {
+    ) -> Result<(), LiquidError> {
         match self.schema.get(col_idx) {
             Some(DataType::Bool) => Ok(match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::Bool(_) => {
@@ -88,8 +88,8 @@ impl Row {
                 }
                 _ => panic!("Something is horribly wrong"),
             }),
-            None => Err(DFError::ColIndexOutOfBounds),
-            _ => Err(DFError::TypeMismatch),
+            None => Err(LiquidError::ColIndexOutOfBounds),
+            _ => Err(LiquidError::TypeMismatch),
         }
     }
 
@@ -99,7 +99,7 @@ impl Row {
         &mut self,
         col_idx: usize,
         data: String,
-    ) -> Result<(), DFError> {
+    ) -> Result<(), LiquidError> {
         match self.schema.get(col_idx) {
             Some(DataType::String) => {
                 Ok(match self.data.get(col_idx).unwrap() {
@@ -110,19 +110,19 @@ impl Row {
                     _ => panic!("Something is horribly wrong"),
                 })
             }
-            None => Err(DFError::ColIndexOutOfBounds),
-            _ => Err(DFError::TypeMismatch),
+            None => Err(LiquidError::ColIndexOutOfBounds),
+            _ => Err(LiquidError::TypeMismatch),
         }
     }
 
     /// Set an field in the row to `Null`.
-    pub fn set_null(&mut self, col_idx: usize) -> Result<(), DFError> {
+    pub fn set_null(&mut self, col_idx: usize) -> Result<(), LiquidError> {
         match self.data.get(col_idx) {
             Some(_) => {
                 *self.data.get_mut(col_idx).unwrap() = Data::Null;
                 Ok(())
             }
-            _ => Err(DFError::ColIndexOutOfBounds),
+            _ => Err(LiquidError::ColIndexOutOfBounds),
         }
     }
 
@@ -132,18 +132,18 @@ impl Row {
     }
 
     /// Get the current index of this `Row`.
-    pub fn get_idx(&self) -> Result<usize, DFError> {
+    pub fn get_idx(&self) -> Result<usize, LiquidError> {
         match self.idx {
             Some(index) => Ok(index),
-            None => Err(DFError::NotSet),
+            None => Err(LiquidError::NotSet),
         }
     }
 
     /// Get a reference of the boxed value at the given `idx`.
-    pub fn get(&self, idx: usize) -> Result<&Data, DFError> {
+    pub fn get(&self, idx: usize) -> Result<&Data, LiquidError> {
         match self.data.get(idx) {
             Some(d) => Ok(d),
-            None => Err(DFError::ColIndexOutOfBounds),
+            None => Err(LiquidError::ColIndexOutOfBounds),
         }
     }
 
@@ -153,15 +153,15 @@ impl Row {
     }
 
     /// Get the `DataType` of the `Column` at the given `idx`.
-    pub fn col_type(&self, idx: usize) -> Result<&DataType, DFError> {
+    pub fn col_type(&self, idx: usize) -> Result<&DataType, LiquidError> {
         match self.schema.get(idx) {
             Some(d) => Ok(d),
-            None => Err(DFError::ColIndexOutOfBounds),
+            None => Err(LiquidError::ColIndexOutOfBounds),
         }
     }
 
     /// Accept a visitor for this row that vists all the elements in this `Row`.
-    pub fn accept<T: Fielder>(&self, f: &mut T) -> Result<(), DFError> {
+    pub fn accept<T: Fielder>(&self, f: &mut T) -> Result<(), LiquidError> {
         let idx = match self.get_idx() {
             Ok(i) => i,
             Err(e) => return Err(e),
