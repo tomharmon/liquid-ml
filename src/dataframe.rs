@@ -90,26 +90,39 @@ impl DataFrame {
 
     /// Get the [`Data`](sorer::dataframe::Data) at the given `col_idx, row_idx`
     /// offsets.
-    ///
-    /// NOTE: This just panics instead of returning Err(RowIndexOutOfBounds)
-    /// since rn i'm lazy and this match will get gross AF
     pub fn get(&self, col_idx: usize, row_idx: usize) -> Result<Data, DFError> {
+        // Note that yes this is really ugly, but no it can't be abstracted
+        // (must match on the types) and it is for performance so that we don't
+        // have to box/unbox values when constructing the DataFrame and mapping
+        // over it
         match self.data.get(col_idx) {
-            Some(Column::Int(col)) => match col.get(row_idx).unwrap() {
-                Some(data) => Ok(Data::Int(*data)),
-                None => Ok(Data::Null),
+            Some(Column::Int(col)) => match col.get(row_idx) {
+                Some(optional_data) => match optional_data {
+                    Some(data) => Ok(Data::Int(*data)),
+                    None => Ok(Data::Null),
+                },
+                None => Err(DFError::RowIndexOutOfBounds),
             },
-            Some(Column::Bool(col)) => match col.get(row_idx).unwrap() {
-                Some(data) => Ok(Data::Bool(*data)),
-                None => Ok(Data::Null),
+            Some(Column::Bool(col)) => match col.get(row_idx) {
+                Some(optional_data) => match optional_data {
+                    Some(data) => Ok(Data::Bool(*data)),
+                    None => Ok(Data::Null),
+                },
+                None => Err(DFError::RowIndexOutOfBounds),
             },
-            Some(Column::Float(col)) => match col.get(row_idx).unwrap() {
-                Some(data) => Ok(Data::Float(*data)),
-                None => Ok(Data::Null),
+            Some(Column::Float(col)) => match col.get(row_idx) {
+                Some(optional_data) => match optional_data {
+                    Some(data) => Ok(Data::Float(*data)),
+                    None => Ok(Data::Null),
+                },
+                None => Err(DFError::RowIndexOutOfBounds),
             },
-            Some(Column::String(col)) => match col.get(row_idx).unwrap() {
-                Some(data) => Ok(Data::String(data.clone())),
-                None => Ok(Data::Null),
+            Some(Column::String(col)) => match col.get(row_idx) {
+                Some(optional_data) => match optional_data {
+                    Some(data) => Ok(Data::String(data.clone())),
+                    None => Ok(Data::Null),
+                },
+                None => Err(DFError::RowIndexOutOfBounds),
             },
             None => Err(DFError::ColIndexOutOfBounds),
         }
