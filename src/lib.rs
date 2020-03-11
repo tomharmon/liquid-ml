@@ -1,5 +1,4 @@
 //! # DataFrame
-
 pub mod dataframe;
 pub mod error;
 pub mod fielder;

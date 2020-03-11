@@ -16,4 +16,10 @@ pub enum LiquidError {
     NotSet,
     #[error("Network error")]
     NetworkError(#[from] io::Error),
+    #[error("Serialization/Deserialization Error")]
+    SerdeError(#[from] Box<bincode::ErrorKind>),
+    #[error("Who you sending this to?")]
+    UnknownId,
+    #[error("Trying to connect at an Id that already exists")]
+    ReconnectionError,
 }

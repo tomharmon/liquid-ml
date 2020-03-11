@@ -52,7 +52,10 @@ impl Schema {
 
     /// Add a row to this `Schema`. If `row_name` is `Some` and the name
     /// already exists in this `Schema`, the row will not be added.
-    pub fn add_row(&mut self, row_name: Option<String>) -> Result<(), LiquidError> {
+    pub fn add_row(
+        &mut self,
+        row_name: Option<String>,
+    ) -> Result<(), LiquidError> {
         match &row_name {
             Some(_name) => {
                 if !self.row_names.contains(&row_name) {

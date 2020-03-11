@@ -1,13 +1,4 @@
-use bincode;
-// use serde::{Deserialize, Serialize};
-use futures::stream::StreamExt;
-use std::env;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufStream};
-use tokio::net::{TcpListener, TcpStream};
-// use tokio::prelude::*;
-use rspark::network::DirEntry;
-use std::io::Write;
-
+/*
 async fn process_socket(
     socket: &mut BufStream<TcpStream>,
     directory: &mut Vec<DirEntry>,
@@ -27,10 +18,11 @@ async fn process_socket(
     directory.push(registration);
     std::io::stdout().flush().unwrap();
 }
-
+*/
 //https://docs.rs/tokio/0.2.13/tokio/net/struct.TcpListener.html
 #[tokio::main]
 async fn main() {
+    /*
     let addr = env::args()
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:9000".to_string());
@@ -62,5 +54,5 @@ async fn main() {
     };
 
     // Start the server and block this async fn until `server` spins down.
-    server.await;
+    server.await;*/
 }

@@ -89,8 +89,11 @@ impl DataFrame {
 
     /// Get the [`Data`](sorer::dataframe::Data) at the given `col_idx, row_idx`
     /// offsets.
-    pub fn get(&self, col_idx: usize, row_idx: usize) -> 
-        Result<Data, LiquidError> {
+    pub fn get(
+        &self,
+        col_idx: usize,
+        row_idx: usize,
+    ) -> Result<Data, LiquidError> {
         // Note that yes this is really ugly, but no it can't be abstracted
         // (must match on the types) and it is for performance so that we don't
         // have to box/unbox values when constructing the DataFrame and mapping
