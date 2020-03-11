@@ -1,13 +1,12 @@
 use crate::error::LiquidError;
-use crate::network::message::{RegistrationMsg, ConnectionMsg, Message};
-use crate::network::network::Connection;
-use serde::{Serialize, de::DeserializeOwned, Deserialize};
+use crate::network::message::{RegistrationMsg, ConnectionMsg};
+use crate::network::network::{Connection, send_msg, read_msg};
+use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{
-    split, AsyncReadExt, BufReader, BufStream, BufWriter, 
+    split, BufReader, BufStream, BufWriter, ReadHalf 
 };
 use tokio::net::{TcpListener, TcpStream};
-use tokio::prelude::*;
 //TODO: Look at Struct std::net::SocketAddrV4 instead of storing
 //      addresses as strings
 
@@ -44,21 +43,21 @@ impl Client {
     /// 4. Connects to all other existing `Client`s which spawns a Tokio task
     ///    for each connection that will read messages from the connection
     ///    and handle it.
-    pub(crate) async fn new(
+    pub async fn new(
         server_addr: String,
         my_addr: String,
     ) -> Result<Self, LiquidError> {
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
-        let mut buf_server = BufStream::new(server_stream);
-
+        let (reader, writer) = split(server_stream);
+        let mut buf_reader = BufReader::new(reader);
+        let mut buf_writer = BufWriter::new(writer);
         // Tell the server our addresss
-        buf_server.write(my_addr.as_bytes()).await?;
+        send_msg(&my_addr, &mut buf_writer).await?;
 
-        // The server will give us registration information
-        let mut buffer = Vec::new();
-        buf_server.read_to_end(&mut buffer).await?;
-        let reg: RegistrationMsg = bincode::deserialize(&buffer[..])?;
+        let reg = read_msg::<RegistrationMsg>(&mut buf_reader).await?;
+
+        let buf_server = BufStream::new(buf_reader.into_inner().unsplit(buf_writer.into_inner()));
 
         let mut c = Client {
             id: reg.assigned_id,
@@ -73,7 +72,7 @@ impl Client {
         for a in reg.clients {
             c.connect(a).await?;
         }
-
+        
         Ok(c)
     }
 
@@ -82,7 +81,7 @@ impl Client {
     /// `Client`, we add the connection to them to this `Client.directory`
     /// and spawn a Tokio task to handle further communication from the new
     /// `Client`
-    pub(crate) async fn accept_new_connection(
+    pub async fn accept_new_connections(
         &mut self,
     ) -> Result<(), LiquidError> {
         loop {
@@ -92,9 +91,7 @@ impl Client {
             let mut buf_reader = BufReader::new(reader);
             let buf_writer = BufWriter::new(writer);
             // Read the ConnectionMsg from the new client
-            let mut buffer = Vec::new();
-            buf_reader.read_to_end(&mut buffer).await?;
-            let conn_msg: ConnectionMsg = bincode::deserialize(&buffer[..])?;
+            let conn_msg: ConnectionMsg = read_msg(&mut buf_reader).await?;
             // Add the connection to the new client to this directory
             let conn = Connection {
                 address: conn_msg.my_address,
@@ -147,13 +144,14 @@ impl Client {
                     my_address: self.address.clone(),
                 };
                 self.send_msg(client.0, &conn_msg).await?;
+                self.send_msg(client.0, &"Hi".to_string()).await?;
                 Ok(())
             }
         }
     }
 
     /// Send a message to a client with the given `target_id`.
-    pub(crate) async fn send_msg<T: Serialize>(
+    pub async fn send_msg<T: Serialize>(
         &mut self,
         target_id: usize,
         message: &T,
@@ -161,8 +159,7 @@ impl Client {
         match self.directory.get_mut(&target_id) {
             None => Err(LiquidError::UnknownId),
             Some(conn) => {
-                let msg = bincode::serialize(message)?;
-                conn.stream.write(&msg[..]).await?; // should send_msg return a future?
+                send_msg(message, &mut conn.stream).await?;
                 self.msg_id += 1;
                 Ok(())
             }
@@ -171,21 +168,18 @@ impl Client {
 
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
-    pub(crate) fn recv_msg<T: AsyncReadExt + Unpin + Send + 'static>(
+    pub(crate) fn recv_msg(
         &mut self,
-        mut reader: T,
-        callback: fn(&Vec<u8>) -> ()
+        mut reader: BufReader<ReadHalf<TcpStream>>,
+        callback: fn(String) -> ()
     ) { //-> Result<(), LiquidError> {
         // NOTE: may need to do tokio::runtime::Runtime::spawn or
         // tokio::runtime::Handle::spawn in order to actually place spawned
         // task into an executor
         tokio::spawn(async move {
-            let mut buff = Vec::new();
-            println!("Listening for msgs");
             loop {
-                reader.read_to_end(&mut buff).await.unwrap();
-                //let msg : Message<D> = bincode::deserialize(&buff[..]).unwrap();
-                callback(&buff);
+                let s : String = read_msg(&mut reader).await.unwrap();//.read_to_end(&mut buff).await.unwrap();
+                callback(s);
             }
         });
     }

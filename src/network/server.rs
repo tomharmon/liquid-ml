@@ -1,13 +1,12 @@
 use crate::error::LiquidError;
-use crate::network::network::Connection;
+use crate::network::network::{Connection, read_msg, send_msg};
 use crate::network::message::*;
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{
-    split, AsyncReadExt, BufReader, BufStream, BufWriter, 
+    split, BufReader, BufWriter, 
 };
-use tokio::net::{TcpListener, TcpStream};
-use tokio::prelude::*;
+use tokio::net::TcpListener;
 //TODO: Look at Struct std::net::SocketAddrV4 instead of storing
 //      addresses as strings
 
@@ -31,7 +30,7 @@ pub struct Server {
 #[allow(dead_code)]
 impl Server {
     /// Create a new `Server` running on the given `my_addr` IP:Port address.
-    pub(crate) async fn new(
+    pub async fn new(
         address: String,
     ) -> Result<Self, LiquidError> {
         // Bind to the given IP:Port 
@@ -42,23 +41,23 @@ impl Server {
             directory: HashMap::new(),
             listener: registration_listener
         };
-        //tokio::spawn(s.accept_new_connection());
+
         Ok(s)
     }
 
-    pub(crate) async fn accept_new_connection(
+    pub async fn accept_new_connections(
         &mut self,
     ) -> Result<(), LiquidError> {
         loop {
             // wait on connections from new clients
-            let (socket, _) = self.listener.accept().await?;
+            let (socket, addr) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
             let mut buf_reader = BufReader::new(reader);
             let buf_writer = BufWriter::new(writer);
             // Read the IP:Port from the client
-            let mut buffer = Vec::new();
-            buf_reader.read_to_end(&mut buffer).await?;
-            let address: String = bincode::deserialize(&buffer[..])?;
+
+            let address: String = read_msg(&mut buf_reader).await?;
+
             // Add the connection to the new client to this directory
             let conn = Connection {
                 address,
@@ -92,8 +91,7 @@ impl Server {
         match self.directory.get_mut(&target_id) {
             None => Err(LiquidError::UnknownId),
             Some(conn) => {
-                let msg = bincode::serialize(message)?;
-                conn.stream.write(&msg[..]).await?; // should send_msg return a future?
+                send_msg(message, &mut conn.stream).await?;
                 self.msg_id += 1;
                 Ok(())
             }
