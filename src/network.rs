@@ -78,13 +78,16 @@ impl Client {
         &mut self,
     ) -> Result<(), LiquidError> {
         loop {
+            // wait on connections from new clients
             let (socket, _) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
             let mut buf_reader = BufReader::new(reader);
             let mut buf_writer = BufWriter::new(writer);
+            // Read the ConnectionMsg from the new client
             let mut buffer = Vec::new();
             buf_reader.read_to_end(&mut buffer).await?;
             let conn_msg: ConnectionMsg = bincode::deserialize(&buffer[..])?;
+            // Add the connection to the new client to this directory
             let conn = Connection {
                 address: conn_msg.my_address,
                 stream: buf_writer,
@@ -93,8 +96,8 @@ impl Client {
             match self.directory.insert(conn_msg.my_id, conn) {
                 Some(old_buf) => return Err(LiquidError::ReconnectionError),
                 None => {
-                    // spawn tokio
-
+                    // spawn a tokio task to handle new messages from the client
+                    self.recv_msg(buf_reader);
                     self.increment_msg_id(conn_msg.msg_id);
                 }
             };
@@ -112,12 +115,12 @@ impl Client {
     ) -> Result<(), LiquidError> {
         let stream = TcpStream::connect(client.1.clone()).await?;
         let (reader, writer) = split(stream);
-        // spawn a tokio task that reads messages from client
+        // spawn a tokio task that handle new messages from the client
         let mut buf_reader = BufReader::new(reader);
-        self.recv_msg(buf_read);
-        let buf_writer = BufWriter::new(writer);
+        self.recv_msg(buf_reader);
 
         // Make the connection struct which holds the stream for sending msgs
+        let buf_writer = BufWriter::new(writer);
         let conn = Connection {
             address: client.1,
             stream: buf_writer,
@@ -134,10 +137,6 @@ impl Client {
                     my_address: self.address.clone(),
                 };
                 self.send_msg(client.0, &conn_msg).await?;
-                // spawn tokio task to read messages from the other client when
-                // they are received
-                
-
                 Ok(())
             }
         }
@@ -162,7 +161,7 @@ impl Client {
         }
     }
 
-    pub(crate) fn recv_msg<T: AsyncReadExt>(&mut self, T) {
+    pub(crate) fn recv_msg<T: AsyncReadExt>(&mut self, reader: T) {
         println!("hi");
     }
 
