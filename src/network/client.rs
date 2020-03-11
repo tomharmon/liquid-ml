@@ -1,8 +1,10 @@
 use crate::error::LiquidError;
-use serde::{Deserialize, Serialize};
+use crate::network::message::{RegistrationMsg, ConnectionMsg, Message};
+use crate::network::network::Connection;
+use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use std::collections::HashMap;
 use tokio::io::{
-    split, AsyncReadExt, BufReader, BufStream, BufWriter, WriteHalf,
+    split, AsyncReadExt, BufReader, BufStream, BufWriter, 
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
@@ -24,42 +26,6 @@ pub struct Client {
     pub server: BufStream<TcpStream>,
     /// A `TcpListener` which listens for connections from new `Client`s
     pub listener: TcpListener,
-}
-
-/// A connection to another `Client`, used for sending directed communication
-#[derive(Debug)]
-pub struct Connection {
-    /// The `IP:Port` of another `Client` that we're connected to
-    pub address: String,
-    /// The buffered stream used for sending messages to the other `Client`
-    pub stream: BufWriter<WriteHalf<TcpStream>>,
-}
-
-/// A registration message sent by the `Server` to new `Client`s once they
-/// connect to the `Server` so that they know which other `Client`s are
-/// currently connected
-#[derive(Serialize, Deserialize, Debug)]
-struct RegistrationMsg {
-    /// The id that the `Server` assigns to the new `Client`
-    assigned_id: usize,
-    /// The id of this `RegistrationMsg`
-    msg_id: usize,
-    /// A list of the currently connected clients, containing a tuple of 
-    /// `(node_id, IP:Port String)`
-    clients: Vec<(usize, String)>,
-}
-
-/// A connection message that a new `Client` sends to all other existing 
-/// `Client`s after the new `Client` receives a `RegistrationMsg` from
-/// the `Server`
-#[derive(Serialize, Deserialize, Debug)]
-struct ConnectionMsg {
-    /// The id of the new `Client`
-    my_id: usize,
-    /// The id of this `ConnectionMsg`
-    msg_id: usize,
-    /// The IP:Port of the new `Client`
-    my_address: String,
 }
 
 /// Methods which allow a `Client` node to start up and connect to a distributed
@@ -208,8 +174,8 @@ impl Client {
     pub(crate) fn recv_msg<T: AsyncReadExt + Unpin + Send + 'static>(
         &mut self,
         mut reader: T,
-        callback: fn(&[u8]) -> ()
-    ) {
+        callback: fn(&Vec<u8>) -> ()
+    ) { //-> Result<(), LiquidError> {
         // NOTE: may need to do tokio::runtime::Runtime::spawn or
         // tokio::runtime::Handle::spawn in order to actually place spawned
         // task into an executor
@@ -218,7 +184,8 @@ impl Client {
             println!("Listening for msgs");
             loop {
                 reader.read_to_end(&mut buff).await.unwrap();
-                callback(&buff[..]);
+                //let msg : Message<D> = bincode::deserialize(&buff[..]).unwrap();
+                callback(&buff);
             }
         });
     }
