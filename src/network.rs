@@ -1,16 +1,15 @@
 use crate::error::LiquidError;
-use futures::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::net::Shutdown;
 use tokio::io::{
-    split, AsyncReadExt, BufReader, BufStream, BufWriter, ReadHalf, WriteHalf,
+    split, AsyncReadExt, BufReader, BufStream, BufWriter, WriteHalf,
 };
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 //TODO: Look at Struct std::net::SocketAddrV4 instead of storing
 //      addresses as strings
 
+#[derive(Debug)]
 pub struct Client {
     pub id: usize,
     pub address: String,
@@ -20,19 +19,20 @@ pub struct Client {
     pub listener: TcpListener,
 }
 
+#[derive(Debug)]
 pub struct Connection {
     pub address: String,
     pub stream: BufWriter<WriteHalf<TcpStream>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct RegistrationMsg {
     assigned_id: usize,
     msg_id: usize,
     clients: Vec<(usize, String)>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct ConnectionMsg {
     my_id: usize,
     msg_id: usize,
@@ -97,16 +97,13 @@ impl Client {
                 Some(_) => return Err(LiquidError::ReconnectionError),
                 None => {
                     // spawn a tokio task to handle new messages from the client
+                    // that we just connected to
                     self.recv_msg(buf_reader);
                     self.increment_msg_id(conn_msg.msg_id);
                 }
             };
         }
     }
-
-    // writing: sending directed msgs -> must add Connection to client.directory
-    // reading: reciving msgs  ->
-    // listening for new connections: must await c.accept_new_connection
 
     pub(crate) async fn connect(
         &mut self,
@@ -141,7 +138,6 @@ impl Client {
         }
     }
 
-    /// NOTE: Might want to split the TCP Stream for better concurrency
     pub(crate) async fn send_msg<T: Serialize>(
         &mut self,
         to: usize,
@@ -158,33 +154,19 @@ impl Client {
         }
     }
 
-    pub(crate) fn recv_msg<T: AsyncReadExt + std::marker::Unpin + Send>(
+    pub(crate) fn recv_msg<T: AsyncReadExt + std::marker::Unpin + Send + 'static>(
         &mut self,
-        reader: T,
+        mut reader: T,
     ) {
         tokio::spawn(async move {
             let mut buff = Vec::new();
             loop {
-                reader.read_to_end(&mut buff);
-                println!("hi");
+                reader.read_to_end(&mut buff).await.unwrap();
+                let msg: ConnectionMsg = bincode::deserialize(&buff[..]).unwrap();
+                println!("{:#?}", msg);
             }
         });
     }
-
-    /*
-     pub(crate) async fn recv_msg<'de, T: Deserialize<'de>>(&mut self) -> Result<T, LiquidError> {
-        let mut futures = Vec::new();
-        let mut buffers = Vec::new();
-        for (_, conn) in self.directory.iter_mut() {
-            let mut buff = Vec::new();
-            futures.push(conn.stream.read_to_end(&mut buff));
-            buffers.push(buff);
-        }
-        future::select_all(futures.iter_mut());
-        Err(LiquidError::UnknownId)
-        // TODO: Not sure what this should do
-    }
-    */
 
     fn increment_msg_id(&mut self, id: usize) {
         self.id = std::cmp::max(self.id, id) + 1;
