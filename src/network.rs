@@ -9,38 +9,75 @@ use tokio::prelude::*;
 //TODO: Look at Struct std::net::SocketAddrV4 instead of storing
 //      addresses as strings
 
+/// Represents a Client node in a distributed system.
 #[derive(Debug)]
 pub struct Client {
+    /// The `id` of this `Client`
     pub id: usize,
+    /// The `address` of this `Client`
     pub address: String,
+    /// The id of the current message
     pub msg_id: usize,
+    /// A directory which is a map of client id to a [`Connection`](Connection)
     pub directory: HashMap<usize, Connection>,
+    /// A buffered connection to the `Server`
     pub server: BufStream<TcpStream>,
+    /// A `TcpListener` which listens for connections from new `Client`s
     pub listener: TcpListener,
 }
 
+/// A connection to another `Client`, used for sending directed communication
 #[derive(Debug)]
 pub struct Connection {
+    /// The `IP:Port` of another `Client` that we're connected to
     pub address: String,
+    /// The buffered stream used for sending messages to the other `Client`
     pub stream: BufWriter<WriteHalf<TcpStream>>,
 }
 
+/// A registration message sent by the `Server` to new `Client`s once they
+/// connect to the `Server` so that they know which other `Client`s are
+/// currently connected
 #[derive(Serialize, Deserialize, Debug)]
 struct RegistrationMsg {
+    /// The id that the `Server` assigns to the new `Client`
     assigned_id: usize,
+    /// The id of this `RegistrationMsg`
     msg_id: usize,
+    /// A list of the currently connected clients, containing a tuple of 
+    /// `(node_id, IP:Port String)`
     clients: Vec<(usize, String)>,
 }
 
+/// A connection message that a new `Client` sends to all other existing 
+/// `Client`s after the new `Client` receives a `RegistrationMsg` from
+/// the `Server`
 #[derive(Serialize, Deserialize, Debug)]
 struct ConnectionMsg {
+    /// The id of the new `Client`
     my_id: usize,
+    /// The id of this `ConnectionMsg`
     msg_id: usize,
+    /// The IP:Port of the new `Client`
     my_address: String,
 }
 
+/// Methods which allow a `Client` node to start up and connect to a distributed
+/// system, listen for new connections from other new `Client`s, send
+/// directed communication to other `Client`s, and respond to messages from
+/// other `Client`s
 #[allow(dead_code)]
 impl Client {
+    /// Create a new `Client` running on the given `my_addr` IP:Port address,
+    /// which connects to a server running on the given `server_addr` IP:Port.
+    ///
+    /// Constructing the `Client` does these things:
+    /// 1. Connects to the server
+    /// 2. Sends the server our IP:Port address
+    /// 3. Server responds with a `RegistrationMsg`
+    /// 4. Connects to all other existing `Client`s which spawns a Tokio task
+    ///    for each connection that will read messages from the connection
+    ///    and handle it.
     pub(crate) async fn new(
         server_addr: String,
         my_addr: String,
@@ -74,6 +111,11 @@ impl Client {
         Ok(c)
     }
 
+    /// A blocking function that allows a `Client` to listen for connections
+    /// from newly started `Client`s. When a new `Client` connects to this
+    /// `Client`, we add the connection to them to this `Client.directory`
+    /// and spawn a Tokio task to handle further communication from the new
+    /// `Client`
     pub(crate) async fn accept_new_connection(
         &mut self,
     ) -> Result<(), LiquidError> {
@@ -105,6 +147,11 @@ impl Client {
         }
     }
 
+    /// Connect to a running `Client` with the given `(id, IP:Port)` information.
+    /// After connecting, add the `Connection` to the other `Client` to this
+    /// `Client.directory` for sending later messages to the `Client`. Finally,
+    /// spawn a Tokio task to read further messages from the `Client` and
+    /// handle the message.
     pub(crate) async fn connect(
         &mut self,
         client: (usize, String),
@@ -138,28 +185,32 @@ impl Client {
         }
     }
 
+    /// Send a message to a client with the given `target_id`.
     pub(crate) async fn send_msg<T: Serialize>(
         &mut self,
-        to: usize,
+        target_id: usize,
         message: &T,
     ) -> Result<(), LiquidError> {
-        match self.directory.get_mut(&to) {
+        match self.directory.get_mut(&target_id) {
             None => Err(LiquidError::UnknownId),
             Some(conn) => {
                 let msg = bincode::serialize(message)?;
-                conn.stream.write(&msg[..]).await?; // should this fn return a future?
+                conn.stream.write(&msg[..]).await?; // should send_msg return a future?
                 self.msg_id += 1;
                 Ok(())
             }
         }
     }
 
+    /// Spawns a Tokio task to read messages from the given `reader` and
+    /// handle responding to them.
     pub(crate) fn recv_msg<T: AsyncReadExt + std::marker::Unpin + Send + 'static>(
         &mut self,
         mut reader: T,
     ) {
         tokio::spawn(async move {
             let mut buff = Vec::new();
+            println!("Listening for msgs");
             loop {
                 reader.read_to_end(&mut buff).await.unwrap();
                 let msg: ConnectionMsg = bincode::deserialize(&buff[..]).unwrap();
