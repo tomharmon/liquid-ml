@@ -204,10 +204,13 @@ impl Client {
 
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
-    pub(crate) fn recv_msg<T: AsyncReadExt + std::marker::Unpin + Send + 'static>(
+    pub(crate) fn recv_msg<T: AsyncReadExt + Unpin + Send + 'static>(
         &mut self,
         mut reader: T,
     ) {
+        // NOTE: may need to do tokio::runtime::Runtime::spawn or
+        // tokio::runtime::Handle::spawn in order to actually place spawned
+        // task into an executor
         tokio::spawn(async move {
             let mut buff = Vec::new();
             println!("Listening for msgs");
