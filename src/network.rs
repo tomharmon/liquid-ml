@@ -140,7 +140,7 @@ impl Client {
                 None => {
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
-                    self.recv_msg(buf_reader);
+                    self.recv_msg(buf_reader, |x| println!("{:?}", x));
                     self.increment_msg_id(conn_msg.msg_id);
                 }
             };
@@ -158,9 +158,7 @@ impl Client {
     ) -> Result<(), LiquidError> {
         let stream = TcpStream::connect(client.1.clone()).await?;
         let (reader, writer) = split(stream);
-        // spawn a tokio task that handle new messages from the client
         let buf_reader = BufReader::new(reader);
-        self.recv_msg(buf_reader);
 
         // Make the connection struct which holds the stream for sending msgs
         let buf_writer = BufWriter::new(writer);
@@ -172,6 +170,9 @@ impl Client {
         match self.directory.insert(client.0, conn) {
             Some(_) => Err(LiquidError::ReconnectionError),
             None => {
+                // spawn a tokio task to handle new messages from the client
+                // that we just connected to
+                self.recv_msg(buf_reader, |x| println!("{:?}", x));
                 // send the client our id and address so they can add us to
                 // their directory
                 let conn_msg = ConnectionMsg {
@@ -207,6 +208,7 @@ impl Client {
     pub(crate) fn recv_msg<T: AsyncReadExt + Unpin + Send + 'static>(
         &mut self,
         mut reader: T,
+        callback: fn(&[u8]) -> ()
     ) {
         // NOTE: may need to do tokio::runtime::Runtime::spawn or
         // tokio::runtime::Handle::spawn in order to actually place spawned
@@ -216,8 +218,7 @@ impl Client {
             println!("Listening for msgs");
             loop {
                 reader.read_to_end(&mut buff).await.unwrap();
-                let msg: ConnectionMsg = bincode::deserialize(&buff[..]).unwrap();
-                println!("{:#?}", msg);
+                callback(&buff[..]);
             }
         });
     }
