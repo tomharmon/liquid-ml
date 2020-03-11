@@ -82,7 +82,7 @@ impl Client {
             let (socket, _) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
             let mut buf_reader = BufReader::new(reader);
-            let mut buf_writer = BufWriter::new(writer);
+            let buf_writer = BufWriter::new(writer);
             // Read the ConnectionMsg from the new client
             let mut buffer = Vec::new();
             buf_reader.read_to_end(&mut buffer).await?;
@@ -94,7 +94,7 @@ impl Client {
             };
             // TODO: Close the newly created connections in the error cases
             match self.directory.insert(conn_msg.my_id, conn) {
-                Some(old_buf) => return Err(LiquidError::ReconnectionError),
+                Some(_) => return Err(LiquidError::ReconnectionError),
                 None => {
                     // spawn a tokio task to handle new messages from the client
                     self.recv_msg(buf_reader);
@@ -104,9 +104,8 @@ impl Client {
         }
     }
 
-
     // writing: sending directed msgs -> must add Connection to client.directory
-    // reading: reciving msgs  -> 
+    // reading: reciving msgs  ->
     // listening for new connections: must await c.accept_new_connection
 
     pub(crate) async fn connect(
@@ -116,7 +115,7 @@ impl Client {
         let stream = TcpStream::connect(client.1.clone()).await?;
         let (reader, writer) = split(stream);
         // spawn a tokio task that handle new messages from the client
-        let mut buf_reader = BufReader::new(reader);
+        let buf_reader = BufReader::new(reader);
         self.recv_msg(buf_reader);
 
         // Make the connection struct which holds the stream for sending msgs
@@ -140,8 +139,6 @@ impl Client {
                 Ok(())
             }
         }
-
-
     }
 
     /// NOTE: Might want to split the TCP Stream for better concurrency
@@ -161,8 +158,17 @@ impl Client {
         }
     }
 
-    pub(crate) fn recv_msg<T: AsyncReadExt>(&mut self, reader: T) {
-        println!("hi");
+    pub(crate) fn recv_msg<T: AsyncReadExt + std::marker::Unpin + Send>(
+        &mut self,
+        reader: T,
+    ) {
+        tokio::spawn(async move {
+            let mut buff = Vec::new();
+            loop {
+                reader.read_to_end(&mut buff);
+                println!("hi");
+            }
+        });
     }
 
     /*
