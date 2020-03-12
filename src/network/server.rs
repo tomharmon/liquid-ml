@@ -1,11 +1,10 @@
 use crate::error::LiquidError;
-use crate::network::network::{Connection, read_msg, send_msg};
 use crate::network::message::*;
+use crate::network::network;
+use crate::network::network::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
-use tokio::io::{
-    split, BufReader, BufWriter, 
-};
+use tokio::io::{split, BufReader, BufWriter};
 use tokio::net::TcpListener;
 //TODO: Look at Struct std::net::SocketAddrV4 instead of storing
 //      addresses as strings
@@ -29,53 +28,53 @@ pub struct Server {
 /// other `Client`s
 #[allow(dead_code)]
 impl Server {
-    /// Create a new `Server` running on the given `my_addr` IP:Port address.
-    pub async fn new(
-        address: String,
-    ) -> Result<Self, LiquidError> {
-        // Bind to the given IP:Port 
-        let registration_listener = TcpListener::bind(address.clone()).await?;
-        let s = Server {
-            address,
+    /// Create a new `Server` running on the given `address` in the format of
+    /// `IP:Port`
+    pub async fn new(address: String) -> Result<Self, LiquidError> {
+        Ok(Server {
+            listener: TcpListener::bind(&address).await?,
             msg_id: 0,
             directory: HashMap::new(),
-            listener: registration_listener
-        };
-
-        Ok(s)
+            address,
+        })
     }
 
-    pub async fn accept_new_connections(
-        &mut self,
-    ) -> Result<(), LiquidError> {
+    /// A blocking function that allows a `Server` to listen for connections
+    /// from newly started `Client`s. When a new `Client` connects to this
+    /// `Server`, we add the connection to this `Server.directory`, but do
+    /// not listen for further messages from the `Client` since this is not
+    /// required for any desired functionality.
+    pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
         loop {
             // wait on connections from new clients
-            let (socket, addr) = self.listener.accept().await?;
+            let (socket, _) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
             let mut buf_reader = BufReader::new(reader);
-            let buf_writer = BufWriter::new(writer);
+            let write_stream = BufWriter::new(writer);
             // Read the IP:Port from the client
+            let address: String = network::read_msg(&mut buf_reader).await?;
 
-            let address: String = read_msg(&mut buf_reader).await?;
-
-            // Add the connection to the new client to this directory
+            // Represents the connection from this Server to the new Client
             let conn = Connection {
                 address,
-                stream: buf_writer,
+                write_stream,
             };
-
             let assigned_id = self.directory.len();
 
-            let reg_msg = RegistrationMsg {
-                assigned_id,
-                msg_id: self.msg_id,
-                clients: self.directory.iter().map(|(k, v)| (*k, v.address.clone())).collect()
-            };
-
             // TODO: Close the newly created connections in the error cases
+            // Add the connection with the new client to this directory
             match self.directory.insert(assigned_id, conn) {
                 Some(_) => return Err(LiquidError::ReconnectionError),
                 None => {
+                    let reg_msg = RegistrationMsg {
+                        assigned_id,
+                        msg_id: self.msg_id,
+                        clients: self
+                            .directory
+                            .iter()
+                            .map(|(k, v)| (*k, v.address.clone()))
+                            .collect(),
+                    };
                     self.send_msg(assigned_id, &reg_msg).await?;
                 }
             };
@@ -91,7 +90,7 @@ impl Server {
         match self.directory.get_mut(&target_id) {
             None => Err(LiquidError::UnknownId),
             Some(conn) => {
-                send_msg(message, &mut conn.stream).await?;
+                network::send_msg(message, &mut conn.write_stream).await?;
                 self.msg_id += 1;
                 Ok(())
             }

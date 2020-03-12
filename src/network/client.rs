@@ -1,11 +1,10 @@
 use crate::error::LiquidError;
-use crate::network::message::{RegistrationMsg, ConnectionMsg};
-use crate::network::network::{Connection, send_msg, read_msg};
+use crate::network::message::{ConnectionMsg, RegistrationMsg};
+use crate::network::network;
+use crate::network::network::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
-use tokio::io::{
-    split, BufReader, BufWriter, ReadHalf, WriteHalf
-};
+use tokio::io::{split, BufReader, BufWriter, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 //TODO: Look at Struct std::net::SocketAddrV4 instead of storing
 //      addresses as strings
@@ -22,7 +21,10 @@ pub struct Client {
     /// A directory which is a map of client id to a [`Connection`](Connection)
     pub directory: HashMap<usize, Connection>,
     /// A buffered connection to the `Server`
-    pub server: (BufReader<ReadHalf<TcpStream>>, BufWriter<WriteHalf<TcpStream>>),
+    pub server: (
+        BufReader<ReadHalf<TcpStream>>,
+        BufWriter<WriteHalf<TcpStream>>,
+    ),
     /// A `TcpListener` which listens for connections from new `Client`s
     pub listener: TcpListener,
 }
@@ -50,19 +52,21 @@ impl Client {
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
         let (reader, writer) = split(server_stream);
-        let mut buf_reader = BufReader::new(reader);
-        let mut buf_writer = BufWriter::new(writer);
+        let mut read_stream = BufReader::new(reader);
+        let mut write_stream = BufWriter::new(writer);
         // Tell the server our addresss
-        send_msg(&my_addr, &mut buf_writer).await?;
+        network::send_msg(&my_addr, &mut write_stream).await?;
+        // The Server responds w addresses of all currently connected clients
+        let reg =
+            network::read_msg::<RegistrationMsg>(&mut read_stream).await?;
 
-        let reg = read_msg::<RegistrationMsg>(&mut buf_reader).await?;
-
+        // Initialize ourself
         let mut c = Client {
             id: reg.assigned_id,
             address: my_addr.clone(),
             msg_id: reg.msg_id + 1,
             directory: HashMap::new(),
-            server: (buf_reader, buf_writer),
+            server: (read_stream, write_stream),
             listener: TcpListener::bind(my_addr.clone()).await?,
         };
 
@@ -70,30 +74,29 @@ impl Client {
         for a in reg.clients {
             c.connect(a).await?;
         }
-        
+
         Ok(c)
     }
 
     /// A blocking function that allows a `Client` to listen for connections
     /// from newly started `Client`s. When a new `Client` connects to this
-    /// `Client`, we add the connection to them to this `Client.directory`
+    /// `Client`, we add the connection to this `Client.directory`
     /// and spawn a Tokio task to handle further communication from the new
     /// `Client`
-    pub async fn accept_new_connections(
-        &mut self,
-    ) -> Result<(), LiquidError> {
+    pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
         loop {
             // wait on connections from new clients
             let (socket, _) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
             let mut buf_reader = BufReader::new(reader);
-            let buf_writer = BufWriter::new(writer);
+            let write_stream = BufWriter::new(writer);
             // Read the ConnectionMsg from the new client
-            let conn_msg: ConnectionMsg = read_msg(&mut buf_reader).await?;
-            // Add the connection to the new client to this directory
+            let conn_msg: ConnectionMsg =
+                network::read_msg(&mut buf_reader).await?;
+            // Add the connection with the new client to this directory
             let conn = Connection {
                 address: conn_msg.my_address,
-                stream: buf_writer,
+                write_stream,
             };
             // TODO: Close the newly created connections in the error cases
             match self.directory.insert(conn_msg.my_id, conn) {
@@ -101,7 +104,8 @@ impl Client {
                 None => {
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
-                    self.recv_msg(buf_reader, |x| println!("{:?}", x));
+                    // TODO: change the callback given to self.recv_msg
+                    self.recv_msg(buf_reader, |x| println!("{:#?}", x));
                     self.increment_msg_id(conn_msg.msg_id);
                 }
             };
@@ -117,23 +121,26 @@ impl Client {
         &mut self,
         client: (usize, String),
     ) -> Result<(), LiquidError> {
+        // Connect to the given client
         let stream = TcpStream::connect(client.1.clone()).await?;
         let (reader, writer) = split(stream);
-        let buf_reader = BufReader::new(reader);
+        let read_stream = BufReader::new(reader);
+        let write_stream = BufWriter::new(writer);
 
         // Make the connection struct which holds the stream for sending msgs
-        let buf_writer = BufWriter::new(writer);
         let conn = Connection {
-            address: client.1,
-            stream: buf_writer,
+            address: client.1.clone(),
+            write_stream,
         };
-        // add the connection to our directory of connections to other clients
+
+        // Add the connection to our directory of connections to other clients
         match self.directory.insert(client.0, conn) {
             Some(_) => Err(LiquidError::ReconnectionError),
             None => {
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
-                self.recv_msg(buf_reader, |x| println!("{:?}", x));
+                // TODO: change the callback given to self.recv_msg
+                self.recv_msg(read_stream, |x| println!("{:?}", x));
                 // send the client our id and address so they can add us to
                 // their directory
                 let conn_msg = ConnectionMsg {
@@ -142,13 +149,16 @@ impl Client {
                     my_address: self.address.clone(),
                 };
                 self.send_msg(client.0, &conn_msg).await?;
+
+                println!("Id: {:#?} at address: {:#?} connected to id: {:#?} at address: {:#?}", self.id, self.address, client.0, client.1);
                 self.send_msg(client.0, &"Hi".to_string()).await?;
+
                 Ok(())
             }
         }
     }
 
-    /// Send a message to a client with the given `target_id`.
+    /// Send the given `message` to a client with the given `target_id`.
     pub async fn send_msg<T: Serialize>(
         &mut self,
         target_id: usize,
@@ -157,7 +167,7 @@ impl Client {
         match self.directory.get_mut(&target_id) {
             None => Err(LiquidError::UnknownId),
             Some(conn) => {
-                send_msg(message, &mut conn.stream).await?;
+                network::send_msg(message, &mut conn.write_stream).await?;
                 self.msg_id += 1;
                 Ok(())
             }
@@ -169,14 +179,14 @@ impl Client {
     pub(crate) fn recv_msg(
         &mut self,
         mut reader: BufReader<ReadHalf<TcpStream>>,
-        callback: fn(String) -> ()
-    ) { //-> Result<(), LiquidError> {
+        callback: fn(String) -> (), // TODO: fix signature
+    ) {
         // NOTE: may need to do tokio::runtime::Runtime::spawn or
         // tokio::runtime::Handle::spawn in order to actually place spawned
         // task into an executor
         tokio::spawn(async move {
             loop {
-                let s : String = read_msg(&mut reader).await.unwrap();//.read_to_end(&mut buff).await.unwrap();
+                let s: String = network::read_msg(&mut reader).await.unwrap();
                 callback(s);
             }
         });
