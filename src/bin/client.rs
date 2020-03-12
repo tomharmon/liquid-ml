@@ -1,5 +1,5 @@
-use rspark::error::LiquidError;
-use rspark::network::client::Client;
+use liquid_ml::error::LiquidError;
+use liquid_ml::network::client::Client;
 use std::env;
 
 #[tokio::main]

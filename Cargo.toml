@@ -1,5 +1,5 @@
 [package]
-name = "rspark"
+name = "liquid-ml"
 version = "0.1.0"
 authors = ["Thomas Harmon <harmon.t@husky.neu.edu>", "Samedh Gupta <gupta.sam@husky.neu.edu>"]
 edition = "2018"

@@ -1,5 +1,5 @@
-use rspark::error::LiquidError;
-use rspark::network::server::Server;
+use liquid_ml::error::LiquidError;
+use liquid_ml::network::server::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
