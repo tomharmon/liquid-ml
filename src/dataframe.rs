@@ -145,22 +145,43 @@ impl DataFrame {
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
     /// to be changed to the given `data`.
-    ///
-    /// NOTE: do we really want to return result types for all the setters?
-    /// If someone is dumb enough to get index out of bounds error, should
-    /// they be helped?
-    pub fn set_int(&mut self, col_idx: usize, row_idx: usize, data: i64) {
-        if let Some(DataType::Int) = self.schema.schema.get(col_idx) {
-            match self.data.get_mut(col_idx) {
-                Some(Column::Int(col)) => {
-                    *col.get_mut(row_idx).unwrap_or_else(|| {
-                        panic!("Err: row idx out of bounds")
-                    }) = Some(data)
-                }
-                _ => unreachable!("Something is horribly wrong"),
-            }
-        } else {
-            panic!("Err: col idx out of bounds or col is not of int type")
+    pub fn set_int(
+        &mut self,
+        col_idx: usize,
+        row_idx: usize,
+        data: i64,
+    ) -> Result<(), LiquidError> {
+        match self.schema.schema.get(col_idx) {
+            Some(DataType::Int) => match self.data.get_mut(col_idx) {
+                Some(Column::Int(col)) => match col.get_mut(row_idx) {
+                    Some(d) => Ok(*d = Some(data)),
+                    None => Err(LiquidError::RowIndexOutOfBounds),
+                },
+                None => Err(LiquidError::ColIndexOutOfBounds),
+                _ => panic!("Something is horribly wrong"),
+            },
+            _ => Err(LiquidError::TypeMismatch),
+        }
+    }
+
+    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
+    /// to be changed to the given `data`.
+    pub fn set_float(
+        &mut self,
+        col_idx: usize,
+        row_idx: usize,
+        data: f64,
+    ) -> Result<(), LiquidError> {
+        match self.schema.schema.get(col_idx) {
+            Some(DataType::Float) => match self.data.get_mut(col_idx) {
+                Some(Column::Float(col)) => match col.get_mut(row_idx) {
+                    Some(d) => Ok(*d = Some(data)),
+                    None => Err(LiquidError::RowIndexOutOfBounds),
+                },
+                None => Err(LiquidError::ColIndexOutOfBounds),
+                _ => panic!("Something is horribly wrong"),
+            },
+            _ => Err(LiquidError::TypeMismatch),
         }
     }
 
@@ -170,90 +191,75 @@ impl DataFrame {
     /// NOTE: do we really want to return result types for all the setters?
     /// If someone is dumb enough to get index out of bounds error, should
     /// they be helped?
-    pub fn set_float(&mut self, col_idx: usize, row_idx: usize, data: f64) {
-        if let Some(DataType::Float) = self.schema.schema.get(col_idx) {
-            match self.data.get_mut(col_idx) {
-                Some(Column::Float(col)) => {
-                    *col.get_mut(row_idx).unwrap_or_else(|| {
-                        panic!("Err: row idx out of bounds")
-                    }) = Some(data)
-                }
-                _ => unreachable!("Something is horribly wrong"),
-            }
-        } else {
-            panic!("Err: col idx out of bounds or col is not of float type")
+    pub fn set_bool(
+        &mut self,
+        col_idx: usize,
+        row_idx: usize,
+        data: bool,
+    ) -> Result<(), LiquidError> {
+        match self.schema.schema.get(col_idx) {
+            Some(DataType::Bool) => match self.data.get_mut(col_idx) {
+                Some(Column::Bool(col)) => match col.get_mut(row_idx) {
+                    Some(d) => Ok(*d = Some(data)),
+                    None => Err(LiquidError::RowIndexOutOfBounds),
+                },
+                None => Err(LiquidError::ColIndexOutOfBounds),
+                _ => panic!("Something is horribly wrong"),
+            },
+            _ => Err(LiquidError::TypeMismatch),
         }
     }
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
     /// to be changed to the given `data`.
-    ///
-    /// NOTE: do we really want to return result types for all the setters?
-    /// If someone is dumb enough to get index out of bounds error, should
-    /// they be helped?
-    pub fn set_bool(&mut self, col_idx: usize, row_idx: usize, data: bool) {
-        if let Some(DataType::Bool) = self.schema.schema.get(col_idx) {
-            match self.data.get_mut(col_idx) {
-                Some(Column::Bool(col)) => {
-                    *col.get_mut(row_idx).unwrap_or_else(|| {
-                        panic!("Err: row idx out of bounds")
-                    }) = Some(data)
-                }
-                _ => unreachable!("Something is horribly wrong"),
-            }
-        } else {
-            panic!("Err: col idx out of bounds or col is not of bool type")
-        }
-    }
-
-    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
-    /// to be changed to the given `data`.
-    ///
-    /// NOTE: do we really want to return result types for all the setters?
-    /// If someone is dumb enough to get index out of bounds error, should
-    /// they be helped?
-    pub fn set_string(&mut self, col_idx: usize, row_idx: usize, data: String) {
-        if let Some(DataType::String) = self.schema.schema.get(col_idx) {
-            match self.data.get_mut(col_idx) {
-                Some(Column::String(col)) => {
-                    *col.get_mut(row_idx).unwrap_or_else(|| {
-                        panic!("Err: row idx out of bounds")
-                    }) = Some(data)
-                }
-                _ => unreachable!("Something is horribly wrong"),
-            }
-        } else {
-            panic!("Err: col idx out of bounds or col is not of string type")
+    pub fn set_string(
+        &mut self,
+        col_idx: usize,
+        row_idx: usize,
+        data: String,
+    ) -> Result<(), LiquidError> {
+        match self.schema.schema.get(col_idx) {
+            Some(DataType::String) => match self.data.get_mut(col_idx) {
+                Some(Column::String(col)) => match col.get_mut(row_idx) {
+                    Some(d) => Ok(*d = Some(data.clone())),
+                    None => Err(LiquidError::RowIndexOutOfBounds),
+                },
+                None => Err(LiquidError::ColIndexOutOfBounds),
+                _ => panic!("Something is horribly wrong"),
+            },
+            _ => Err(LiquidError::TypeMismatch),
         }
     }
 
     /// Set the fields of the given `Row` struct with values from the row at
     /// the given `idx`.  If the row is not form the same schema as this
     /// `DataFrame`, results are undefined.
-    ///
-    /// NOTE: do we wanna propogate errors from setters here every time? Performance?
-    /// NOTE: unwrapping thigns instead of propogating
-    pub fn fill_row(&self, idx: usize, row: &mut Row) {
+    pub fn fill_row(
+        &self,
+        idx: usize,
+        row: &mut Row,
+    ) -> Result<(), LiquidError> {
         for (c_idx, col) in self.data.iter().enumerate() {
             match col {
                 Column::Int(c) => match c.get(idx).unwrap() {
-                    Some(x) => row.set_int(c_idx, *x).unwrap(),
-                    None => row.set_null(c_idx).unwrap(),
+                    Some(x) => row.set_int(c_idx, *x)?,
+                    None => row.set_null(c_idx)?,
                 },
                 Column::Float(c) => match c.get(idx).unwrap() {
-                    Some(x) => row.set_float(c_idx, *x).unwrap(),
-                    None => row.set_null(c_idx).unwrap(),
+                    Some(x) => row.set_float(c_idx, *x)?,
+                    None => row.set_null(c_idx)?,
                 },
                 Column::Bool(c) => match c.get(idx).unwrap() {
-                    Some(x) => row.set_bool(c_idx, *x).unwrap(),
-                    None => row.set_null(c_idx).unwrap(),
+                    Some(x) => row.set_bool(c_idx, *x)?,
+                    None => row.set_null(c_idx)?,
                 },
                 Column::String(c) => match c.get(idx).unwrap() {
-                    Some(x) => row.set_string(c_idx, x.clone()).unwrap(),
-                    None => row.set_null(c_idx).unwrap(),
+                    Some(x) => row.set_string(c_idx, x.clone())?,
+                    None => row.set_null(c_idx)?,
                 },
             };
         }
+        Ok(())
     }
 
     /// Add a `Row` at the end of this `DataFrame`. Panics if the row has
@@ -317,7 +323,7 @@ impl DataFrame {
         let mut row = Row::new(&self.schema);
 
         for i in 0..self.n_rows() {
-            self.fill_row(i, &mut row);
+            self.fill_row(i, &mut row).unwrap();
             if r.visit(&row) {
                 df.add_row(&row);
             }
@@ -346,7 +352,7 @@ fn map_helper<T: Rower>(
     let mut row = Row::new(&df.schema);
     // NOTE: IS THIS THE ~10% slower way to do counted loop???? @tom
     for i in start..end {
-        df.fill_row(i, &mut row);
+        df.fill_row(i, &mut row).unwrap();
         rower.visit(&mut row);
     }
     rower

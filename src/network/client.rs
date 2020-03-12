@@ -6,8 +6,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{split, BufReader, BufWriter, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-//TODO: Look at Struct std::net::SocketAddrV4 instead of storing
-//      addresses as strings
 
 /// Represents a Client node in a distributed system.
 #[derive(Debug)]
@@ -68,8 +66,11 @@ impl Client {
         network::send_msg(0, &my_addr, &mut directory).await?;
         write_stream = directory.remove(&0).unwrap().write_stream;
         // The Server responds w addresses of all currently connected clients
-        let reg =
-            network::read_msg::<RegistrationMsg>(&mut read_stream).await?;
+        let reg = network::read_msg::<RegistrationMsg>(
+            &mut read_stream,
+            &mut Vec::new(),
+        )
+        .await?;
 
         // Initialize ourself
         let mut c = Client {
@@ -95,15 +96,16 @@ impl Client {
     /// and spawn a Tokio task to handle further communication from the new
     /// `Client`
     pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
+        let mut buffer = Vec::new();
         loop {
             // wait on connections from new clients
             let (socket, _) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
-            let mut buf_reader = BufReader::new(reader);
+            let mut read_stream = BufReader::new(reader);
             let write_stream = BufWriter::new(writer);
             // Read the ConnectionMsg from the new client
             let conn_msg: ConnectionMsg =
-                network::read_msg(&mut buf_reader).await?;
+                network::read_msg(&mut read_stream, &mut buffer).await?;
             // Add the connection with the new client to this directory
             let conn = Connection {
                 address: conn_msg.my_address,
@@ -116,7 +118,7 @@ impl Client {
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
                     // TODO: change the callback given to self.recv_msg
-                    self.recv_msg(buf_reader, |x| println!("{:#?}", x));
+                    self.recv_msg(read_stream, |x| println!("{:#?}", x));
                     self.increment_msg_id(conn_msg.msg_id);
                 }
             };
@@ -197,8 +199,10 @@ impl Client {
         // tokio::runtime::Handle::spawn in order to actually place spawned
         // task into an executor
         tokio::spawn(async move {
+            let mut buffer = Vec::new();
             loop {
-                let s: String = network::read_msg(&mut reader).await.unwrap();
+                let s: String =
+                    network::read_msg(&mut reader, &mut buffer).await.unwrap();
                 callback(s);
             }
         });

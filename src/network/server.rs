@@ -6,8 +6,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{split, BufReader, BufWriter};
 use tokio::net::TcpListener;
-//TODO: Look at Struct std::net::SocketAddrV4 instead of storing
-//      addresses as strings
 
 /// Represents a registration `Server` in a distributed system.
 #[derive(Debug)]
@@ -45,14 +43,16 @@ impl Server {
     /// not listen for further messages from the `Client` since this is not
     /// required for any desired functionality.
     pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
+        let mut buffer = Vec::new();
         loop {
             // wait on connections from new clients
             let (socket, _) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
-            let mut buf_reader = BufReader::new(reader);
+            let mut read_stream = BufReader::new(reader);
             let write_stream = BufWriter::new(writer);
             // Read the IP:Port from the client
-            let address: String = network::read_msg(&mut buf_reader).await?;
+            let address: String =
+                network::read_msg(&mut read_stream, &mut buffer).await?;
 
             // Represents the connection from this Server to the new Client
             let conn = Connection {

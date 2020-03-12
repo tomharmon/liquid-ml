@@ -20,12 +20,11 @@ pub struct Connection {
 
 pub(crate) async fn read_msg<T: DeserializeOwned>(
     reader: &mut BufReader<ReadHalf<TcpStream>>,
+    buffer: &mut Vec<u8>,
 ) -> Result<T, LiquidError> {
     let n = reader.read_u64().await?;
-    //TODO: Maybe pass in a buffer sso a new one doesnt need to be created everytime
-    let mut buff = Vec::new();
-    reader.take(n).read_to_end(&mut buff).await?;
-    let result: T = bincode::deserialize(&buff[..])?;
+    reader.take(n).read_to_end(buffer).await?;
+    let result: T = bincode::deserialize(&buffer[..])?;
     Ok(result)
 }
 
