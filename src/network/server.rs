@@ -24,7 +24,6 @@ pub struct Server {
 /// system, listen for new connections from other new `Client`s, send
 /// directed communication to other `Client`s, and respond to messages from
 /// other `Client`s
-#[allow(dead_code)]
 impl Server {
     /// Create a new `Server` running on the given `address` in the format of
     /// `IP:Port`
