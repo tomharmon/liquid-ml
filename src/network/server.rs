@@ -87,13 +87,8 @@ impl Server {
         target_id: usize,
         message: &T,
     ) -> Result<(), LiquidError> {
-        match self.directory.get_mut(&target_id) {
-            None => Err(LiquidError::UnknownId),
-            Some(conn) => {
-                network::send_msg(message, &mut conn.write_stream).await?;
-                self.msg_id += 1;
-                Ok(())
-            }
-        }
+        network::send_msg(target_id, message, &mut self.directory).await?;
+        self.msg_id += 1;
+        Ok(())
     }
 }

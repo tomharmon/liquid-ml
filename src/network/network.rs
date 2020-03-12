@@ -1,4 +1,7 @@
 use crate::error::LiquidError;
+
+use std::collections::HashMap;
+
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::io::{
@@ -26,13 +29,20 @@ pub(crate) async fn read_msg<T: DeserializeOwned>(
     Ok(result)
 }
 
+/// Send the given `message` over the given `write_stream`
 pub(crate) async fn send_msg<T: Serialize>(
+    target_id: usize,
     message: &T,
-    writer: &mut BufWriter<WriteHalf<TcpStream>>,
+    directory: &mut HashMap<usize, Connection>,
 ) -> Result<(), LiquidError> {
-    let msg = bincode::serialize(message)?;
-    writer.write_u64(msg.len() as u64).await?;
-    writer.write_all(&msg).await?;
-    writer.flush().await?;
-    Ok(())
+    match directory.get_mut(&target_id) {
+        None => Err(LiquidError::UnknownId),
+        Some(conn) => {
+            let msg = bincode::serialize(message)?;
+            conn.write_stream.write_u64(msg.len() as u64).await?;
+            conn.write_stream.write_all(&msg).await?;
+            conn.write_stream.flush().await?;
+            Ok(())
+        }
+    }
 }

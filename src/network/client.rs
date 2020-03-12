@@ -50,12 +50,23 @@ impl Client {
         my_addr: String,
     ) -> Result<Self, LiquidError> {
         // Connect to the server
-        let server_stream = TcpStream::connect(server_addr).await?;
+        let server_stream = TcpStream::connect(server_addr.clone()).await?;
         let (reader, writer) = split(server_stream);
         let mut read_stream = BufReader::new(reader);
         let mut write_stream = BufWriter::new(writer);
         // Tell the server our addresss
-        network::send_msg(&my_addr, &mut write_stream).await?;
+        let mut directory = HashMap::new();
+        directory
+            .insert(
+                0,
+                Connection {
+                    address: server_addr,
+                    write_stream,
+                },
+            )
+            .unwrap();
+        network::send_msg(0, &my_addr, &mut directory).await?;
+        write_stream = directory.remove(&0).unwrap().write_stream;
         // The Server responds w addresses of all currently connected clients
         let reg =
             network::read_msg::<RegistrationMsg>(&mut read_stream).await?;
@@ -65,7 +76,7 @@ impl Client {
             id: reg.assigned_id,
             address: my_addr.clone(),
             msg_id: reg.msg_id + 1,
-            directory: HashMap::new(),
+            directory,
             server: (read_stream, write_stream),
             listener: TcpListener::bind(my_addr.clone()).await?,
         };
@@ -148,10 +159,16 @@ impl Client {
                     msg_id: self.msg_id,
                     my_address: self.address.clone(),
                 };
-                self.send_msg(client.0, &conn_msg).await?;
+                network::send_msg(client.0, &conn_msg, &mut self.directory)
+                    .await?;
 
                 println!("Id: {:#?} at address: {:#?} connected to id: {:#?} at address: {:#?}", self.id, self.address, client.0, client.1);
-                self.send_msg(client.0, &"Hi".to_string()).await?;
+                network::send_msg(
+                    client.0,
+                    &"Hi".to_string(),
+                    &mut self.directory,
+                )
+                .await?;
 
                 Ok(())
             }
@@ -164,14 +181,9 @@ impl Client {
         target_id: usize,
         message: &T,
     ) -> Result<(), LiquidError> {
-        match self.directory.get_mut(&target_id) {
-            None => Err(LiquidError::UnknownId),
-            Some(conn) => {
-                network::send_msg(message, &mut conn.write_stream).await?;
-                self.msg_id += 1;
-                Ok(())
-            }
-        }
+        network::send_msg(target_id, message, &mut self.directory).await?;
+        self.msg_id += 1;
+        Ok(())
     }
 
     /// Spawns a Tokio task to read messages from the given `reader` and

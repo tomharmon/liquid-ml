@@ -1,6 +1,7 @@
 //! The possible error types when using the `DataFrame` trait.
 use std::io;
 use thiserror::Error;
+
 /// An enumeration of `DataFrame` errors.
 #[derive(Debug, Error)]
 pub enum LiquidError {
