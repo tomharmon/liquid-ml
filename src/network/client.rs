@@ -4,7 +4,7 @@ use crate::network::network::{Connection, send_msg, read_msg};
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{
-    split, BufReader, BufStream, BufWriter, ReadHalf 
+    split, BufReader, BufWriter, ReadHalf, WriteHalf
 };
 use tokio::net::{TcpListener, TcpStream};
 //TODO: Look at Struct std::net::SocketAddrV4 instead of storing
@@ -22,7 +22,7 @@ pub struct Client {
     /// A directory which is a map of client id to a [`Connection`](Connection)
     pub directory: HashMap<usize, Connection>,
     /// A buffered connection to the `Server`
-    pub server: BufStream<TcpStream>,
+    pub server: (BufReader<ReadHalf<TcpStream>>, BufWriter<WriteHalf<TcpStream>>),
     /// A `TcpListener` which listens for connections from new `Client`s
     pub listener: TcpListener,
 }
@@ -57,14 +57,12 @@ impl Client {
 
         let reg = read_msg::<RegistrationMsg>(&mut buf_reader).await?;
 
-        let buf_server = BufStream::new(buf_reader.into_inner().unsplit(buf_writer.into_inner()));
-
         let mut c = Client {
             id: reg.assigned_id,
             address: my_addr.clone(),
             msg_id: reg.msg_id + 1,
             directory: HashMap::new(),
-            server: buf_server,
+            server: (buf_reader, buf_writer),
             listener: TcpListener::bind(my_addr.clone()).await?,
         };
 
