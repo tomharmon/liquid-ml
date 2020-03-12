@@ -2,6 +2,7 @@ use crate::error::LiquidError;
 use crate::network::message::{ConnectionMsg, RegistrationMsg};
 use crate::network::network;
 use crate::network::network::Connection;
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{split, BufReader, BufWriter, ReadHalf, WriteHalf};
@@ -117,7 +118,9 @@ impl Client {
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
                     // TODO: change the callback given to self.recv_msg
-                    self.recv_msg(read_stream, |x| println!("{:#?}", x));
+                    self.recv_msg(read_stream, |x: String| {
+                        println!("{:#?}", x)
+                    });
                     self.increment_msg_id(conn_msg.msg_id);
                 }
             };
@@ -152,7 +155,7 @@ impl Client {
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
                 // TODO: change the callback given to self.recv_msg
-                self.recv_msg(read_stream, |x| println!("{:?}", x));
+                self.recv_msg(read_stream, |x: String| println!("{:?}", x));
                 // send the client our id and address so they can add us to
                 // their directory
                 let conn_msg = ConnectionMsg {
@@ -187,20 +190,19 @@ impl Client {
         Ok(())
     }
 
+    // TODO: remove 'static so that callbacks don't have to drop T manually
+    // TODO: make the right callback that we want for handling messages
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
-    pub(crate) fn recv_msg(
+    pub(crate) fn recv_msg<T: DeserializeOwned + 'static>(
         &mut self,
         mut reader: BufReader<ReadHalf<TcpStream>>,
-        callback: fn(String) -> (), // TODO: fix signature
+        callback: fn(T) -> (),
     ) {
-        // NOTE: may need to do tokio::runtime::Runtime::spawn or
-        // tokio::runtime::Handle::spawn in order to actually place spawned
-        // task into an executor
         tokio::spawn(async move {
             let mut buffer = Vec::new();
             loop {
-                let s: String =
+                let s: T =
                     network::read_msg(&mut reader, &mut buffer).await.unwrap();
                 callback(s);
             }

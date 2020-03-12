@@ -32,15 +32,25 @@ impl DataFrame {
     /// Creates a new `DataFrame` from the given file, only reads `len` bytes
     /// starting at the given byte offset `from`.
     pub fn from_sor(file_name: String, from: usize, len: usize) -> Self {
-        let mut schema = Schema::from(infer_schema_from_file(file_name.clone()));
+        let mut schema =
+            Schema::from(infer_schema_from_file(file_name.clone()));
         let n_threads = num_cpus::get();
-        let data = from_file(file_name, schema.schema.clone(), from, len, n_threads);
+        let data =
+            from_file(file_name, schema.schema.clone(), from, len, n_threads);
         if data.get(0).is_some() {
             match &data[0] {
-                Column::Bool(x) => x.iter().for_each(|_| schema.add_row(None).unwrap()),
-                Column::Int(x) => x.iter().for_each(|_| schema.add_row(None).unwrap()),
-                Column::Float(x) => x.iter().for_each(|_| schema.add_row(None).unwrap()),
-                Column::String(x) => x.iter().for_each(|_| schema.add_row(None).unwrap()),
+                Column::Bool(x) => {
+                    x.iter().for_each(|_| schema.add_row(None).unwrap())
+                }
+                Column::Int(x) => {
+                    x.iter().for_each(|_| schema.add_row(None).unwrap())
+                }
+                Column::Float(x) => {
+                    x.iter().for_each(|_| schema.add_row(None).unwrap())
+                }
+                Column::String(x) => {
+                    x.iter().for_each(|_| schema.add_row(None).unwrap())
+                }
             };
         }
         DataFrame {
