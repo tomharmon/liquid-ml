@@ -24,5 +24,5 @@ pub enum LiquidError {
     #[error("Trying to connect at an Id that already exists")]
     ReconnectionError,
     #[error("Key is not present at this node")]
-    NotPresent
+    NotPresent,
 }

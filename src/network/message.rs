@@ -1,6 +1,5 @@
 //! Defines messages used to communicate with the network of nodes over TCP.
 use serde::{Deserialize, Serialize};
-use crate::kv::{Key, Value};
 
 /// A registration message sent by the `Server` to new `Client`s once they
 /// connect to the `Server` so that they know which other `Client`s are
@@ -36,15 +35,4 @@ pub(crate) struct Message<T> {
     pub(crate) sender: usize,
     pub(crate) target: usize,
     pub(crate) msg: T,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct KVRequest {
-    pub(crate) key: Key
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct KVResponse {
-    pub(crate) key: Key,
-    pub(crate) data: Value
 }

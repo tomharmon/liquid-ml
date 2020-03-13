@@ -3,16 +3,17 @@
 
 use crate::error::LiquidError;
 use crate::network;
-use crate::network::message::{ConnectionMsg, RegistrationMsg, Message, KVResponse};
+use crate::network::message::{ConnectionMsg, Message, RegistrationMsg};
 use crate::network::Connection;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use tokio::io::{split, BufReader, BufWriter, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// Represents a Client node in a distributed system.
+/// Where Type T is the types of messages that can be sent between clients
 #[derive(Debug)]
 pub struct Client<T> {
     /// The `id` of this `Client`
@@ -33,14 +34,14 @@ pub struct Client<T> {
     /// A Reciever whch acts as a queue for messages
     pub(crate) receiver: Receiver<Message<T>>,
     ///
-    sender: Sender<Message<T>>
+    sender: Sender<Message<T>>,
 }
 
 /// Methods which allow a `Client` node to start up and connect to a distributed
 /// system, listen for new connections from other new `Client`s, send
 /// directed communication to other `Client`s, and respond to messages from
 /// other `Client`s
-impl<RT: Send + DeserializeOwned + 'static> Client<RT> {
+impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
     ///
@@ -128,7 +129,7 @@ impl<RT: Send + DeserializeOwned + 'static> Client<RT> {
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
                     // TODO: change the callback given to self.recv_msg
-                    self.recv_msg(read_stream);//, |x: String| { println!("{:#?}", x) });
+                    self.recv_msg(read_stream); //, |x: String| { println!("{:#?}", x) });
                     self.increment_msg_id(conn_msg.msg_id);
                 }
             };
@@ -163,9 +164,9 @@ impl<RT: Send + DeserializeOwned + 'static> Client<RT> {
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
                 // TODO: change the callback given to self.recv_msg
-                self.recv_msg(read_stream);//, |x: String| println!("{:?}", x));
-                // send the client our id and address so they can add us to
-                // their directory
+                self.recv_msg(read_stream); //, |x: String| println!("{:?}", x));
+                                            // send the client our id and address so they can add us to
+                                            // their directory
                 let conn_msg = ConnectionMsg {
                     my_id: self.id,
                     msg_id: self.msg_id,
@@ -188,10 +189,10 @@ impl<RT: Send + DeserializeOwned + 'static> Client<RT> {
     }
 
     /// Send the given `message` to a client with the given `target_id`.
-    pub async fn send_msg<T: Serialize>(
+    pub async fn send_msg(
         &mut self,
         target_id: usize,
-        message: &T,
+        message: &RT,
     ) -> Result<(), LiquidError> {
         network::send_msg(target_id, message, &mut self.directory).await?;
         self.msg_id += 1;
@@ -204,7 +205,7 @@ impl<RT: Send + DeserializeOwned + 'static> Client<RT> {
     /// handle responding to them.
     pub(crate) fn recv_msg(
         &mut self,
-        mut reader: BufReader<ReadHalf<TcpStream>>
+        mut reader: BufReader<ReadHalf<TcpStream>>,
     ) {
         let new_sender = self.sender.clone();
         tokio::spawn(async move {
@@ -212,7 +213,7 @@ impl<RT: Send + DeserializeOwned + 'static> Client<RT> {
             loop {
                 let s: Message<RT> =
                     network::read_msg(&mut reader, &mut buffer).await.unwrap();
-                new_sender.send(s);
+                new_sender.send(s).unwrap();
             }
         });
     }
@@ -226,5 +227,3 @@ impl<RT: Send + DeserializeOwned + 'static> Client<RT> {
         self.id = std::cmp::max(self.id, id) + 1;
     }
 }
-
-
