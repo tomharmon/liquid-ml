@@ -6,21 +6,20 @@ use crate::schema::Schema;
 use sorer::dataframe::Data;
 use sorer::schema::DataType;
 
-/// Represents a single row in a [`DataFrame`](::crate::dataframe::DataFrame)
+/// Represents a single row in a `DataFrame`
 pub struct Row {
-    /// A clone of the [`Schema`](::crate::schema::Schema) of the
-    /// [`DataFrame`](::crate::dataframe::DataFrame) this `Row` is from.
+    /// A clone of the `Schema` of the `DataFrame` this `Row` is from.
     pub(crate) schema: Vec<DataType>,
     /// The data of this `Row` as boxed values.
     pub(crate) data: Vec<Data>,
-    /// The offset of this `Row` in the `DataFrame`, should ideally be set for the row.
+    /// The offset of this `Row` in the `DataFrame`
     idx: Option<usize>,
 }
 
 /// Functions for creating, mutating, and getting data from `Row`s.
 impl Row {
     /// Constructs a new `Row` with the given `Schema` and fills it with
-    /// [`Null`](sorer::dataframe::Data) values.
+    /// `Null` values.
     pub fn new(schema: &Schema) -> Self {
         let mut data: Vec<Data> = Vec::new();
         for _ in &schema.schema {
@@ -34,8 +33,9 @@ impl Row {
         }
     }
 
-    /// Set a field in the row to have the given `data`. The `DataType` at the
-    /// `col_idx` must be an `Int` or will return an `TypeMismatch` error.
+    /// Sets the field in this `Row` at the given `col_idx` to have the given
+    /// `data`. The `DataType` at the `col_idx` must be an `Int` or it will
+    /// return a `TypeMismatch` error.
     pub fn set_int(
         &mut self,
         col_idx: usize,
@@ -53,8 +53,9 @@ impl Row {
         }
     }
 
-    /// Set a field in the row to have the given `data`. The `DataType` at the
-    /// `col_idx` must be a `Float` or will return an `TypeMismatch` error.
+    /// Sets the field in this `Row` at the given `col_idx` to have the given
+    /// `data`. The `DataType` at the `col_idx` must be a `Float` or it will
+    /// return a `TypeMismatch` error.
     pub fn set_float(
         &mut self,
         col_idx: usize,
@@ -74,8 +75,9 @@ impl Row {
         }
     }
 
-    /// Set a field in the row to have the given `data`. The `DataType` at the
-    /// `col_idx` must be a `Bool` or will return an `TypeMismatch` error.
+    /// Sets the field in this `Row` at the given `col_idx` to have the given
+    /// `data`. The `DataType` at the `col_idx` must be a `Bool` or it will
+    /// return a `TypeMismatch` error.
     pub fn set_bool(
         &mut self,
         col_idx: usize,
@@ -93,8 +95,9 @@ impl Row {
         }
     }
 
-    /// Set a field in the row to have the given `data`. The `DataType` at the
-    /// `col_idx` must be a `String` or will return an `TypeMismatch` error.
+    /// Sets the field in this `Row` at the given `col_idx` to have the given
+    /// `data`. The `DataType` at the `col_idx` must be a `String` or it will
+    /// return a `TypeMismatch` error.
     pub fn set_string(
         &mut self,
         col_idx: usize,
@@ -115,7 +118,7 @@ impl Row {
         }
     }
 
-    /// Set an field in the row to `Null`.
+    /// Sets the field in this `Row` at the given `col_idx` to be `Null`.
     pub fn set_null(&mut self, col_idx: usize) -> Result<(), LiquidError> {
         match self.data.get(col_idx) {
             Some(_) => {

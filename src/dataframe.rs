@@ -1,9 +1,12 @@
-//! A module for creating and manipulating
-//! [`DataFrame`s](::crate::dataframe::DataFrame). A `DataFrame` can be created
-//! from a [`SoR`](sorer) file, by adding [`Column`s](sorer::dataframe::Column),
-//! or by adding [`Row`s](::crate::row::Row). You may implement the
-//! [`Rower`](::crate::rower::Rower) trait to perform `map` operations on
-//! a `DataFrame`.
+//! A module for creating and manipulating `DataFrame`s. A `DataFrame` can be
+//! created from a [`SoR`](https://docs.rs/sorer/0.1.0/sorer/) file,
+//! or by adding `Column`s or `Row`s manually.
+//!
+//! The `DataFrame` is lightly inpsired by those found in `R` or `pandas`, and
+//! supports optionally named columns and rows. You may analyze the data in a
+//! `DataFrame` in a horizontally scalable manner across many machines by
+//! implementing the `Rower` trait to perform `map` or `filter` operations on a
+//! `DataFrame`.
 
 use crate::error::LiquidError;
 use crate::row::Row;
@@ -15,19 +18,18 @@ use sorer::schema::{infer_schema_from_file, DataType};
 
 use crossbeam_utils::thread;
 
-/// Represents a DataFrame which contains
-/// [columnar](sorer::dataframe::Column) `Data` and a
-/// [Schema](::crate::schema::Schema).
+/// Represents a DataFrame which contains `Data` stored in a columnar format
+/// and a well-defined `Schema`
 pub struct DataFrame {
-    /// The [Schema](::crate::schema::Schema) of this DataFrame
+    /// The `Schema` of this `DataFrame`
     pub schema: Schema,
-    /// The [columnar](::crate::dataframe::Column) data of this DataFrame.
+    /// The data of this DataFrame, in columnar format
     pub data: Vec<Column>,
     /// Number of threads for this computer
     pub n_threads: usize,
 }
 
-/// Traits defining a `DataFrame` inspired by those used in `pandas` and `R`.
+/// An interface for a `DataFrame`, inspired by those used in `pandas` and `R`.
 impl DataFrame {
     /// Creates a new `DataFrame` from the given file, only reads `len` bytes
     /// starting at the given byte offset `from`.
@@ -37,6 +39,8 @@ impl DataFrame {
         let n_threads = num_cpus::get();
         let data =
             from_file(file_name, schema.schema.clone(), from, len, n_threads);
+        // required so that the schema in this `DataFrame` actually has the
+        // correct number of rows.
         if data.get(0).is_some() {
             match &data[0] {
                 Column::Bool(x) => {
@@ -60,11 +64,12 @@ impl DataFrame {
         }
     }
 
-    /// Creates an empty `DataFrame` from the given
-    /// [`Schema`](::crate::schema::Schema).
-    pub fn new(s: &Schema) -> Self {
+    /// Creates an empty `DataFrame` from the given `Schema`. The `DataFrame`
+    /// is created with no rows, but the names of the columns in the given
+    /// `schema` are cloned.
+    pub fn new(schema: &Schema) -> Self {
         let mut data = Vec::new();
-        for data_type in &s.schema {
+        for data_type in &schema.schema {
             match data_type {
                 DataType::Bool => data.push(Column::Bool(Vec::new())),
                 DataType::Int => data.push(Column::Int(Vec::new())),
@@ -73,8 +78,8 @@ impl DataFrame {
             }
         }
         let schema = Schema {
-            schema: s.schema.clone(),
-            col_names: s.col_names.clone(),
+            schema: schema.schema.clone(),
+            col_names: schema.col_names.clone(),
             row_names: Vec::new(),
         };
 
@@ -90,7 +95,8 @@ impl DataFrame {
         &self.schema
     }
 
-    /// Adds a [`Column`](sorer::dataframe::Column) to this `DataFrame`.
+    /// Adds a `Column` to this `DataFrame` with an optional `name`. Returns
+    /// a `LiquidError::NameAlreadyExists` if the given `name` is not unique.
     pub fn add_column(
         &mut self,
         col: Column,
@@ -104,8 +110,7 @@ impl DataFrame {
         }
     }
 
-    /// Get the [`Data`](sorer::dataframe::Data) at the given `col_idx, row_idx`
-    /// offsets.
+    /// Get the `Data` at the given `col_idx`, `row_idx` offsets.
     pub fn get(
         &self,
         col_idx: usize,
@@ -204,10 +209,6 @@ impl DataFrame {
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
     /// to be changed to the given `data`.
-    ///
-    /// NOTE: do we really want to return result types for all the setters?
-    /// If someone is dumb enough to get index out of bounds error, should
-    /// they be helped?
     pub fn set_bool(
         &mut self,
         col_idx: usize,
@@ -238,7 +239,7 @@ impl DataFrame {
         match self.schema.schema.get(col_idx) {
             Some(DataType::String) => match self.data.get_mut(col_idx) {
                 Some(Column::String(col)) => match col.get_mut(row_idx) {
-                    Some(d) => Ok(*d = Some(data.clone())),
+                    Some(d) => Ok(*d = Some(data)),
                     None => Err(LiquidError::RowIndexOutOfBounds),
                 },
                 None => Err(LiquidError::ColIndexOutOfBounds),
@@ -248,29 +249,31 @@ impl DataFrame {
         }
     }
 
-    /// Set the fields of the given `Row` struct with values from the row at
-    /// the given `idx`.  If the row is not form the same schema as this
-    /// `DataFrame`, results are undefined.
+    /// Set the fields of the given `Row` struct with values from this
+    /// `DataFrame` at the given `row_index`.
+    ///
+    /// If the `row` does not have the same schema as this `DataFrame`, a
+    /// `LiquidError::TypeMismatch` error will be returned.
     pub fn fill_row(
         &self,
-        idx: usize,
+        row_index: usize,
         row: &mut Row,
     ) -> Result<(), LiquidError> {
         for (c_idx, col) in self.data.iter().enumerate() {
             match col {
-                Column::Int(c) => match c.get(idx).unwrap() {
+                Column::Int(c) => match c.get(row_index).unwrap() {
                     Some(x) => row.set_int(c_idx, *x)?,
                     None => row.set_null(c_idx)?,
                 },
-                Column::Float(c) => match c.get(idx).unwrap() {
+                Column::Float(c) => match c.get(row_index).unwrap() {
                     Some(x) => row.set_float(c_idx, *x)?,
                     None => row.set_null(c_idx)?,
                 },
-                Column::Bool(c) => match c.get(idx).unwrap() {
+                Column::Bool(c) => match c.get(row_index).unwrap() {
                     Some(x) => row.set_bool(c_idx, *x)?,
                     None => row.set_null(c_idx)?,
                 },
-                Column::String(c) => match c.get(idx).unwrap() {
+                Column::String(c) => match c.get(row_index).unwrap() {
                     Some(x) => row.set_string(c_idx, x.clone())?,
                     None => row.set_null(c_idx)?,
                 },
@@ -279,12 +282,15 @@ impl DataFrame {
         Ok(())
     }
 
-    /// Add a `Row` at the end of this `DataFrame`. Panics if the row has
-    /// a `Schema` different than the `Schema` for this `DataFrame`.
-    pub fn add_row(&mut self, row: &Row) {
+    /// Add a `Row` at the end of this `DataFrame`.
+    ///
+    /// If the `row` does not have the same schema as this `DataFrame`, a
+    /// `LiquidError::TypeMismatch` error will be returned.
+    pub fn add_row(&mut self, row: &Row) -> Result<(), LiquidError> {
         if row.schema != self.schema.schema {
-            panic!("Err incompatible row")
+            return Err(LiquidError::TypeMismatch);
         }
+
         for (data, column) in row.data.iter().zip(self.data.iter_mut()) {
             match (data, column) {
                 (Data::Int(n), Column::Int(l)) => l.push(Some(*n)),
@@ -295,19 +301,24 @@ impl DataFrame {
                 (Data::Null, Column::Float(l)) => l.push(None),
                 (Data::Null, Column::Bool(l)) => l.push(None),
                 (Data::Null, Column::String(l)) => l.push(None),
-                (_, _) => panic!("Err: incampatible row"),
+                (_, _) => unreachable!("Something is horribly wrong"),
             };
         }
+
         self.schema.row_names.push(None);
+        Ok(())
     }
 
-    /// Applies the given `rower` to every row in this `DataFrame`.
+    /// Applies the given `rower` sequentially to every row in this `DataFrame`.
     pub fn map<T: Rower>(&self, rower: T) -> T {
         map_helper(self, rower, 0, self.n_rows())
     }
 
     // TODO: There is a division remainder error (we might be skipping some rows in the last
     // thread) FIX THIS
+    /// Applies the given `rower` to every row in this `DataFrame` in parallel
+    /// using `self.n_threads` (which by default is set to the number of
+    /// threads available on the machine this `DataFrame` runs on).
     pub fn pmap<T: Rower + Clone + Send>(&self, rower: T) -> T {
         let rowers = vec![rower; self.n_threads];
         let mut new_rowers = Vec::new();
@@ -333,8 +344,8 @@ impl DataFrame {
             .fold(acc, |prev, x| x.join(&prev))
     }
 
-    /// Create a new dataframe, constructed from rows for which the given Rower
-    /// returned true from its accept method.
+    /// Create a new `DataFrame`, constructed from rows for which the given
+    /// `Rower` returned true from its `accept` method.
     pub fn filter<T: Rower>(&self, r: &mut T) -> Self {
         let mut df = DataFrame::new(&self.schema);
         let mut row = Row::new(&self.schema);
@@ -342,7 +353,7 @@ impl DataFrame {
         for i in 0..self.n_rows() {
             self.fill_row(i, &mut row).unwrap();
             if r.visit(&row) {
-                df.add_row(&row);
+                df.add_row(&row).unwrap();
             }
         }
 
@@ -418,7 +429,7 @@ mod tests {
             } else {
                 r.set_int(0, i).unwrap();
             }
-            df.add_row(&r);
+            df.add_row(&r).unwrap();
         }
 
         df
