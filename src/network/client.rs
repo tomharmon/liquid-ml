@@ -3,17 +3,18 @@
 
 use crate::error::LiquidError;
 use crate::network;
-use crate::network::message::{ConnectionMsg, RegistrationMsg};
+use crate::network::message::{ConnectionMsg, RegistrationMsg, Message, KVResponse};
 use crate::network::Connection;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{split, BufReader, BufWriter, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// Represents a Client node in a distributed system.
 #[derive(Debug)]
-pub struct Client {
+pub struct Client<T> {
     /// The `id` of this `Client`
     pub id: usize,
     /// The `address` of this `Client`
@@ -29,13 +30,17 @@ pub struct Client {
     ),
     /// A `TcpListener` which listens for connections from new `Client`s
     pub listener: TcpListener,
+    /// A Reciever whch acts as a queue for messages
+    pub(crate) receiver: Receiver<Message<T>>,
+    ///
+    sender: Sender<Message<T>>
 }
 
 /// Methods which allow a `Client` node to start up and connect to a distributed
 /// system, listen for new connections from other new `Client`s, send
 /// directed communication to other `Client`s, and respond to messages from
 /// other `Client`s
-impl Client {
+impl<RT: Send + DeserializeOwned + 'static> Client<RT> {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
     ///
@@ -55,7 +60,7 @@ impl Client {
         let (reader, writer) = split(server_stream);
         let mut read_stream = BufReader::new(reader);
         let mut write_stream = BufWriter::new(writer);
-        // Tell the server our addresss
+        // Tell the server our address
         let mut directory = HashMap::new();
         directory
             .insert(
@@ -74,7 +79,7 @@ impl Client {
             &mut Vec::new(),
         )
         .await?;
-
+        let (sender, receiver) = channel::<Message<RT>>();
         // Initialize ourself
         let mut c = Client {
             id: reg.assigned_id,
@@ -83,6 +88,8 @@ impl Client {
             directory,
             server: (read_stream, write_stream),
             listener: TcpListener::bind(my_addr.clone()).await?,
+            receiver,
+            sender,
         };
 
         // Connect to all the clients
@@ -121,16 +128,14 @@ impl Client {
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
                     // TODO: change the callback given to self.recv_msg
-                    self.recv_msg(read_stream, |x: String| {
-                        println!("{:#?}", x)
-                    });
+                    self.recv_msg(read_stream);//, |x: String| { println!("{:#?}", x) });
                     self.increment_msg_id(conn_msg.msg_id);
                 }
             };
         }
     }
 
-    /// Connect to a running `Client` with the given `(id, IP:Port)` information.
+    /// Connect to a running `Client` with the given `(id, IP:Port)` informa)tion.
     /// After connecting, add the `Connection` to the other `Client` to this
     /// `Client.directory` for sending later messages to the `Client`. Finally,
     /// spawn a Tokio task to read further messages from the `Client` and
@@ -158,7 +163,7 @@ impl Client {
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
                 // TODO: change the callback given to self.recv_msg
-                self.recv_msg(read_stream, |x: String| println!("{:?}", x));
+                self.recv_msg(read_stream);//, |x: String| println!("{:?}", x));
                 // send the client our id and address so they can add us to
                 // their directory
                 let conn_msg = ConnectionMsg {
@@ -197,22 +202,29 @@ impl Client {
     // TODO: make the right callback that we want for handling messages
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
-    pub(crate) fn recv_msg<T: DeserializeOwned + 'static>(
+    pub(crate) fn recv_msg(
         &mut self,
-        mut reader: BufReader<ReadHalf<TcpStream>>,
-        callback: fn(T) -> (),
+        mut reader: BufReader<ReadHalf<TcpStream>>
     ) {
+        let new_sender = self.sender.clone();
         tokio::spawn(async move {
             let mut buffer = Vec::new();
             loop {
-                let s: T =
+                let s: Message<RT> =
                     network::read_msg(&mut reader, &mut buffer).await.unwrap();
-                callback(s);
+                new_sender.send(s);
             }
         });
+    }
+
+    /// Process the next message in this client's message queue
+    pub(crate) fn process_next(&mut self) -> Message<RT> {
+        self.receiver.recv().unwrap()
     }
 
     fn increment_msg_id(&mut self, id: usize) {
         self.id = std::cmp::max(self.id, id) + 1;
     }
 }
+
+

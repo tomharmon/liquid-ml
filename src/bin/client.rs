@@ -6,7 +6,7 @@ use std::env;
 async fn main() -> Result<(), LiquidError> {
     let args: Vec<String> = env::args().collect();
     let mut c =
-        Client::new("127.0.0.1:9000".to_string(), args[1].clone()).await?;
+        Client::<String>::new("127.0.0.1:9000".to_string(), args[1].clone()).await?;
 
     let jh = tokio::spawn(async move {
         c.accept_new_connections().await.unwrap();

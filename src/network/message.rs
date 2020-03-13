@@ -36,3 +36,14 @@ pub(crate) struct Message<T> {
     pub(crate) target: usize,
     pub(crate) msg: T,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub(crate) struct KVRequest {
+    pub(crate) key: String
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KVResponse {
+    pub(crate) key: String,
+    pub(crate) data: Vec<u8>
+}
