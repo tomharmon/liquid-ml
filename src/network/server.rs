@@ -1,7 +1,10 @@
+//! Represents a server node in a distributed system, with implementations
+//! provided for `LiquidML` use cases.
+
 use crate::error::LiquidError;
+use crate::network;
 use crate::network::message::*;
-use crate::network::network;
-use crate::network::network::Connection;
+use crate::network::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{split, BufReader, BufWriter};

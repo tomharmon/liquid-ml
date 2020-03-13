@@ -1,3 +1,4 @@
+//! Defines messages used to communicate with the network of nodes over TCP.
 use serde::{Deserialize, Serialize};
 
 /// A registration message sent by the `Server` to new `Client`s once they
