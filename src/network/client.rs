@@ -219,7 +219,7 @@ impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
     }
 
     /// Process the next message in this client's message queue
-    pub(crate) fn process_next(&mut self) -> Message<RT> {
+    pub(crate) fn process_message(&mut self) -> Message<RT> {
         self.receiver.recv().unwrap()
     }
 
