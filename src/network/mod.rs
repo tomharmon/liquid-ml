@@ -4,6 +4,7 @@ use crate::error::LiquidError;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::net::Shutdown;
 use tokio::io::{
     AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, ReadHalf, WriteHalf,
 };
@@ -46,6 +47,22 @@ pub(crate) async fn send_msg<T: Serialize>(
             Ok(())
         }
     }
+}
+
+pub(crate) fn existing_conn_err(
+    read_stream: BufReader<ReadHalf<TcpStream>>,
+    write_stream: BufWriter<WriteHalf<TcpStream>>,
+) -> Result<(), LiquidError> {
+    // Already have an open connection to this client, shut
+    // down the one we just created.
+    let reader = read_stream.into_inner();
+    let stream = reader.unsplit(write_stream.into_inner());
+    stream.shutdown(Shutdown::Both);
+    return Err(LiquidError::ReconnectionError);
+}
+
+pub(crate) fn increment_msg_id(&mut cur_id: usize, id: usize) {
+    id = std::cmp::max(cur_id, id) + 1;
 }
 
 pub mod client;

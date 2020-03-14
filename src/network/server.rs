@@ -4,7 +4,7 @@
 use crate::error::LiquidError;
 use crate::network;
 use crate::network::message::*;
-use crate::network::Connection;
+use crate::network::{Connection, existing_conn_err};
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{split, BufReader, BufWriter};
@@ -53,12 +53,12 @@ impl Server {
             let mut read_stream = BufReader::new(reader);
             let write_stream = BufWriter::new(writer);
             // Read the IP:Port from the client
-            let address: String =
+            let conn_msg: Message<ConnectionMsg> =
                 network::read_msg(&mut read_stream, &mut buffer).await?;
 
             // Represents the connection from this Server to the new Client
             let conn = Connection {
-                address,
+                address: conn_msg.msg.my_address,
                 write_stream,
             };
             let assigned_id = self.directory.len();
@@ -66,16 +66,21 @@ impl Server {
             // TODO: Close the newly created connections in the error cases
             // Add the connection with the new client to this directory
             match self.directory.insert(assigned_id, conn) {
-                Some(_) => return Err(LiquidError::ReconnectionError),
+                Some(_) => {
+                    conn = self.directory.remove(j)
+                    return existing_conn_err(read_stream, self.directory.get_mut(&assigned_id).unwrap().write_stream),
                 None => {
-                    let reg_msg = RegistrationMsg {
-                        assigned_id,
+                    let reg_msg = Message::<RegistrationMsg> {
+                        sender_id: 0,
+                        target_id: assigned_id,
                         msg_id: self.msg_id,
-                        clients: self
-                            .directory
-                            .iter()
-                            .map(|(k, v)| (*k, v.address.clone()))
-                            .collect(),
+                        msg: RegistrationMsg {
+                            clients: self
+                                .directory
+                                .iter()
+                                .map(|(k, v)| (*k, v.address.clone()))
+                                .collect(),
+                        },
                     };
                     self.send_msg(assigned_id, &reg_msg).await?;
                 }

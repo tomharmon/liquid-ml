@@ -4,7 +4,7 @@
 use crate::error::LiquidError;
 use crate::network;
 use crate::network::message::{ConnectionMsg, Message, RegistrationMsg};
-use crate::network::Connection;
+use crate::network::{Connection, existing_conn_err, increment_msg_id};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -12,8 +12,8 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use tokio::io::{split, BufReader, BufWriter, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
-/// Represents a Client node in a distributed system.
-/// Where Type T is the types of messages that can be sent between clients
+/// Represents a `Client` node in a distributed system, where Type T is the types
+/// of messages that can be sent between `Client`s
 #[derive(Debug)]
 pub struct Client<T> {
     /// The `id` of this `Client`
@@ -33,15 +33,16 @@ pub struct Client<T> {
     pub listener: TcpListener,
     /// A Reciever whch acts as a queue for messages
     pub(crate) receiver: Receiver<Message<T>>,
-    ///
+    /// Used to pass `Message`s to a 
     sender: Sender<Message<T>>,
 }
 
+// TODO: remove 'static
 /// Methods which allow a `Client` node to start up and connect to a distributed
 /// system, listen for new connections from other new `Client`s, send
 /// directed communication to other `Client`s, and respond to messages from
 /// other `Client`s
-impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
+impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
     ///
@@ -75,15 +76,12 @@ impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
         network::send_msg(0, &my_addr, &mut directory).await?;
         write_stream = directory.remove(&0).unwrap().write_stream;
         // The Server responds w addresses of all currently connected clients
-        let reg = network::read_msg::<RegistrationMsg>(
-            &mut read_stream,
-            &mut Vec::new(),
-        )
-        .await?;
-        let (sender, receiver) = channel::<Message<RT>>();
+        let reg: Message<RegistrationMsg> =
+            network::read_msg(&mut read_stream, &mut Vec::new()).await?;
         // Initialize ourself
+        let (sender, receiver) = channel::<Message<RT>>();
         let mut c = Client {
-            id: reg.assigned_id,
+            id: reg.target_id,
             address: my_addr.clone(),
             msg_id: reg.msg_id + 1,
             directory,
@@ -94,9 +92,12 @@ impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
         };
 
         // Connect to all the clients
-        for a in reg.clients {
+        for a in reg.msg.clients {
             c.connect(a).await?;
         }
+
+        // TODO: Listen for further messages from the Server, e.g. `Kill` messages
+        //self.recv_msg();;
 
         Ok(c)
     }
@@ -115,24 +116,24 @@ impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
             let mut read_stream = BufReader::new(reader);
             let write_stream = BufWriter::new(writer);
             // Read the ConnectionMsg from the new client
-            let conn_msg: ConnectionMsg =
+            let conn_msg: Message<ConnectionMsg> =
                 network::read_msg(&mut read_stream, &mut buffer).await?;
-            // Add the connection with the new client to this directory
-            let conn = Connection {
-                address: conn_msg.my_address,
-                write_stream,
-            };
-            // TODO: Close the newly created connections in the error cases
-            match self.directory.insert(conn_msg.my_id, conn) {
-                Some(_) => return Err(LiquidError::ReconnectionError),
-                None => {
+            // Make sure we don't have an existing connection to this client
+            match self.directory.contains_key(&conn_msg.target_id) {
+                true => return existing_conn_err(read_stream, write_stream),
+                false => {
+                    // Add the connection with the new client to this directory
+                    let conn = Connection {
+                        address: conn_msg.msg.my_address,
+                        write_stream,
+                    };
+                    self.directory.insert(conn_msg.target_id, conn);
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
-                    // TODO: change the callback given to self.recv_msg
-                    self.recv_msg(read_stream); //, |x: String| { println!("{:#?}", x) });
-                    self.increment_msg_id(conn_msg.msg_id);
+                    self.recv_msg(read_stream);
+                    increment_msg_id(self.msg_id, conn_msg.msg_id);
                 }
-            };
+            }
         }
     }
 
@@ -158,24 +159,28 @@ impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
         };
 
         // Add the connection to our directory of connections to other clients
+        match self.directory.contains_key(&c)
         match self.directory.insert(client.0, conn) {
-            Some(_) => Err(LiquidError::ReconnectionError),
+            Some(_) => existing_conn_err(read_stream, write_stream),
             None => {
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
-                // TODO: change the callback given to self.recv_msg
-                self.recv_msg(read_stream); //, |x: String| println!("{:?}", x));
-                                            // send the client our id and address so they can add us to
-                                            // their directory
-                let conn_msg = ConnectionMsg {
-                    my_id: self.id,
+                self.recv_msg(read_stream);
+                // send the client our id and address so they can add us to
+                // their directory
+                let conn_msg = Message::<ConnectionMsg> {
                     msg_id: self.msg_id,
-                    my_address: self.address.clone(),
+                    sender_id: self.id,
+                    target_id: client.0,
+                    msg: ConnectionMsg {
+                        my_address: self.address.clone(),
+                    },
                 };
                 network::send_msg(client.0, &conn_msg, &mut self.directory)
                     .await?;
 
                 println!("Id: {:#?} at address: {:#?} connected to id: {:#?} at address: {:#?}", self.id, self.address, client.0, client.1);
+                // for testing/demonstration purposes
                 network::send_msg(
                     client.0,
                     &"Hi".to_string(),
@@ -199,8 +204,9 @@ impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
         Ok(())
     }
 
-    // TODO: remove 'static so that callbacks don't have to drop T manually
     // TODO: make the right callback that we want for handling messages
+    // or better clarify docs on how the client uses channels and fix our use
+    // of the channel if not done yet
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
     pub(crate) fn recv_msg(
@@ -221,9 +227,5 @@ impl<RT: Send + DeserializeOwned + 'static + Serialize> Client<RT> {
     /// Process the next message in this client's message queue
     pub(crate) fn process_message(&mut self) -> Message<RT> {
         self.receiver.recv().unwrap()
-    }
-
-    fn increment_msg_id(&mut self, id: usize) {
-        self.id = std::cmp::max(self.id, id) + 1;
     }
 }
