@@ -39,14 +39,19 @@ pub(crate) async fn send_msg<T: Serialize>(
 ) -> Result<(), LiquidError> {
     match directory.get_mut(&target_id) {
         None => Err(LiquidError::UnknownId),
-        Some(conn) => {
-            let msg = bincode::serialize(message)?;
-            conn.write_stream.write_u64(msg.len() as u64).await?;
-            conn.write_stream.write_all(&msg).await?;
-            conn.write_stream.flush().await?;
-            Ok(())
-        }
+        Some(conn) => send_msg_helper(&mut conn.write_stream, message).await,
     }
+}
+
+pub(crate) async fn send_msg_helper<T: Serialize>(
+    write_stream: &mut BufWriter<WriteHalf<TcpStream>>,
+    message: &T,
+) -> Result<(), LiquidError> {
+    let msg = bincode::serialize(message)?;
+    write_stream.write_u64(msg.len() as u64).await?;
+    write_stream.write_all(&msg).await?;
+    write_stream.flush().await?;
+    Ok(())
 }
 
 pub(crate) fn existing_conn_err(
@@ -57,12 +62,12 @@ pub(crate) fn existing_conn_err(
     // down the one we just created.
     let reader = read_stream.into_inner();
     let stream = reader.unsplit(write_stream.into_inner());
-    stream.shutdown(Shutdown::Both);
+    stream.shutdown(Shutdown::Both)?;
     return Err(LiquidError::ReconnectionError);
 }
 
-pub(crate) fn increment_msg_id(&mut cur_id: usize, id: usize) {
-    id = std::cmp::max(cur_id, id) + 1;
+pub(crate) fn increment_msg_id(cur_id: usize, id: usize) -> usize {
+    std::cmp::max(cur_id, id) + 1
 }
 
 pub mod client;

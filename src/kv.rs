@@ -76,7 +76,7 @@ impl KVStore {
 
     /// Internal helper to process messages from the queue
     async fn process_message(&mut self) -> Result<(), LiquidError> {
-        let msg = self.network.process_message();
+        let _msg = self.network.process_message();
         unimplemented!()
         // This function will read and process a message from the recieve queue
         //

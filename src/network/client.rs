@@ -4,7 +4,7 @@
 use crate::error::LiquidError;
 use crate::network;
 use crate::network::message::{ConnectionMsg, Message, RegistrationMsg};
-use crate::network::{Connection, existing_conn_err, increment_msg_id};
+use crate::network::{existing_conn_err, increment_msg_id, Connection};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ pub struct Client<T> {
     pub listener: TcpListener,
     /// A Reciever whch acts as a queue for messages
     pub(crate) receiver: Receiver<Message<T>>,
-    /// Used to pass `Message`s to a 
+    ///
     sender: Sender<Message<T>>,
 }
 
@@ -61,21 +61,8 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
         let server_stream = TcpStream::connect(server_addr.clone()).await?;
         let (reader, writer) = split(server_stream);
         let mut read_stream = BufReader::new(reader);
-        let mut write_stream = BufWriter::new(writer);
-        // Tell the server our address
-        let mut directory = HashMap::new();
-        directory
-            .insert(
-                0,
-                Connection {
-                    address: server_addr,
-                    write_stream,
-                },
-            )
-            .unwrap();
-        network::send_msg(0, &my_addr, &mut directory).await?;
-        write_stream = directory.remove(&0).unwrap().write_stream;
-        // The Server responds w addresses of all currently connected clients
+        let write_stream = BufWriter::new(writer);
+        // The Server sends the addresses of all currently connected clients
         let reg: Message<RegistrationMsg> =
             network::read_msg(&mut read_stream, &mut Vec::new()).await?;
         // Initialize ourself
@@ -84,7 +71,7 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
             id: reg.target_id,
             address: my_addr.clone(),
             msg_id: reg.msg_id + 1,
-            directory,
+            directory: HashMap::new(),
             server: (read_stream, write_stream),
             listener: TcpListener::bind(my_addr.clone()).await?,
             receiver,
@@ -118,6 +105,7 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
             // Read the ConnectionMsg from the new client
             let conn_msg: Message<ConnectionMsg> =
                 network::read_msg(&mut read_stream, &mut buffer).await?;
+            self.msg_id = increment_msg_id(self.msg_id, conn_msg.msg_id);
             // Make sure we don't have an existing connection to this client
             match self.directory.contains_key(&conn_msg.target_id) {
                 true => return existing_conn_err(read_stream, write_stream),
@@ -131,7 +119,6 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
                     self.recv_msg(read_stream);
-                    increment_msg_id(self.msg_id, conn_msg.msg_id);
                 }
             }
         }
@@ -158,16 +145,15 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
             write_stream,
         };
 
-        // Add the connection to our directory of connections to other clients
-        match self.directory.contains_key(&c)
-        match self.directory.insert(client.0, conn) {
-            Some(_) => existing_conn_err(read_stream, write_stream),
-            None => {
+        match self.directory.contains_key(&client.0) {
+            true => existing_conn_err(read_stream, conn.write_stream),
+            false => {
+                // Add the connection to our directory
+                self.directory.insert(client.0, conn);
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
                 self.recv_msg(read_stream);
-                // send the client our id and address so they can add us to
-                // their directory
+
                 let conn_msg = Message::<ConnectionMsg> {
                     msg_id: self.msg_id,
                     sender_id: self.id,
@@ -176,8 +162,11 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
                         my_address: self.address.clone(),
                     },
                 };
+                // send the client our id and address so they can add us to
+                // their directory
                 network::send_msg(client.0, &conn_msg, &mut self.directory)
                     .await?;
+                self.msg_id += 1;
 
                 println!("Id: {:#?} at address: {:#?} connected to id: {:#?} at address: {:#?}", self.id, self.address, client.0, client.1);
                 // for testing/demonstration purposes
@@ -187,6 +176,7 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
                     &mut self.directory,
                 )
                 .await?;
+                self.msg_id += 1;
 
                 Ok(())
             }
@@ -204,21 +194,23 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
         Ok(())
     }
 
-    // TODO: make the right callback that we want for handling messages
-    // or better clarify docs on how the client uses channels and fix our use
-    // of the channel if not done yet
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
     pub(crate) fn recv_msg(
         &mut self,
         mut reader: BufReader<ReadHalf<TcpStream>>,
     ) {
+        // TODO: make the right callback that we want for handling messages
+        // after sending them thru mpsc channel
+        // TODO: need to properly increment message id but that means self
+        // needs to be 'static and that propagates some
         let new_sender = self.sender.clone();
         tokio::spawn(async move {
             let mut buffer = Vec::new();
             loop {
                 let s: Message<RT> =
                     network::read_msg(&mut reader, &mut buffer).await.unwrap();
+                //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 new_sender.send(s).unwrap();
             }
         });

@@ -4,7 +4,7 @@
 use crate::error::LiquidError;
 use crate::network;
 use crate::network::message::*;
-use crate::network::{Connection, existing_conn_err};
+use crate::network::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
 use tokio::io::{split, BufReader, BufWriter};
@@ -45,46 +45,37 @@ impl Server {
     /// not listen for further messages from the `Client` since this is not
     /// required for any desired functionality.
     pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
-        let mut buffer = Vec::new();
         loop {
             // wait on connections from new clients
-            let (socket, _) = self.listener.accept().await?;
+            let (socket, addr) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
-            let mut read_stream = BufReader::new(reader);
+            let _read_stream = BufReader::new(reader);
             let write_stream = BufWriter::new(writer);
-            // Read the IP:Port from the client
-            let conn_msg: Message<ConnectionMsg> =
-                network::read_msg(&mut read_stream, &mut buffer).await?;
-
-            // Represents the connection from this Server to the new Client
+            // A new client has connected to this Server for registration.
+            // Make the `RegistrationMsg` to send to the new Client to inform
+            // them of already existing nodes.
+            let target_id = self.directory.len();
+            let reg_msg = Message::<RegistrationMsg> {
+                sender_id: 0,
+                target_id,
+                msg_id: self.msg_id,
+                msg: RegistrationMsg {
+                    clients: self
+                        .directory
+                        .iter()
+                        .map(|(k, v)| (*k, v.address.clone()))
+                        .collect(),
+                },
+            };
+            // Add them to our directory after making the `RegistrationMsg`
+            // because we don't need to inform them of their own address
             let conn = Connection {
-                address: conn_msg.msg.my_address,
+                address: addr.to_string(), // TODO: check if is correct method
                 write_stream,
             };
-            let assigned_id = self.directory.len();
-
-            // TODO: Close the newly created connections in the error cases
-            // Add the connection with the new client to this directory
-            match self.directory.insert(assigned_id, conn) {
-                Some(_) => {
-                    conn = self.directory.remove(j)
-                    return existing_conn_err(read_stream, self.directory.get_mut(&assigned_id).unwrap().write_stream),
-                None => {
-                    let reg_msg = Message::<RegistrationMsg> {
-                        sender_id: 0,
-                        target_id: assigned_id,
-                        msg_id: self.msg_id,
-                        msg: RegistrationMsg {
-                            clients: self
-                                .directory
-                                .iter()
-                                .map(|(k, v)| (*k, v.address.clone()))
-                                .collect(),
-                        },
-                    };
-                    self.send_msg(assigned_id, &reg_msg).await?;
-                }
-            };
+            self.directory.insert(target_id, conn);
+            // Send the new client the list of existing nodes.
+            self.send_msg(target_id, &reg_msg).await?;
         }
     }
 
