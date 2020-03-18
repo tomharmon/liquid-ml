@@ -61,7 +61,9 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
         let server_stream = TcpStream::connect(server_addr.clone()).await?;
         let (reader, writer) = split(server_stream);
         let mut read_stream = BufReader::new(reader);
-        let write_stream = BufWriter::new(writer);
+        let mut write_stream = BufWriter::new(writer);
+        // Tell the server our address
+        network::send_msg_helper(&mut write_stream, &my_addr).await?;
         // The Server sends the addresses of all currently connected clients
         let reg: Message<RegistrationMsg> =
             network::read_msg(&mut read_stream, &mut Vec::new()).await?;
@@ -196,10 +198,7 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
 
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
-    pub(crate) fn recv_msg(
-        &mut self,
-        mut reader: BufReader<ReadHalf<TcpStream>>,
-    ) {
+    pub(crate) fn recv_msg(&self, mut reader: BufReader<ReadHalf<TcpStream>>) {
         // TODO: make the right callback that we want for handling messages
         // after sending them thru mpsc channel
         // TODO: need to properly increment message id but that means self
@@ -217,7 +216,24 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
     }
 
     /// Process the next message in this client's message queue
-    pub(crate) fn process_message(&mut self) -> Message<RT> {
+    pub(crate) fn next_msg(&mut self) -> Message<RT> {
         self.receiver.recv().unwrap()
     }
 }
+
+/*
+fn KVProcessor(&mut c: Client) {
+
+    tokio::spawn( async move {
+        loop {
+            let message = c.next_msg();
+            /// do some stuff to the message
+            /// Update the hasmap
+            /// reply
+            c.send_message(1, "some message");
+        }
+    });
+
+
+}
+*/

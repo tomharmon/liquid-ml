@@ -386,6 +386,56 @@ fn map_helper<T: Rower>(
     rower
 }
 
+impl From<Column> for DataFrame {
+    /// Construct a new `DataFrame` with the given `column`.
+    fn from(column: Column) -> Self {
+        DataFrame::from(vec![column])
+    }
+}
+
+impl From<Vec<Column>> for DataFrame {
+    /// Construct a new `DataFrame` with the given `columns`.
+    fn from(data: Vec<Column>) -> Self {
+        let mut schema = Schema::new();
+        for column in &data {
+            match &column {
+                Column::Bool(_) => {
+                    schema.add_column(DataType::Bool, None).unwrap()
+                }
+                Column::Int(_) => {
+                    schema.add_column(DataType::Int, None).unwrap()
+                }
+                Column::Float(_) => {
+                    schema.add_column(DataType::Float, None).unwrap()
+                }
+                Column::String(_) => {
+                    schema.add_column(DataType::String, None).unwrap()
+                }
+            };
+        }
+        let n_threads = num_cpus::get();
+        DataFrame {
+            schema,
+            n_threads,
+            data,
+        }
+    }
+}
+
+impl From<Data> for DataFrame {
+    /// Construct a new `DataFrame` with the given `scalar` value.
+    fn from(scalar: Data) -> Self {
+        let c = match scalar {
+            Data::Bool(x) => Column::Bool(vec![Some(x)]),
+            Data::Int(x) => Column::Int(vec![Some(x)]),
+            Data::Float(x) => Column::Float(vec![Some(x)]),
+            Data::String(x) => Column::String(vec![Some(x)]),
+            Data::Null => panic!("Can't make a DataFrame from a null value"),
+        };
+        DataFrame::from(c)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

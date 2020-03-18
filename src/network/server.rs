@@ -45,16 +45,20 @@ impl Server {
     /// not listen for further messages from the `Client` since this is not
     /// required for any desired functionality.
     pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
+        let mut buffer = Vec::new();
         loop {
             // wait on connections from new clients
-            let (socket, addr) = self.listener.accept().await?;
+            let (socket, _) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
-            let _read_stream = BufReader::new(reader);
+            let mut read_stream = BufReader::new(reader);
             let write_stream = BufWriter::new(writer);
-            // A new client has connected to this Server for registration.
+            // Receive the listening IP:Port address of the new client
+            let address =
+                network::read_msg::<String>(&mut read_stream, &mut buffer)
+                    .await?;
             // Make the `RegistrationMsg` to send to the new Client to inform
             // them of already existing nodes.
-            let target_id = self.directory.len();
+            let target_id = self.directory.len() + 1;
             let reg_msg = Message::<RegistrationMsg> {
                 sender_id: 0,
                 target_id,
@@ -70,7 +74,7 @@ impl Server {
             // Add them to our directory after making the `RegistrationMsg`
             // because we don't need to inform them of their own address
             let conn = Connection {
-                address: addr.to_string(), // TODO: check if is correct method
+                address,
                 write_stream,
             };
             self.directory.insert(target_id, conn);
