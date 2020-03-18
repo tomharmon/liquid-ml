@@ -8,10 +8,10 @@ use crate::network::{existing_conn_err, increment_msg_id, Connection};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::io::{split, BufReader, BufWriter, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-
+use std::sync::Arc;
 /// Represents a `Client` node in a distributed system, where Type T is the types
 /// of messages that can be sent between `Client`s
 #[derive(Debug)]
@@ -42,7 +42,7 @@ pub struct Client<T> {
 /// system, listen for new connections from other new `Client`s, send
 /// directed communication to other `Client`s, and respond to messages from
 /// other `Client`s
-impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
+impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static> Client<RT> {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
     ///
@@ -56,7 +56,7 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
     pub async fn new(
         server_addr: String,
         my_addr: String,
-    ) -> Result<Self, LiquidError> {
+    ) -> Result<(Arc, impl std::future::Future), LiquidError> {
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr.clone()).await?;
         let (reader, writer) = split(server_stream);
@@ -68,7 +68,7 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
         let reg: Message<RegistrationMsg> =
             network::read_msg(&mut read_stream, &mut Vec::new()).await?;
         // Initialize ourself
-        let (sender, receiver) = channel::<Message<RT>>();
+        let (sender, receiver) = channel::<Message<RT>>(1000);
         let mut c = Client {
             id: reg.target_id,
             address: my_addr.clone(),
@@ -87,8 +87,9 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
 
         // TODO: Listen for further messages from the Server, e.g. `Kill` messages
         //self.recv_msg();;
-
-        Ok(c)
+        
+        let f = Client::accept_new_connections(std::sync::Arc::new(c));
+        Ok((c, f))
     }
 
     /// A blocking function that allows a `Client` to listen for connections
@@ -96,8 +97,8 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
     /// `Client`, we add the connection to this `Client.directory`
     /// and spawn a Tokio task to handle further communication from the new
     /// `Client`
-    pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
-        let mut buffer = Vec::new();
+    pub async fn accept_new_connections(a: std::sync::Arc<Client<RT>>) -> Result<(), LiquidError> {
+        /*let mut buffer = Vec::new();
         loop {
             // wait on connections from new clients
             let (socket, _) = self.listener.accept().await?;
@@ -123,7 +124,8 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
                     self.recv_msg(read_stream);
                 }
             }
-        }
+        }*/
+        unimplemented!()
     }
 
     /// Connect to a running `Client` with the given `(id, IP:Port)` informa)tion.
@@ -203,21 +205,21 @@ impl<RT: Send + DeserializeOwned + Serialize + 'static> Client<RT> {
         // after sending them thru mpsc channel
         // TODO: need to properly increment message id but that means self
         // needs to be 'static and that propagates some
-        let new_sender = self.sender.clone();
+        let mut new_sender = self.sender.clone();
         tokio::spawn(async move {
             let mut buffer = Vec::new();
             loop {
                 let s: Message<RT> =
                     network::read_msg(&mut reader, &mut buffer).await.unwrap();
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
-                new_sender.send(s).unwrap();
+                new_sender.send(s).await.unwrap();
             }
         });
     }
 
     /// Process the next message in this client's message queue
-    pub(crate) fn next_msg(&mut self) -> Message<RT> {
-        self.receiver.recv().unwrap()
+    pub(crate) async fn next_msg(&mut self) -> Message<RT> {
+        self.receiver.recv().await.unwrap()
     }
 }
 
