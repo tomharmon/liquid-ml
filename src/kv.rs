@@ -3,7 +3,8 @@ use crate::kv_message::KVMessage;
 use crate::network::client::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tokio::sync::{RwLock, Notify};
+use std::sync::Arc;
+use tokio::sync::{Notify, RwLock};
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct Key {
@@ -22,16 +23,16 @@ impl Key {
 pub struct KVStore {
     data: RwLock<HashMap<Key, Value>>,
     cache: RwLock<HashMap<Key, Value>>,
-    network: RwLock<Client<KVMessage>>,
-    notifier: Notify
+    network: Arc<RwLock<Client<KVMessage>>>,
+    notifier: Notify,
 }
 
 impl KVStore {
-    pub fn new(network: Client<KVMessage>) -> Self {
+    pub fn new(network: Arc<RwLock<Client<KVMessage>>>) -> Self {
         let res = KVStore {
             data: RwLock::new(HashMap::new()),
             cache: RwLock::new(HashMap::new()),
-            network: RwLock::new(network),
+            network,
             notifier: Notify::new(),
         };
         res
@@ -48,17 +49,16 @@ impl KVStore {
 
     /// Get the data for the give key, if the key is on a different node then make a network call
     /// and wait until the data has been added to the cache
-    pub async fn wait_and_get(
-        &mut self,
-        k: &Key,
-    ) -> Result<Value, LiquidError> {
+    pub async fn wait_and_get(&self, k: &Key) -> Result<Value, LiquidError> {
         if k.home == self.network.read().await.id {
             while self.data.read().await.get(k) == None {
                 self.notifier.notified().await;
             }
             Ok(self.data.read().await.get(k).unwrap().clone())
         } else {
-            self.network.write().await
+            self.network
+                .write()
+                .await
                 .send_msg(k.home, &KVMessage::Get(k.clone()))
                 .await?;
             while self.cache.read().await.get(k) == None {
@@ -68,12 +68,14 @@ impl KVStore {
         }
     }
 
-    pub async fn put(&mut self, k: &Key, v: Value) -> Result<(), LiquidError> {
+    pub async fn put(&self, k: &Key, v: Value) -> Result<(), LiquidError> {
         if k.home == self.network.read().await.id {
             self.data.write().await.insert(k.clone(), v);
             Ok(())
         } else {
-            self.network.write().await
+            self.network
+                .write()
+                .await
                 .send_msg(k.home, &KVMessage::Put(k.clone(), v))
                 .await
         }
@@ -82,17 +84,24 @@ impl KVStore {
     /// Internal helper to process messages from the queue
     pub async fn process_messages(&self) -> Result<(), LiquidError> {
         loop {
+            println!("attempting to get write lock to process a message");
             let msg = self.network.write().await.next_msg().await;
+            println!("Got a message {:?}", msg);
             match &msg.msg {
                 KVMessage::Get(k) => {
                     // This should wait until it has the data to respond
-                    let x : Value = self.data.read().await.get(k).unwrap().clone();
-                    self.network.write().await.send_msg(msg.sender_id ,&KVMessage::Data(k.clone(), x)).await?;
-                },
+                    let x: Value =
+                        self.data.read().await.get(k).unwrap().clone();
+                    self.network
+                        .write()
+                        .await
+                        .send_msg(msg.sender_id, &KVMessage::Data(k.clone(), x))
+                        .await?;
+                }
                 KVMessage::Data(k, v) => {
-                    self.cache.write().await.insert(k.clone(), v.clone()); 
+                    self.cache.write().await.insert(k.clone(), v.clone());
                     self.notifier.notify();
-                },
+                }
                 KVMessage::Put(k, v) => {
                     // Note is the home id actually my id should we check?
                     self.data.write().await.insert(k.clone(), v.clone());
@@ -111,7 +120,3 @@ impl KVStore {
         // If the message is a KVResponse the provided data will be placed in the cache
     }
 }
-
-
-
-

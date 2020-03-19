@@ -1,21 +1,30 @@
 use liquid_ml::error::LiquidError;
 use liquid_ml::network::client::Client;
 use std::env;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let args: Vec<String> = env::args().collect();
-    let mut c =
+    let c =
         Client::<String>::new("127.0.0.1:9000".to_string(), args[1].clone())
             .await?;
+    let my_id = c.id;
+    let arc = Arc::new(RwLock::new(c));
+    let fut0 = Client::accept_new_connections(arc.clone());
+    if my_id == 2 {
+        println!("sending msg");
+        {
+            arc.write()
+                .await
+                .send_msg(1, &String::from("hello"))
+                .await
+                .unwrap();
+        }
+        println!("done sending msg");
+    }
 
-    let jh = tokio::spawn(async move {
-        c.accept_new_connections().await.unwrap();
-    });
-
-    //c.send_msg(1, &"hello".to_string());
-    //tokio::spawn(async)
-
-    jh.await.unwrap();
+    fut0.await.unwrap();
     Ok(())
 }
