@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::io::{split, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 /// Represents a `Client` node in a distributed system, where Type T is the types
@@ -35,6 +35,7 @@ pub struct Client<T> {
     pub(crate) receiver: Receiver<Message<T>>,
     ///
     sender: Sender<Message<T>>,
+    notifier: Arc<Notify>,
 }
 
 // TODO: remove 'static
@@ -58,6 +59,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
     pub async fn new(
         server_addr: String,
         my_addr: String,
+        notifier: Arc<Notify>,
     ) -> Result<Self, LiquidError> {
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr.clone()).await?;
@@ -87,6 +89,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                 server: (stream, sink),
                 receiver,
                 sender,
+                notifier,
             };
 
             // Connect to all the clients
@@ -162,8 +165,11 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                             FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
                         >(stream)
                     };
-                    let new_sender = { client.read().await.sender.clone() };
-                    Client::recv_msg(new_sender, new_stream);
+                    {
+                        let new_sender = client.read().await.sender.clone();
+                        let new_notifier = client.read().await.notifier.clone();
+                        Client::recv_msg(new_sender, new_stream, new_notifier);
+                    }
                     println!(
                         "Connected to id: {:#?} at address: {:#?}",
                         intro.sender_id, addr
@@ -222,7 +228,11 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                 self.directory.insert(client.0, conn);
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
-                Client::recv_msg(self.sender.clone(), stream);
+                Client::recv_msg(
+                    self.sender.clone(),
+                    stream,
+                    self.notifier.clone(),
+                );
                 // send the client our id and address so they can add us to
                 // their directory
                 self.msg_id += 1;
@@ -248,7 +258,9 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             msg_id: self.msg_id,
             msg: message,
         };
+        println!("Sending the message: {:?}", m);
         network::send_msg(target_id, m, &mut self.directory).await?;
+        println!("sent it");
         self.msg_id += 1;
         Ok(())
     }
@@ -258,6 +270,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
     pub(crate) fn recv_msg(
         mut sender: Sender<Message<RT>>,
         mut reader: FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
+        notifier: Arc<Notify>,
     ) {
         // TODO: make the right callback that we want for handling messages
         // after sending them thru mpsc channel
@@ -271,6 +284,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 println!("Got msg {:?}", s);
                 sender.send(s).await.unwrap();
+                notifier.notify();
                 println!("added msg to queue");
             }
         });
@@ -281,20 +295,3 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         self.receiver.recv().await.unwrap()
     }
 }
-
-/*
-fn KVProcessor(&mut c: Client) {
-
-    tokio::spawn( async move {
-        loop {
-            let message = c.next_msg();
-            /// do some stuff to the message
-            /// Update the hasmap
-            /// reply
-            c.send_message(1, "some message");
-        }
-    });
-
-
-}
-*/

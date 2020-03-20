@@ -24,16 +24,21 @@ pub struct KVStore {
     data: RwLock<HashMap<Key, Value>>,
     cache: RwLock<HashMap<Key, Value>>,
     network: Arc<RwLock<Client<KVMessage>>>,
-    notifier: Notify,
+    internal_notifier: Notify,
+    network_notifier: Arc<Notify>,
 }
 
 impl KVStore {
-    pub fn new(network: Arc<RwLock<Client<KVMessage>>>) -> Self {
+    pub fn new(
+        network: Arc<RwLock<Client<KVMessage>>>,
+        network_notifier: Arc<Notify>,
+    ) -> Self {
         let res = KVStore {
             data: RwLock::new(HashMap::new()),
             cache: RwLock::new(HashMap::new()),
             network,
-            notifier: Notify::new(),
+            internal_notifier: Notify::new(),
+            network_notifier,
         };
         res
     }
@@ -52,7 +57,7 @@ impl KVStore {
     pub async fn wait_and_get(&self, k: &Key) -> Result<Value, LiquidError> {
         if k.home == self.network.read().await.id {
             while self.data.read().await.get(k) == None {
-                self.notifier.notified().await;
+                self.internal_notifier.notified().await;
             }
             Ok(self.data.read().await.get(k).unwrap().clone())
         } else {
@@ -64,7 +69,7 @@ impl KVStore {
                     .await?;
             }
             while { self.cache.read().await.get(k) } == None {
-                self.notifier.notified().await;
+                self.internal_notifier.notified().await;
             }
             Ok(self.cache.read().await.get(k).unwrap().clone())
         }
@@ -91,27 +96,37 @@ impl KVStore {
             println!("attempting to get write lock to process a message");
             // TODO: try to get a message here and release the lock after that retrying after some
             // notification or smth
+            self.network_notifier.notified().await;
+            // Should user try read and wait in a loop ideally
             let msg = { self.network.write().await.next_msg().await };
             println!("Got a message {:?}", msg);
             match &msg.msg {
                 KVMessage::Get(k) => {
                     // This should wait until it has the data to respond
+                    println!("in the correct match block");
+
                     let x: Value =
-                        self.data.read().await.get(k).unwrap().clone();
-                    self.network
-                        .write()
-                        .await
-                        .send_msg(msg.sender_id, KVMessage::Data(k.clone(), x))
-                        .await?;
+                        { self.data.read().await.get(k).unwrap().clone() };
+                    println!("going to send over the following data: {:?}", x);
+                    {
+                        self.network
+                            .write()
+                            .await
+                            .send_msg(
+                                msg.sender_id,
+                                KVMessage::Data(k.clone(), x),
+                            )
+                            .await?;
+                    }
                 }
                 KVMessage::Data(k, v) => {
                     self.cache.write().await.insert(k.clone(), v.clone());
-                    self.notifier.notify();
+                    self.internal_notifier.notify();
                 }
                 KVMessage::Put(k, v) => {
                     // Note is the home id actually my id should we check?
                     self.data.write().await.insert(k.clone(), v.clone());
-                    self.notifier.notify();
+                    self.internal_notifier.notify();
                 }
             }
         }

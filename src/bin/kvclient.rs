@@ -4,18 +4,24 @@ use liquid_ml::kv_message::KVMessage;
 use liquid_ml::network::client::Client;
 use std::env;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let args: Vec<String> = env::args().collect();
-    let c =
-        Client::<KVMessage>::new("127.0.0.1:9000".to_string(), args[1].clone())
-            .await?;
+    let notifier = Arc::new(Notify::new());
+    let c = Client::<KVMessage>::new(
+        "127.0.0.1:9000".to_string(),
+        args[1].clone(),
+        notifier.clone(),
+    )
+    .await?;
     let my_id = c.id;
     let arc = Arc::new(RwLock::new(c));
-    let kv = KVStore::new(arc.clone());
-    let fut0 = Client::accept_new_connections(arc);
+    let kv = KVStore::new(arc.clone(), notifier);
+    let fut0 = tokio::spawn(async move {
+        Client::accept_new_connections(arc).await.unwrap();
+    });
     let fut = kv.process_messages();
     let key = &Key::new("hello".to_string(), 1);
     let val = String::from("world").into_bytes();
@@ -30,7 +36,7 @@ async fn main() -> Result<(), LiquidError> {
 
     //c.send_msg(1, &"hello".to_string());
 
-    fut0.await.unwrap();
     fut.await.unwrap();
+    fut0.await.unwrap();
     Ok(())
 }
