@@ -15,10 +15,18 @@ async fn main() -> Result<(), LiquidError> {
     let fut0 = Client::accept_new_connections(arc.clone());
     if my_id == 2 {
         println!("sending msg");
+        tokio::time::delay_for(tokio::time::Duration::from_secs(1)).await;
         {
             arc.write()
                 .await
                 .send_msg(1, &String::from("hello"))
+                .await
+                .unwrap();
+        }
+        {
+            arc.write()
+                .await
+                .send_msg(1, &String::from("hello222222"))
                 .await
                 .unwrap();
         }

@@ -23,12 +23,17 @@ pub struct Connection {
 
 /// Reads a message of from the given `reader` into the `buffer` and deserialize
 /// it into a type `T`
-pub(crate) async fn read_msg<T: DeserializeOwned>(
+pub(crate) async fn read_msg<T: DeserializeOwned + std::fmt::Debug>(
     reader: &mut FramedRead<ReadHalf<TcpStream>, BytesCodec>,
 ) -> Result<T, LiquidError> {
     match reader.next().await {
         None => Err(LiquidError::StreamClosed),
-        Some(x) => Ok(bincode::deserialize(&x?[..])?),
+        Some(x) => {
+            println!("{:?}", x);
+            let res = Ok(bincode::deserialize(&x?[..])?);
+            println!("deserialized to {:?}", res);
+            res
+        }
     }
 }
 
@@ -44,6 +49,7 @@ pub(crate) async fn send_msg<T: Serialize>(
             conn.sink
                 .send(Bytes::from(bincode::serialize(message)?))
                 .await?;
+            conn.sink.flush().await?;
             Ok(())
         }
     }

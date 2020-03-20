@@ -201,17 +201,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                 network::send_msg(client.0, &conn_msg, &mut self.directory)
                     .await?;
                 self.msg_id += 1;
-
                 println!("Id: {:#?} at address: {:#?} connected to id: {:#?} at address: {:#?}", self.id, self.address, client.0, client.1);
-                // for testing/demonstration purposes
-                network::send_msg(
-                    client.0,
-                    &"Hi".to_string(),
-                    &mut self.directory,
-                )
-                .await?;
-                self.msg_id += 1;
-
                 Ok(())
             }
         }
@@ -224,7 +214,13 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         target_id: usize,
         message: &RT,
     ) -> Result<(), LiquidError> {
-        network::send_msg(target_id, message, &mut self.directory).await?;
+        let m = Message {
+            sender_id: self.id,
+            target_id,
+            msg_id: self.msg_id,
+            msg: message,
+        };
+        network::send_msg(target_id, &m, &mut self.directory).await?;
         self.msg_id += 1;
         Ok(())
     }
