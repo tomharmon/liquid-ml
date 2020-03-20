@@ -19,14 +19,14 @@ async fn main() -> Result<(), LiquidError> {
         {
             arc.write()
                 .await
-                .send_msg(1, &String::from("hello"))
+                .send_msg(1, String::from("hello"))
                 .await
                 .unwrap();
         }
         {
             arc.write()
                 .await
-                .send_msg(1, &String::from("hello222222"))
+                .send_msg(1, String::from("hello222222"))
                 .await
                 .unwrap();
         }

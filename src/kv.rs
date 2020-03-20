@@ -59,7 +59,7 @@ impl KVStore {
             self.network
                 .write()
                 .await
-                .send_msg(k.home, &KVMessage::Get(k.clone()))
+                .send_msg(k.home, KVMessage::Get(k.clone()))
                 .await?;
             while self.cache.read().await.get(k) == None {
                 self.notifier.notified().await;
@@ -76,7 +76,7 @@ impl KVStore {
             self.network
                 .write()
                 .await
-                .send_msg(k.home, &KVMessage::Put(k.clone(), v))
+                .send_msg(k.home, KVMessage::Put(k.clone(), v))
                 .await
         }
     }
@@ -95,7 +95,7 @@ impl KVStore {
                     self.network
                         .write()
                         .await
-                        .send_msg(msg.sender_id, &KVMessage::Data(k.clone(), x))
+                        .send_msg(msg.sender_id, KVMessage::Data(k.clone(), x))
                         .await?;
                 }
                 KVMessage::Data(k, v) => {

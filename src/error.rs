@@ -27,4 +27,6 @@ pub enum LiquidError {
     NotPresent,
     #[error("Unexpected Stream shutdown")]
     StreamClosed,
+    #[error("Unexpected Message")]
+    UnexpectedMessage,
 }

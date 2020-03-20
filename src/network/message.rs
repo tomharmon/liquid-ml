@@ -1,30 +1,95 @@
 //! Defines messages used to communicate with the network of nodes over TCP.
+use crate::error::LiquidError;
+use bincode::{deserialize, serialize};
+use bytes::{Buf, BufMut, BytesMut};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-
-/// A registration message sent by the `Server` to new `Client`s once they
-/// connect to the `Server` so that they know which other `Client`s are
-/// currently connected
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct RegistrationMsg {
-    /// A list of the currently connected clients, containing a tuple of
-    /// `(node_id, IP:Port String)`
-    pub(crate) clients: Vec<(usize, String)>,
-}
-
-/// A connection message that a new `Client` sends to all other existing
-/// `Client`s after the new `Client` receives a `RegistrationMsg` from
-/// the `Server`
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct ConnectionMsg {
-    /// The IP:Port of the new `Client`
-    pub(crate) my_address: String,
-}
+use tokio_util::codec::{Decoder, Encoder};
 
 /// A message for communication between nodes
 #[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct Message<T> {
+pub struct Message<T> {
     pub(crate) msg_id: usize,
     pub(crate) sender_id: usize,
     pub(crate) target_id: usize,
     pub(crate) msg: T,
+}
+
+impl<T> Message<T> {
+    pub(crate) fn new(
+        msg_id: usize,
+        sender_id: usize,
+        target_id: usize,
+        msg: T,
+    ) -> Self {
+        Message {
+            msg_id,
+            sender_id,
+            target_id,
+            msg,
+        }
+    }
+}
+
+/// Control messages to facilitate communication with the reqistration server
+#[derive(Serialize, Deserialize, Debug)]
+pub enum ControlMsg {
+    /// A directory message sent by the `Server` to new `Client`s once they
+    /// connect to the `Server` so that they know which other `Client`s are
+    /// currently connected
+    Directory { dir: Vec<(usize, String)> },
+    /// An introduction that a new `Client` sends to all other existing
+    /// `Client`s and the server
+    Introduction { address: String },
+    //TODO : Add a kill message here at some point
+}
+
+pub struct MessageCodec<T> {
+    pub(crate) phantom: std::marker::PhantomData<T>,
+}
+
+impl<T> MessageCodec<T> {
+    pub(crate) fn new() -> Self {
+        MessageCodec {
+            phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: DeserializeOwned> Decoder for MessageCodec<T> {
+    type Item = Message<T>;
+    type Error = LiquidError;
+    fn decode(
+        &mut self,
+        src: &mut BytesMut,
+    ) -> Result<Option<Self::Item>, Self::Error> {
+        if src.remaining() < std::mem::size_of::<u64>() {
+            Ok(None)
+        } else {
+            let num_bytes = src.get_u64() as usize;
+            if src.remaining() < num_bytes {
+                Ok(None)
+            } else {
+                Ok(Some(deserialize(&src.split_to(num_bytes)[..])?))
+            }
+        }
+    }
+}
+
+impl<T: Serialize> Encoder<Message<T>> for MessageCodec<T> {
+    type Error = LiquidError;
+
+    fn encode(
+        &mut self,
+        item: Message<T>,
+        dst: &mut BytesMut,
+    ) -> Result<(), Self::Error> {
+        println!("encoding a message");
+        let serialized = serialize(&item)?;
+        let num_bytes = serialized.len();
+        dst.reserve(std::mem::size_of::<u64>());
+        dst.put_u64(num_bytes as u64);
+        dst.extend_from_slice(&serialized[..]);
+        Ok(())
+    }
 }
