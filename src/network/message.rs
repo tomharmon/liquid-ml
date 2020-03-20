@@ -44,6 +44,7 @@ pub enum ControlMsg {
     //TODO : Add a kill message here at some point
 }
 
+#[derive(Debug)]
 pub struct MessageCodec<T> {
     pub(crate) phantom: std::marker::PhantomData<T>,
 }
@@ -84,7 +85,6 @@ impl<T: Serialize> Encoder<Message<T>> for MessageCodec<T> {
         item: Message<T>,
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
-        println!("encoding a message");
         let serialized = serialize(&item)?;
         let num_bytes = serialized.len();
         dst.reserve(std::mem::size_of::<u64>());

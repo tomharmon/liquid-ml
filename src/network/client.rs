@@ -113,7 +113,6 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         let mut listener = TcpListener::bind(listen_address).await?;
         loop {
             // wait on connections from new clients
-            println!("Waiting for connections");
             let (socket, _) = listener.accept().await?;
             let (reader, writer) = split(socket);
             let mut stream =
@@ -126,7 +125,6 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                 } else {
                     return Err(LiquidError::UnexpectedMessage);
                 };
-            println!("Got a new connection");
             let old_msg_id = { client.read().await.msg_id };
             {
                 client.write().await.msg_id =
@@ -141,7 +139,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                 false => {
                     // Add the connection with the new client to this directory
                     let conn = Connection {
-                        address: addr,
+                        address: addr.clone(),
                         sink,
                     };
                     {
@@ -151,17 +149,25 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                             .directory
                             .insert(intro.sender_id, conn);
                     }
-                    println!("added new connection to directory");
                     // spawn a tokio task to handle new messages from the client
                     // that we just connected to
-                    // note: this may not work
-                    let new_stream = FramedRead::new(
-                        stream.into_inner(),
-                        MessageCodec::new(),
-                    );
+                    // NOTE: Not unsafe because message codec has no fields and
+                    // can be converted to a different type without losing meaning
+                    let new_stream = unsafe {
+                        std::mem::transmute::<
+                            FramedRead<
+                                ReadHalf<TcpStream>,
+                                MessageCodec<ControlMsg>,
+                            >,
+                            FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
+                        >(stream)
+                    };
                     let new_sender = { client.read().await.sender.clone() };
                     Client::recv_msg(new_sender, new_stream);
-                    println!("Spawned a future to recv messages");
+                    println!(
+                        "Connected to id: {:#?} at address: {:#?}",
+                        intro.sender_id, addr
+                    );
                 }
             }
         }
@@ -197,12 +203,20 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                     },
                 ))
                 .await?;
+                // NOTE: Not unsafe because message codec has no fields and
+                // can be converted to a different type without losing meaning
+                let sink = unsafe {
+                    std::mem::transmute::<
+                        FramedWrite<
+                            WriteHalf<TcpStream>,
+                            MessageCodec<ControlMsg>,
+                        >,
+                        FramedWrite<WriteHalf<TcpStream>, MessageCodec<RT>>,
+                    >(sink)
+                };
                 let conn = Connection {
                     address: client.1.clone(),
-                    sink: FramedWrite::new(
-                        sink.into_inner(),
-                        MessageCodec::<RT>::new(),
-                    ),
+                    sink,
                 };
                 // Add the connection to our directory
                 self.directory.insert(client.0, conn);
@@ -212,7 +226,10 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                 // send the client our id and address so they can add us to
                 // their directory
                 self.msg_id += 1;
-                println!("Id: {:#?} at address: {:#?} connected to id: {:#?} at address: {:#?}", self.id, self.address, client.0, client.1);
+                println!(
+                    "Connected to id: {:#?} at address: {:#?}",
+                    client.0, client.1
+                );
                 Ok(())
             }
         }

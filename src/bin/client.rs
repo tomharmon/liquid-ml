@@ -14,8 +14,8 @@ async fn main() -> Result<(), LiquidError> {
     let arc = Arc::new(RwLock::new(c));
     let fut0 = Client::accept_new_connections(arc.clone());
     if my_id == 2 {
-        println!("sending msg");
-        tokio::time::delay_for(tokio::time::Duration::from_secs(1)).await;
+        println!("sending msgs");
+        //tokio::time::delay_for(tokio::time::Duration::from_secs(1)).await;
         {
             arc.write()
                 .await

@@ -56,12 +56,14 @@ impl KVStore {
             }
             Ok(self.data.read().await.get(k).unwrap().clone())
         } else {
-            self.network
-                .write()
-                .await
-                .send_msg(k.home, KVMessage::Get(k.clone()))
-                .await?;
-            while self.cache.read().await.get(k) == None {
+            {
+                self.network
+                    .write()
+                    .await
+                    .send_msg(k.home, KVMessage::Get(k.clone()))
+                    .await?;
+            }
+            while { self.cache.read().await.get(k) } == None {
                 self.notifier.notified().await;
             }
             Ok(self.cache.read().await.get(k).unwrap().clone())
@@ -69,8 +71,10 @@ impl KVStore {
     }
 
     pub async fn put(&self, k: &Key, v: Value) -> Result<(), LiquidError> {
-        if k.home == self.network.read().await.id {
-            self.data.write().await.insert(k.clone(), v);
+        if k.home == { self.network.read().await.id } {
+            {
+                self.data.write().await.insert(k.clone(), v);
+            }
             Ok(())
         } else {
             self.network
@@ -85,7 +89,9 @@ impl KVStore {
     pub async fn process_messages(&self) -> Result<(), LiquidError> {
         loop {
             println!("attempting to get write lock to process a message");
-            let msg = self.network.write().await.next_msg().await;
+            // TODO: try to get a message here and release the lock after that retrying after some
+            // notification or smth
+            let msg = { self.network.write().await.next_msg().await };
             println!("Got a message {:?}", msg);
             match &msg.msg {
                 KVMessage::Get(k) => {
