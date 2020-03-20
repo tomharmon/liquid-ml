@@ -1,18 +1,21 @@
 //! Represents a client node in a distributed system, with implementations
 //! provided for `LiquidML` use cases.
-
 use crate::error::LiquidError;
 use crate::network;
 use crate::network::message::{ConnectionMsg, Message, RegistrationMsg};
 use crate::network::{existing_conn_err, increment_msg_id, Connection};
+use bytes::Bytes;
+use futures::SinkExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{split, BufReader, BufWriter, ReadHalf, WriteHalf};
+use tokio::io::{split, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
+use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite};
+
 /// Represents a `Client` node in a distributed system, where Type T is the types
 /// of messages that can be sent between `Client`s
 #[derive(Debug)]
@@ -27,8 +30,8 @@ pub struct Client<T> {
     pub directory: HashMap<usize, Connection>,
     /// A buffered connection to the `Server`
     pub server: (
-        BufReader<ReadHalf<TcpStream>>,
-        BufWriter<WriteHalf<TcpStream>>,
+        FramedRead<ReadHalf<TcpStream>, BytesCodec>,
+        FramedWrite<WriteHalf<TcpStream>, BytesCodec>,
     ),
     /// A Reciever whch acts as a queue for messages
     pub(crate) receiver: Receiver<Message<T>>,
@@ -61,13 +64,14 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr.clone()).await?;
         let (reader, writer) = split(server_stream);
-        let mut read_stream = BufReader::new(reader);
-        let mut write_stream = BufWriter::new(writer);
+        let mut stream = FramedRead::new(reader, BytesCodec::new());
+        let mut sink = FramedWrite::new(writer, BytesCodec::new());
         // Tell the server our address
-        network::send_msg_helper(&mut write_stream, &my_addr).await?;
+        sink.send(Bytes::copy_from_slice(&bincode::serialize(&my_addr)?[..]))
+            .await?;
         // The Server sends the addresses of all currently connected clients
         let reg: Message<RegistrationMsg> =
-            network::read_msg(&mut read_stream, &mut Vec::new()).await?;
+            network::read_msg(&mut stream).await?;
         // Initialize ourself
         let (sender, receiver) = channel::<Message<RT>>(1000);
         let mut c = Client {
@@ -75,7 +79,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             address: my_addr.clone(),
             msg_id: reg.msg_id + 1,
             directory: HashMap::new(),
-            server: (read_stream, write_stream),
+            server: (stream, sink),
             receiver,
             sender,
         };
@@ -99,7 +103,6 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
     pub async fn accept_new_connections(
         client: Arc<RwLock<Client<RT>>>,
     ) -> Result<(), LiquidError> {
-        let mut buffer = Vec::new();
         let listen_address = { client.read().await.address.clone() };
         let mut listener = TcpListener::bind(listen_address).await?;
         loop {
@@ -107,11 +110,11 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             println!("Waiting for connections");
             let (socket, _) = listener.accept().await?;
             let (reader, writer) = split(socket);
-            let mut read_stream = BufReader::new(reader);
-            let write_stream = BufWriter::new(writer);
+            let mut stream = FramedRead::new(reader, BytesCodec::new());
+            let sink = FramedWrite::new(writer, BytesCodec::new());
             // Read the ConnectionMsg from the new client
             let conn_msg: Message<ConnectionMsg> =
-                network::read_msg(&mut read_stream, &mut buffer).await?;
+                network::read_msg(&mut stream).await?;
             println!("Got a new connection");
             let old_msg_id = { client.read().await.msg_id };
             {
@@ -127,12 +130,12 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                     .contains_key(&conn_msg.target_id)
             };
             match contains_key {
-                true => return existing_conn_err(read_stream, write_stream),
+                true => return existing_conn_err(stream, sink),
                 false => {
                     // Add the connection with the new client to this directory
                     let conn = Connection {
                         address: conn_msg.msg.my_address,
-                        write_stream,
+                        sink,
                     };
                     {
                         client
@@ -147,7 +150,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                     // note: this may not work
                     Client::recv_msg(
                         { client.read().await.sender.clone() },
-                        read_stream,
+                        stream,
                     );
                     println!("Spawned a future to recv messages");
                 }
@@ -167,23 +170,23 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         // Connect to the given client
         let stream = TcpStream::connect(client.1.clone()).await?;
         let (reader, writer) = split(stream);
-        let read_stream = BufReader::new(reader);
-        let write_stream = BufWriter::new(writer);
+        let stream = FramedRead::new(reader, BytesCodec::new());
+        let sink = FramedWrite::new(writer, BytesCodec::new());
 
         // Make the connection struct which holds the stream for sending msgs
         let conn = Connection {
             address: client.1.clone(),
-            write_stream,
+            sink,
         };
 
         match self.directory.contains_key(&client.0) {
-            true => existing_conn_err(read_stream, conn.write_stream),
+            true => existing_conn_err(stream, conn.sink),
             false => {
                 // Add the connection to our directory
                 self.directory.insert(client.0, conn);
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
-                Client::recv_msg(self.sender.clone(), read_stream);
+                Client::recv_msg(self.sender.clone(), stream);
 
                 let conn_msg = Message::<ConnectionMsg> {
                     msg_id: self.msg_id,
@@ -214,6 +217,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         }
     }
 
+    // TODO: abstract/merge with Server::send_msg, they are the same
     /// Send the given `message` to a client with the given `target_id`.
     pub async fn send_msg(
         &mut self,
@@ -229,17 +233,17 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
     /// handle responding to them.
     pub(crate) fn recv_msg(
         mut sender: Sender<Message<RT>>,
-        mut reader: BufReader<ReadHalf<TcpStream>>,
+        mut reader: FramedRead<ReadHalf<TcpStream>, BytesCodec>,
     ) {
         // TODO: make the right callback that we want for handling messages
         // after sending them thru mpsc channel
         // TODO: need to properly increment message id but that means self
         // needs to be 'static and that propagates some
         tokio::spawn(async move {
-            let mut buffer = Vec::new();
             loop {
+                println!("waiting to read msg");
                 let s: Message<RT> =
-                    network::read_msg(&mut reader, &mut buffer).await.unwrap();
+                    network::read_msg(&mut reader).await.unwrap();
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 println!("Got msg {:?}", s);
                 sender.send(s).await.unwrap();

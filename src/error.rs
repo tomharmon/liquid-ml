@@ -25,4 +25,6 @@ pub enum LiquidError {
     ReconnectionError,
     #[error("Key is not present at this node")]
     NotPresent,
+    #[error("Unexpected Stream shutdown")]
+    StreamClosed,
 }

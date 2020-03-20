@@ -9,10 +9,12 @@ edition = "2018"
 [dependencies]
 sorer = { git = "https://github.com/SamedhG/sorer", branch = "master" }
 tokio = { version = "0.2.13", features = ["full"] }
+tokio-util = { version = "0.3.1", features = ["codec"] }
 thiserror = "1.0.11"
 num_cpus = "1.12.0"
 bincode = "1.2.1"
 serde = { version = "1.0.104", features = ["derive"] }
 futures = "0.3.4"
 crossbeam-utils = "0.7.2"
+bytes = "0.5.4"
 

@@ -1,14 +1,16 @@
 //! A module with methods to communicate with nodes in a distributed system
 //! over TCP, as well as `Client` and `Server` implementations for `LiquidML`
 use crate::error::LiquidError;
+use bytes::Bytes;
+use futures::SinkExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::net::Shutdown;
-use tokio::io::{
-    AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, ReadHalf, WriteHalf,
-};
+use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
+use tokio::stream::StreamExt;
+use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite};
 
 /// A connection to another `Client`, used for sending directed communication
 #[derive(Debug)]
@@ -16,19 +18,18 @@ pub struct Connection {
     /// The `IP:Port` of another `Client` that we're connected to
     pub address: String,
     /// The buffered stream used for sending messages to the other `Client`
-    pub write_stream: BufWriter<WriteHalf<TcpStream>>,
+    pub sink: FramedWrite<WriteHalf<TcpStream>, BytesCodec>,
 }
 
 /// Reads a message of from the given `reader` into the `buffer` and deserialize
 /// it into a type `T`
 pub(crate) async fn read_msg<T: DeserializeOwned>(
-    reader: &mut BufReader<ReadHalf<TcpStream>>,
-    buffer: &mut Vec<u8>,
+    reader: &mut FramedRead<ReadHalf<TcpStream>, BytesCodec>,
 ) -> Result<T, LiquidError> {
-    let n = reader.read_u64().await?;
-    reader.take(n).read_to_end(buffer).await?;
-    let result: T = bincode::deserialize(&buffer[..])?;
-    Ok(result)
+    match reader.next().await {
+        None => Err(LiquidError::StreamClosed),
+        Some(x) => Ok(bincode::deserialize(&x?[..])?),
+    }
 }
 
 /// Send the given `message` over the given `write_stream`
@@ -39,30 +40,24 @@ pub(crate) async fn send_msg<T: Serialize>(
 ) -> Result<(), LiquidError> {
     match directory.get_mut(&target_id) {
         None => Err(LiquidError::UnknownId),
-        Some(conn) => send_msg_helper(&mut conn.write_stream, message).await,
+        Some(conn) => {
+            conn.sink
+                .send(Bytes::from(bincode::serialize(message)?))
+                .await?;
+            Ok(())
+        }
     }
 }
 
-pub(crate) async fn send_msg_helper<T: Serialize>(
-    write_stream: &mut BufWriter<WriteHalf<TcpStream>>,
-    message: &T,
-) -> Result<(), LiquidError> {
-    let msg = bincode::serialize(message)?;
-    write_stream.write_u64(msg.len() as u64).await?;
-    write_stream.write_all(&msg).await?;
-    write_stream.flush().await?;
-    Ok(())
-}
-
 pub(crate) fn existing_conn_err(
-    read_stream: BufReader<ReadHalf<TcpStream>>,
-    write_stream: BufWriter<WriteHalf<TcpStream>>,
+    stream: FramedRead<ReadHalf<TcpStream>, BytesCodec>,
+    sink: FramedWrite<WriteHalf<TcpStream>, BytesCodec>,
 ) -> Result<(), LiquidError> {
     // Already have an open connection to this client, shut
     // down the one we just created.
-    let reader = read_stream.into_inner();
-    let stream = reader.unsplit(write_stream.into_inner());
-    stream.shutdown(Shutdown::Both)?;
+    let reader = stream.into_inner();
+    let unsplit = reader.unsplit(sink.into_inner());
+    unsplit.shutdown(Shutdown::Both)?;
     return Err(LiquidError::ReconnectionError);
 }
 

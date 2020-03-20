@@ -7,8 +7,9 @@ use crate::network::message::*;
 use crate::network::Connection;
 use serde::Serialize;
 use std::collections::HashMap;
-use tokio::io::{split, BufReader, BufWriter};
+use tokio::io::split;
 use tokio::net::TcpListener;
+use tokio_util::codec::{BytesCodec, FramedRead, FramedWrite};
 
 /// Represents a registration `Server` in a distributed system.
 #[derive(Debug)]
@@ -45,17 +46,14 @@ impl Server {
     /// not listen for further messages from the `Client` since this is not
     /// required for any desired functionality.
     pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
-        let mut buffer = Vec::new();
         loop {
             // wait on connections from new clients
             let (socket, _) = self.listener.accept().await?;
             let (reader, writer) = split(socket);
-            let mut read_stream = BufReader::new(reader);
-            let write_stream = BufWriter::new(writer);
+            let mut stream = FramedRead::new(reader, BytesCodec::new());
+            let sink = FramedWrite::new(writer, BytesCodec::new());
             // Receive the listening IP:Port address of the new client
-            let address =
-                network::read_msg::<String>(&mut read_stream, &mut buffer)
-                    .await?;
+            let address = network::read_msg::<String>(&mut stream).await?;
             // Make the `RegistrationMsg` to send to the new Client to inform
             // them of already existing nodes.
             let target_id = self.directory.len() + 1;
@@ -73,16 +71,14 @@ impl Server {
             };
             // Add them to our directory after making the `RegistrationMsg`
             // because we don't need to inform them of their own address
-            let conn = Connection {
-                address,
-                write_stream,
-            };
+            let conn = Connection { address, sink };
             self.directory.insert(target_id, conn);
             // Send the new client the list of existing nodes.
             self.send_msg(target_id, &reg_msg).await?;
         }
     }
 
+    // TODO: abstract/merge with Client::send_msg, they are the same
     /// Send a message to a client with the given `target_id`.
     pub(crate) async fn send_msg<T: Serialize>(
         &mut self,
