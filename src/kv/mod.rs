@@ -1,10 +1,12 @@
 use crate::error::LiquidError;
-use crate::kv_message::KVMessage;
+use crate::kv::kv_message::KVMessage;
 use crate::network::client::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
+
+pub mod kv_message;
 
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct Key {

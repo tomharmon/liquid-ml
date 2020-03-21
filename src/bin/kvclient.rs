@@ -1,6 +1,6 @@
 use liquid_ml::error::LiquidError;
+use liquid_ml::kv::kv_message::KVMessage;
 use liquid_ml::kv::{KVStore, Key};
-use liquid_ml::kv_message::KVMessage;
 use liquid_ml::network::client::Client;
 use std::env;
 use std::sync::Arc;

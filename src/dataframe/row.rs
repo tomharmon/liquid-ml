@@ -1,8 +1,8 @@
 //! Structs and functions for working with rows of data in a `DataFrame`.
 
+use crate::dataframe::fielder::Fielder;
+use crate::dataframe::schema::Schema;
 use crate::error::LiquidError;
-use crate::fielder::Fielder;
-use crate::schema::Schema;
 use sorer::dataframe::Data;
 use sorer::schema::DataType;
 

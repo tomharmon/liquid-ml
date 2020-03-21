@@ -8,15 +8,20 @@
 //! implementing the `Rower` trait to perform `map` or `filter` operations on a
 //! `DataFrame`.
 
+use crate::dataframe::row::Row;
+use crate::dataframe::rower::Rower;
+use crate::dataframe::schema::Schema;
 use crate::error::LiquidError;
-use crate::row::Row;
-use crate::rower::Rower;
-use crate::schema::Schema;
 use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema_from_file, DataType};
 
 use crossbeam_utils::thread;
+
+pub mod fielder;
+pub mod row;
+pub mod rower;
+pub mod schema;
 
 /// Represents a DataFrame which contains `Data` stored in a columnar format
 /// and a well-defined `Schema`

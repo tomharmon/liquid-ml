@@ -1,7 +1,7 @@
 //! Defines a trait to create visitors which can be used to perform data
 //! analytics on a `DataFrame` via the `pmap`/`map`/`filter` functions.
 
-use crate::row::Row;
+use crate::dataframe::row::Row;
 
 /// A trait for vistors who iterate through and process each row of a
 /// `DataFrame`. Rowers are cloned for parallel execution in `DataFrame::pmap`.
