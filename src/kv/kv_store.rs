@@ -14,20 +14,19 @@ impl KVStore {
         network: Arc<RwLock<Client<KVMessage>>>,
         network_notifier: Arc<Notify>,
     ) -> Self {
-        let res = KVStore {
+        KVStore {
             data: RwLock::new(HashMap::new()),
             cache: RwLock::new(HashMap::new()),
             network,
             internal_notifier: Notify::new(),
             network_notifier,
-        };
-        res
+        }
     }
 
     pub async fn get(&self, k: &Key) -> Result<DataFrame, LiquidError> {
-        if k.home == self.network.read().await.id {
+        if k.home == { self.network.read().await.id } {
             // should not unwrap here it might panic
-            match self.data.read().await.get(k) {
+            match { self.data.read().await.get(k) } {
                 Some(x) => Ok(deserialize(&x[..])?),
                 None => Err(LiquidError::NotPresent),
             }
@@ -42,11 +41,11 @@ impl KVStore {
         &self,
         k: &Key,
     ) -> Result<DataFrame, LiquidError> {
-        if k.home == self.network.read().await.id {
-            while self.data.read().await.get(k) == None {
+        if { k.home == self.network.read().await.id } {
+             while { self.data.read().await.get(k) } == None {
                 self.internal_notifier.notified().await;
             }
-            Ok(deserialize(&self.data.read().await.get(k).unwrap()[..])?)
+            Ok(deserialize({&self.data.read().await.get(k).unwrap()[..]})?)
         } else {
             {
                 self.network
@@ -59,7 +58,7 @@ impl KVStore {
                 self.internal_notifier.notified().await;
             }
             // TODO: remove this clone if possible
-            Ok(self.cache.read().await.get(k).unwrap().clone())
+            Ok({self.cache.read().await.get(k).unwrap().clone()})
         }
     }
 
@@ -71,22 +70,24 @@ impl KVStore {
             }
             Ok(())
         } else {
-            self.network
+            {
+                self.network
                 .write()
                 .await
                 .send_msg(k.home, KVMessage::Put(k.clone(), serial))
                 .await
+            }
         }
     }
 
     /// Internal helper to process messages from the queue
-    pub async fn process_messages(&self) -> Result<(), LiquidError> {
+    pub async fn process_messages(kv: Arc<KVStore>) -> Result<(), LiquidError> {
         loop {
             println!("attempting to get write lock to process a message");
             let msg;
             loop {
-                self.network_notifier.notified().await;
-                match self.network.write().await.receiver.try_recv() {
+                kv.network_notifier.notified().await;
+                match { kv.network.write().await.receiver.try_recv() } {
                     Ok(v) => {
                         msg = v;
                         break;
@@ -101,10 +102,10 @@ impl KVStore {
                     println!("in the correct match block");
 
                     let x: Value =
-                        { self.data.read().await.get(k).unwrap().clone() };
+                        { kv.data.read().await.get(k).unwrap().clone() };
                     println!("going to send over the following data: {:?}", x);
                     {
-                        self.network
+                        kv.network
                             .write()
                             .await
                             .send_msg(
@@ -115,13 +116,13 @@ impl KVStore {
                     }
                 }
                 KVMessage::Data(k, v) => {
-                    self.cache.write().await.insert(k.clone(), deserialize(v)?);
-                    self.internal_notifier.notify();
+                    { kv.cache.write().await.insert(k.clone(), deserialize(v)?); }
+                    kv.internal_notifier.notify();
                 }
                 KVMessage::Put(k, v) => {
                     // Note is the home id actually my id should we check?
-                    self.data.write().await.insert(k.clone(), v.clone());
-                    self.internal_notifier.notify();
+                     { kv.data.write().await.insert(k.clone(), v.clone()); }
+                    kv.internal_notifier.notify();
                 }
             }
         }

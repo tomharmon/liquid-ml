@@ -5,6 +5,7 @@ use liquid_ml::network::client::Client;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
+
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let args: Vec<String> = env::args().collect();
@@ -21,16 +22,20 @@ async fn main() -> Result<(), LiquidError> {
     let fut0 = tokio::spawn(async move {
         Client::accept_new_connections(arc).await.unwrap();
     });
-    let fut = kv.process_messages();
+    let kv_arc = Arc::new(kv);
+    let arc_new = kv_arc.clone();
+    let fut = tokio::spawn(async move{
+        KVStore::process_messages(arc_new).await.unwrap();
+    });
     let key = &Key::new("hello".to_string(), 1);
     let val = DataFrame::from_sor(String::from("tests/test.sor"), 0, 10000);
     if my_id == 1 {
         println!("putting val");
-        kv.put(key, val.clone()).await.unwrap();
+        kv_arc.put(key, val.clone()).await.unwrap();
         println!("done putting val");
     } else {
         println!("getting val");
-        println!("{:?}", kv.wait_and_get(&key).await.unwrap());
+        println!("{:?}", kv_arc.wait_and_get(&key).await.unwrap());
     }
 
     //c.send_msg(1, &"hello".to_string());
