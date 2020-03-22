@@ -1,11 +1,10 @@
+use liquid_ml::dataframe::DataFrame;
 use liquid_ml::error::LiquidError;
-use liquid_ml::kv::kv_message::KVMessage;
-use liquid_ml::kv::{KVStore, Key};
+use liquid_ml::kv::{KVMessage, KVStore, Key};
 use liquid_ml::network::client::Client;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
-
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let args: Vec<String> = env::args().collect();
@@ -24,7 +23,7 @@ async fn main() -> Result<(), LiquidError> {
     });
     let fut = kv.process_messages();
     let key = &Key::new("hello".to_string(), 1);
-    let val = String::from("world").into_bytes();
+    let val = DataFrame::from_sor(String::from("tests/test.sor"), 0, 10000);
     if my_id == 1 {
         println!("putting val");
         kv.put(key, val.clone()).await.unwrap();

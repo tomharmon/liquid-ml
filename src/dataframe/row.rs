@@ -1,20 +1,10 @@
 //! Structs and functions for working with rows of data in a `DataFrame`.
 
 use crate::dataframe::fielder::Fielder;
-use crate::dataframe::schema::Schema;
+use crate::dataframe::{Row, Schema};
 use crate::error::LiquidError;
 use sorer::dataframe::Data;
 use sorer::schema::DataType;
-
-/// Represents a single row in a `DataFrame`
-pub struct Row {
-    /// A clone of the `Schema` of the `DataFrame` this `Row` is from.
-    pub(crate) schema: Vec<DataType>,
-    /// The data of this `Row` as boxed values.
-    pub(crate) data: Vec<Data>,
-    /// The offset of this `Row` in the `DataFrame`
-    idx: Option<usize>,
-}
 
 /// Functions for creating, mutating, and getting data from `Row`s.
 impl Row {
@@ -189,8 +179,8 @@ impl Row {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fielder::Fielder;
-    use crate::schema::Schema;
+    use crate::dataframe::fielder::Fielder;
+    use crate::dataframe::Schema;
 
     struct TestFielder {
         pub num_null: usize,

@@ -1,20 +1,9 @@
 //! A Schema module for managing the data types and row/column names of a
 //! DataFrame.
 
+use crate::dataframe::Schema;
 use crate::error::LiquidError;
 use sorer::schema::DataType;
-
-/// Represents a `Schema` of a `DataFrame`
-pub struct Schema {
-    /// The `DataType`s of this `Schema`
-    pub schema: Vec<DataType>,
-    /// The optional names of each `Column`, which must be unique if they are
-    /// `Some`
-    pub col_names: Vec<Option<String>>,
-    /// The optional names of each `Row`, which must be unique if they are
-    /// `Some`
-    pub row_names: Vec<Option<String>>,
-}
 
 /// The implementation of the Schema interface, which manages data types and
 /// row/column names of a `DataFrame`

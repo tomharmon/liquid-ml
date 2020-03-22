@@ -1,12 +1,14 @@
+use crate::dataframe::DataFrame;
 use crate::error::LiquidError;
-use crate::kv::kv_message::KVMessage;
+use crate::kv::KVMessage;
+use crate::kv::*;
 use crate::network::client::Client;
-use serde::{Deserialize, Serialize};
+use bincode::{deserialize, serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
-use crate::dataframe::DataFrame;
 
+// TODO: Add private get_raw helpers
 impl KVStore {
     pub fn new(
         network: Arc<RwLock<Client<KVMessage>>>,
@@ -25,7 +27,10 @@ impl KVStore {
     pub async fn get(&self, k: &Key) -> Result<DataFrame, LiquidError> {
         if k.home == self.network.read().await.id {
             // should not unwrap here it might panic
-            Ok(self.data.read().await.get(k).unwrap().clone())
+            match self.data.read().await.get(k) {
+                Some(x) => Ok(deserialize(&x[..])?),
+                None => Err(LiquidError::NotPresent),
+            }
         } else {
             Err(LiquidError::NotPresent)
         }
@@ -33,12 +38,15 @@ impl KVStore {
 
     /// Get the data for the give key, if the key is on a different node then make a network call
     /// and wait until the data has been added to the cache
-    pub async fn wait_and_get(&self, k: &Key) -> Result<Value, LiquidError> {
+    pub async fn wait_and_get(
+        &self,
+        k: &Key,
+    ) -> Result<DataFrame, LiquidError> {
         if k.home == self.network.read().await.id {
             while self.data.read().await.get(k) == None {
                 self.internal_notifier.notified().await;
             }
-            Ok(self.data.read().await.get(k).unwrap().clone())
+            Ok(deserialize(&self.data.read().await.get(k).unwrap()[..])?)
         } else {
             {
                 self.network
@@ -50,21 +58,23 @@ impl KVStore {
             while { self.cache.read().await.get(k) } == None {
                 self.internal_notifier.notified().await;
             }
+            // TODO: remove this clone if possible
             Ok(self.cache.read().await.get(k).unwrap().clone())
         }
     }
 
-    pub async fn put(&self, k: &Key, v: Value) -> Result<(), LiquidError> {
+    pub async fn put(&self, k: &Key, v: DataFrame) -> Result<(), LiquidError> {
+        let serial = serialize(&v)?;
         if k.home == { self.network.read().await.id } {
             {
-                self.data.write().await.insert(k.clone(), v);
+                self.data.write().await.insert(k.clone(), serial);
             }
             Ok(())
         } else {
             self.network
                 .write()
                 .await
-                .send_msg(k.home, KVMessage::Put(k.clone(), v))
+                .send_msg(k.home, KVMessage::Put(k.clone(), serial))
                 .await
         }
     }
@@ -81,7 +91,7 @@ impl KVStore {
                         msg = v;
                         break;
                     }
-                    Err(_) => ()
+                    Err(_) => (),
                 }
             }
             println!("Got a message {:?}", msg);
@@ -105,7 +115,7 @@ impl KVStore {
                     }
                 }
                 KVMessage::Data(k, v) => {
-                    self.cache.write().await.insert(k.clone(), v.clone());
+                    self.cache.write().await.insert(k.clone(), deserialize(v)?);
                     self.internal_notifier.notify();
                 }
                 KVMessage::Put(k, v) => {
@@ -115,14 +125,5 @@ impl KVStore {
                 }
             }
         }
-        // This function will read and process a message from the recieve queue
-        //
-        // If the message is a get request it will read the sender of the messsage and reply with a
-        // KVResponse with the data from its local store (We might have to spawn an async tokio
-        // task that waits until a relavant put rquest has occured)
-        //
-        // If the message is a put it will add the provided data to it's local store.
-        //
-        // If the message is a KVResponse the provided data will be placed in the cache
     }
 }
