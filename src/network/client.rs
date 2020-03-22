@@ -258,7 +258,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             msg_id: self.msg_id,
             msg: message,
         };
-        println!("Sending the message: {:?}", m);
+        println!("Sending a message");
         network::send_msg(target_id, m, &mut self.directory).await?;
         println!("sent it");
         self.msg_id += 1;
@@ -282,16 +282,11 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                 let s: Message<RT> =
                     network::read_msg(&mut reader).await.unwrap();
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
-                println!("Got msg {:?}", s);
+                println!("Got msg");
                 sender.send(s).await.unwrap();
                 notifier.notify();
                 println!("added msg to queue");
             }
         });
-    }
-
-    /// Process the next message in this client's message queue
-    pub(crate) async fn next_msg(&mut self) -> Message<RT> {
-        self.receiver.recv().await.unwrap()
     }
 }
