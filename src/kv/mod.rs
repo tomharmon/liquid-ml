@@ -96,11 +96,17 @@ impl KVStore {
     pub async fn process_messages(&self) -> Result<(), LiquidError> {
         loop {
             println!("attempting to get write lock to process a message");
-            // TODO: try to get a message here and release the lock after that retrying after some
-            // notification or smth
-            self.network_notifier.notified().await;
-            // Should user try read and wait in a loop ideally
-            let msg = { self.network.write().await.next_msg().await };
+            let msg;
+            loop {
+                self.network_notifier.notified().await;
+                match self.network.write().await.receiver.try_recv() {
+                    Ok(v) => {
+                        msg = v;
+                        break;
+                    }
+                    Err(_) => ()
+                }
+            }
             println!("Got a message {:?}", msg);
             match &msg.msg {
                 KVMessage::Get(k) => {
