@@ -41,7 +41,6 @@ impl KVStore {
         &self,
         k: &Key,
     ) -> Result<DataFrame, LiquidError> {
-        
         if { k.home == self.network.read().await.id } {
             while { self.data.read().await.get(k) } == None {
                 self.internal_notifier.notified().await;
@@ -62,13 +61,13 @@ impl KVStore {
             while { self.cache.read().await.get(k) } == None {
                 self.internal_notifier.notified().await;
                 println!("while iter {}", x);
-                x+=1;
+                x += 1;
             }
             dbg!("Have the data");
             // TODO: remove this clone if possible
             Ok({ self.cache.read().await.get(k).unwrap().clone() })
         }
-        
+
         //Ok(deserialize(&self.wait_and_get_raw(k).await?[..])?)
     }
 

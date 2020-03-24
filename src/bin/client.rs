@@ -1,9 +1,9 @@
+use liquid_ml::application::Application;
 use liquid_ml::dataframe::DataFrame;
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::Key;
 use sorer::dataframe::{Column, Data};
 use std::env;
-use liquid_ml::application::Application;
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
