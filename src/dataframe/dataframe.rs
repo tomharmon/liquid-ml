@@ -1,15 +1,5 @@
-//! A module for creating and manipulating `DataFrame`s. A `DataFrame` can be
-//! created from a [`SoR`](https://docs.rs/sorer/0.1.0/sorer/) file,
-//! or by adding `Column`s or `Row`s manually.
-//!
-//! The `DataFrame` is lightly inpsired by those found in `R` or `pandas`, and
-//! supports optionally named columns and rows. You may analyze the data in a
-//! `DataFrame` in a horizontally scalable manner across many machines by
-//! implementing the `Rower` trait to perform `map` or `filter` operations on a
-//! `DataFrame`.
-
-use crate::dataframe::rower::Rower;
-use crate::dataframe::{DataFrame, Row, Schema};
+//! Defines functionality for the `DataFrame`
+use crate::dataframe::{DataFrame, Row, Rower, Schema};
 use crate::error::LiquidError;
 use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
@@ -427,8 +417,7 @@ impl From<Data> for DataFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataframe::rower::Rower;
-    use crate::dataframe::Row;
+    use crate::dataframe::{Row, Rower};
 
     #[derive(Clone)]
     struct PosIntSummer {

@@ -1,7 +1,7 @@
 //! Defines messages used to communicate with the network of nodes over TCP.
 use crate::error::LiquidError;
 use bincode::{deserialize, serialize};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Bytes, BytesMut};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};

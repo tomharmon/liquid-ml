@@ -1,7 +1,6 @@
 //! Structs and functions for working with rows of data in a `DataFrame`.
 
-use crate::dataframe::fielder::Fielder;
-use crate::dataframe::{Row, Schema};
+use crate::dataframe::{Fielder, Row, Schema};
 use crate::error::LiquidError;
 use sorer::dataframe::Data;
 use sorer::schema::DataType;
@@ -179,7 +178,7 @@ impl Row {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataframe::fielder::Fielder;
+    use crate::dataframe::Fielder;
     use crate::dataframe::Schema;
 
     struct TestFielder {

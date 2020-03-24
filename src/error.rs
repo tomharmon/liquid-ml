@@ -1,8 +1,7 @@
-//! The possible error types when using the `DataFrame` trait.
-use std::io;
+//! The possible error types when using the liquid-ml crate.
 use thiserror::Error;
 
-/// An enumeration of `DataFrame` errors.
+/// An enumeration of `LiquidML` errors.
 #[derive(Debug, Error)]
 pub enum LiquidError {
     #[error("Row index out of bounds")]
@@ -16,7 +15,7 @@ pub enum LiquidError {
     #[error("Must set an index for the row")]
     NotSet,
     #[error("Network error")]
-    NetworkError(#[from] io::Error),
+    NetworkError(#[from] std::io::Error),
     #[error("Serialization/Deserialization Error")]
     SerdeError(#[from] Box<bincode::ErrorKind>),
     #[error("Who you sending this to?")]

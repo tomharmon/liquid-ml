@@ -13,9 +13,7 @@ use sorer::dataframe::{Column, Data};
 use sorer::schema::DataType;
 
 pub mod dataframe;
-pub mod fielder;
 pub mod row;
-pub mod rower;
 pub mod schema;
 
 /// Represents a DataFrame which contains `Data` stored in a columnar format
@@ -52,4 +50,43 @@ pub struct Row {
     pub(crate) data: Vec<Data>,
     /// The offset of this `Row` in the `DataFrame`
     idx: Option<usize>,
+}
+
+/// A field visitor invoked by a `Row`.
+pub trait Fielder {
+    /// Must be called before visiting a row
+    fn start(&mut self, starting_row_index: usize);
+
+    /// Called for fields of type `bool` with the value of the field
+    fn visit_bool(&mut self, b: bool);
+
+    /// Called for fields of type `float` with the value of the field
+    fn visit_float(&mut self, f: f64);
+
+    /// Called for fields of type `int` with the value of the field
+    fn visit_int(&mut self, i: i64);
+
+    /// Called for fields of type `String` with the value of the field
+    fn visit_string(&mut self, s: &String);
+
+    /// Called for fields where the value of the field is missing
+    fn visit_null(&mut self);
+
+    /// Called when all fields have been seen
+    fn done(&mut self);
+}
+
+/// A trait for vistors who iterate through and process each row of a
+/// `DataFrame`. Rowers are cloned for parallel execution in `DataFrame::pmap`.
+pub trait Rower {
+    /// This function is called once per row. The `Row` object is on loan and
+    /// should not be retained as it is going to be reused in the next
+    /// call. The return value is used in filters to indicate that a row
+    /// should be kept.
+    fn visit(&mut self, r: &Row) -> bool;
+
+    /// Once traversal of the `DataFrame` is complete the rowers that were
+    /// split off will be joined.  There will be one join per split. The
+    /// original object will be the last to be called join on.
+    fn join(&mut self, other: &Self) -> Self;
 }
