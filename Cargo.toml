@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 # sorer = { git = "https://github.com/SamedhG/sorer", branch = "master" }
 sorer = {path = "../sorer/"}
-tokio = { version = "0.2.13", features = ["full"] }
+tokio = { version = "0.2.13", features = ["full", "blocking"] }
 tokio-util = { version = "0.3.1", features = ["codec"] }
 thiserror = "1.0.11"
 num_cpus = "1.12.0"

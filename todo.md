@@ -1,12 +1,12 @@
- - KV should take and return Dataframes
- - Build application layer
-    - PMAP(Rower)
-    - run(fn(kv, string) => "T maybe? a future<Result<T>>?")
-    - new("filename", num-clients as usize)
-        - Every node has the entire SOR file and loads a chunk to its memory
-    - new(fn(kv) -> Self)
+- Orderly shutdown
+- Build application layer
+  - PMAP(Rower)
+  - run(fn(kv, string) => "T maybe? a future<Result<T>>?")
+  - new("filename", num-clients as usize)
+      - Every node has the entire SOR file and loads a chunk to its memory
+  - new(fn(kv) -> Self)
 - Testing
     - IMP: Check for lock contention
     - Assume no network errors
 - Random Forest LUL
-- Orderly shutdown
+- Change printlns to logger

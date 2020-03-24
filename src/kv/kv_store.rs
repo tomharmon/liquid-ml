@@ -41,6 +41,7 @@ impl KVStore {
         &self,
         k: &Key,
     ) -> Result<DataFrame, LiquidError> {
+        
         if { k.home == self.network.read().await.id } {
             while { self.data.read().await.get(k) } == None {
                 self.internal_notifier.notified().await;
@@ -56,12 +57,19 @@ impl KVStore {
                     .send_msg(k.home, KVMessage::Get(k.clone()))
                     .await?;
             }
+            dbg!("Sent the request to get data");
+            let mut x = 0;
             while { self.cache.read().await.get(k) } == None {
                 self.internal_notifier.notified().await;
+                println!("while iter {}", x);
+                x+=1;
             }
+            dbg!("Have the data");
             // TODO: remove this clone if possible
             Ok({ self.cache.read().await.get(k).unwrap().clone() })
         }
+        
+        //Ok(deserialize(&self.wait_and_get_raw(k).await?[..])?)
     }
 
     pub async fn put(&self, k: &Key, v: DataFrame) -> Result<(), LiquidError> {
@@ -97,38 +105,52 @@ impl KVStore {
                     Err(_) => (),
                 }
             }
-            match &msg.msg {
-                KVMessage::Get(k) => {
-                    // This should wait until it has the data to respond
-                    let x: Value = kv.wait_and_get_raw(k).await?;
-                    {
-                        kv.network
-                            .write()
-                            .await
-                            .send_msg(
-                                msg.sender_id,
-                                KVMessage::Data(k.clone(), x),
-                            )
-                            .await?;
+            let kv_ptr_clone = kv.clone();
+            println!("About to spawn a task to process a message");
+            tokio::spawn(async move {
+                println!("msg processing task is running");
+                match &msg.msg {
+                    KVMessage::Get(k) => {
+                        // This should wait until it has the data to respond
+                        let x: Value =
+                            kv_ptr_clone.wait_and_get_raw(k).await.unwrap();
+                        dbg!("got data to respond with");
+                        {
+                            kv_ptr_clone
+                                .network
+                                .write()
+                                .await
+                                .send_msg(
+                                    msg.sender_id,
+                                    KVMessage::Data(k.clone(), x),
+                                )
+                                .await
+                                .unwrap();
+                        }
+                    }
+                    KVMessage::Data(k, v) => {
+                        {
+                            kv_ptr_clone
+                                .cache
+                                .write()
+                                .await
+                                .insert(k.clone(), deserialize(v).unwrap());
+                        }
+                        kv_ptr_clone.internal_notifier.notify();
+                    }
+                    KVMessage::Put(k, v) => {
+                        // Note is the home id actually my id should we check?
+                        {
+                            kv_ptr_clone
+                                .data
+                                .write()
+                                .await
+                                .insert(k.clone(), v.clone());
+                        }
+                        kv_ptr_clone.internal_notifier.notify();
                     }
                 }
-                KVMessage::Data(k, v) => {
-                    {
-                        kv.cache
-                            .write()
-                            .await
-                            .insert(k.clone(), deserialize(v)?);
-                    }
-                    kv.internal_notifier.notify();
-                }
-                KVMessage::Put(k, v) => {
-                    // Note is the home id actually my id should we check?
-                    {
-                        kv.data.write().await.insert(k.clone(), v.clone());
-                    }
-                    kv.internal_notifier.notify();
-                }
-            }
+            });
         }
     }
 

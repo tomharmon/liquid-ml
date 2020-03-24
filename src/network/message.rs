@@ -1,10 +1,10 @@
 //! Defines messages used to communicate with the network of nodes over TCP.
 use crate::error::LiquidError;
 use bincode::{deserialize, serialize};
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use tokio_util::codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 /// A message for communication between nodes
 #[derive(Serialize, Deserialize, Debug)]
@@ -47,12 +47,14 @@ pub enum ControlMsg {
 #[derive(Debug)]
 pub struct MessageCodec<T> {
     pub(crate) phantom: std::marker::PhantomData<T>,
+    pub(crate) codec: LengthDelimitedCodec,
 }
 
 impl<T> MessageCodec<T> {
     pub(crate) fn new() -> Self {
         MessageCodec {
             phantom: std::marker::PhantomData,
+            codec: LengthDelimitedCodec::new(),
         }
     }
 }
@@ -64,15 +66,9 @@ impl<T: DeserializeOwned> Decoder for MessageCodec<T> {
         &mut self,
         src: &mut BytesMut,
     ) -> Result<Option<Self::Item>, Self::Error> {
-        if src.remaining() < std::mem::size_of::<u64>() {
-            Ok(None)
-        } else {
-            let num_bytes = src.get_u64() as usize;
-            if src.remaining() < num_bytes {
-                Ok(None)
-            } else {
-                Ok(Some(deserialize(&src.split_to(num_bytes)[..])?))
-            }
+        match self.codec.decode(src)? {
+            Some(data) => Ok(Some(deserialize(&data)?)),
+            None => Ok(None),
         }
     }
 }
@@ -86,10 +82,6 @@ impl<T: Serialize> Encoder<Message<T>> for MessageCodec<T> {
         dst: &mut BytesMut,
     ) -> Result<(), Self::Error> {
         let serialized = serialize(&item)?;
-        let num_bytes = serialized.len();
-        dst.reserve(std::mem::size_of::<u64>());
-        dst.put_u64(num_bytes as u64);
-        dst.extend_from_slice(&serialized[..]);
-        Ok(())
+        Ok(self.codec.encode(Bytes::from(serialized), dst)?)
     }
 }

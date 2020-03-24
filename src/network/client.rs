@@ -190,6 +190,9 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
     ) -> Result<(), LiquidError> {
         // Connect to the given client
         let stream = TcpStream::connect(client.1.clone()).await?;
+        //dbg!(stream.recv_buffer_size());
+        //dbg!(stream.send_buffer_size());
+        stream.set_recv_buffer_size(2626560).unwrap();
         let (reader, writer) = split(stream);
         let stream = FramedRead::new(reader, MessageCodec::<RT>::new());
         let mut sink =
@@ -258,9 +261,9 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             msg_id: self.msg_id,
             msg: message,
         };
-        println!("Sending a message");
+        println!("Sending a msg");
         network::send_msg(target_id, m, &mut self.directory).await?;
-        println!("sent it");
+        println!("sent the message");
         self.msg_id += 1;
         Ok(())
     }

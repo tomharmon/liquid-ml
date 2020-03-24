@@ -64,8 +64,8 @@ async fn main() -> Result<(), LiquidError> {
         println!("--id 2: done");
     } else if my_id == 3 {
         println!("--id 3: waiting for data");
-        let df1 = kv_arc.wait_and_get(&verif).await?;
         let df2 = kv_arc.wait_and_get(&ck).await?;
+        let df1 = kv_arc.wait_and_get(&verif).await?;
         match (df1.get(0, 0)?, df2.get(0, 0)?) {
             (Data::Int(x), Data::Int(y)) => {
                 if x == y {
