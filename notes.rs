@@ -52,7 +52,30 @@ fn main () {
     app.run(|kv| {
         something complicated 
     })
-    app.pmap(r);
+}
+
+
+// Our design pt2
+#[tokio-main]
+fn main () {
+    let app = Application::new(|| {
+        
+    });
+    // alternatively we can also have a run() method that takes a closure,
+    // where the signature of the closure can take in a `kv` or `df` as a
+    // parameter to let the user do something more advanced/custom
+    app.run(|kv| {
+        something complicated 
+    }).await
+
+    let kv = app.kv;
+    something complicated
+
+
+    app.run(|kv| {
+
+
+    }).await
 }
 
 

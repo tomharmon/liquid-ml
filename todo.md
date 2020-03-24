@@ -10,3 +10,4 @@
     - Assume no network errors
 - Random Forest LUL
 - Change printlns to logger
+- Spawn all tasks onto a runtime directly

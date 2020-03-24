@@ -140,6 +140,7 @@
 //! 5. Define the application layer interface.
 //! 6. Implement random forest.
 
+pub mod application;
 pub mod dataframe;
 pub mod error;
 pub mod kv;
