@@ -9,10 +9,18 @@ use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
 
 // TODO: Add private get_raw helpers
+/// Defines methods for a `KVStore`
 impl KVStore {
+    /// Creates a new `KVStore`. The `network` is used to communicate between
+    /// distributed `KVStore`s. The `network_notifier` comes from the `network`
+    /// and is used to notify this `KVStore` when a new message comes from the
+    /// `network` so that this `KVStore` may process and respond to messages.
+    /// The `network_notifier` is passed in separately so that `new` is not
+    /// `async`.
     pub fn new(
         network: Arc<RwLock<Client<KVMessage>>>,
         network_notifier: Arc<Notify>,
+        id: usize,
     ) -> Self {
         KVStore {
             data: RwLock::new(HashMap::new()),
@@ -20,13 +28,23 @@ impl KVStore {
             network,
             internal_notifier: Notify::new(),
             network_notifier,
+            id,
         }
     }
 
-    pub async fn get(&self, k: &Key) -> Result<DataFrame, LiquidError> {
-        if k.home == { self.network.read().await.id } {
-            // should not unwrap here it might panic
-            match { self.data.read().await.get(k) } {
+    /// `get` is used to retrieve the `Value` associated with the given `key`.
+    /// The difference between `get` and `wait_and_get` is that `get` returns
+    /// an error if the data is not owned by this `KVStore` or is not in its
+    /// cache.
+    ///
+    /// ## Errors
+    /// If `key` is not in this `KVStore`s cache or is not owned by this
+    /// `KVStore`, then the error `Err(LiquidError::NotPresent)` is returned
+    pub async fn get(&self, key: &Key) -> Result<DataFrame, LiquidError> {
+        // TODO: also check the cache
+        if key.home == self.id {
+            // TODO: should not unwrap here it might panic
+            match { self.data.read().await.get(key) } {
                 Some(x) => Ok(deserialize(&x[..])?),
                 None => Err(LiquidError::NotPresent),
             }
@@ -35,47 +53,56 @@ impl KVStore {
         }
     }
 
-    /// Get the data for the give key, if the key is on a different node then make a network call
-    /// and wait until the data has been added to the cache
+    /// Get the data for the given `key`. If the key is on a different node
+    /// then request the data from the node that owns the `key` and wait until
+    /// that node responds with the data, then return the deserialized data.
     pub async fn wait_and_get(
         &self,
-        k: &Key,
+        key: &Key,
     ) -> Result<DataFrame, LiquidError> {
-        if { k.home == self.network.read().await.id } {
-            while { self.data.read().await.get(k) } == None {
+        if key.home == self.id {
+            while { self.data.read().await.get(key) } == None {
                 self.internal_notifier.notified().await;
             }
             Ok(deserialize({
-                &self.data.read().await.get(k).unwrap()[..]
+                &self.data.read().await.get(key).unwrap()[..]
             })?)
         } else {
             {
                 self.network
                     .write()
                     .await
-                    .send_msg(k.home, KVMessage::Get(k.clone()))
+                    .send_msg(key.home, KVMessage::Get(key.clone()))
                     .await?;
             }
             dbg!("Sent the request to get data");
             let mut x = 0;
-            while { self.cache.read().await.get(k) } == None {
+            while { self.cache.read().await.get(key) } == None {
                 self.internal_notifier.notified().await;
                 println!("while iter {}", x);
                 x += 1;
             }
             dbg!("Have the data");
             // TODO: remove this clone if possible
-            Ok({ self.cache.read().await.get(k).unwrap().clone() })
+            Ok({ self.cache.read().await.get(key).unwrap().clone() })
         }
 
         //Ok(deserialize(&self.wait_and_get_raw(k).await?[..])?)
     }
 
-    pub async fn put(&self, k: &Key, v: DataFrame) -> Result<(), LiquidError> {
-        let serial = serialize(&v)?;
-        if k.home == { self.network.read().await.id } {
+    // TODO: should return an `Result<Option<Value>, LiquidError` that is `Some`
+    // if the given `key` already exists in this `KVStore`
+    /// Put the data held in `value` to the `KVStore` with the `id` in
+    /// `key.home`
+    pub async fn put(
+        &self,
+        key: &Key,
+        value: DataFrame,
+    ) -> Result<(), LiquidError> {
+        let serial = serialize(&value)?;
+        if key.home == self.id {
             {
-                self.data.write().await.insert(k.clone(), serial);
+                self.data.write().await.insert(key.clone(), serial);
             }
             Ok(())
         } else {
@@ -83,7 +110,7 @@ impl KVStore {
                 self.network
                     .write()
                     .await
-                    .send_msg(k.home, KVMessage::Put(k.clone(), serial))
+                    .send_msg(key.home, KVMessage::Put(key.clone(), serial))
                     .await
             }
         }

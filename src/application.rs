@@ -9,7 +9,7 @@ use tokio::task::JoinHandle;
 pub struct Application {
     pub kv: Arc<KVStore>,
     pub node_id: usize,
-    // TODO: Use a runtime here
+    // TODO: maybe use a runtime here
     msg_processor: JoinHandle<()>,
     conn_processor: JoinHandle<()>,
 }
@@ -28,7 +28,7 @@ impl Application {
         .await?;
         let node_id = c.id;
         let arc = Arc::new(RwLock::new(c));
-        let kv = KVStore::new(arc.clone(), notifier);
+        let kv = KVStore::new(arc.clone(), notifier, node_id);
         let fut0 = tokio::spawn(async move {
             Client::accept_new_connections(arc).await.unwrap();
         });
