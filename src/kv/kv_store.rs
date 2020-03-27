@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
 
-// TODO: Add private get_raw helpers
 /// Defines methods for a `KVStore`
 impl KVStore {
     /// Creates a new `KVStore`. The `network` is used to communicate between
@@ -57,6 +56,7 @@ impl KVStore {
         }
     }
 
+    // TODO: why is the commented out version broken?
     /// Get the data for the given `key`. If the key belongs on a different node
     /// then the data will be requested from the node that owns the `key` and
     /// this method will block until that node responds with the data.
@@ -72,6 +72,35 @@ impl KVStore {
     ///    not be `await`ed but instead given a callback closure via
     ///    calling `and_then` on the returned future
     pub async fn wait_and_get(
+        &self,
+        key: &Key,
+    ) -> Result<DataFrame, LiquidError> {
+        if key.home == self.id {
+            while { self.data.read().await.get(key) } == None {
+                self.internal_notifier.notified().await;
+            }
+            Ok(deserialize({
+                &self.data.read().await.get(key).unwrap()[..]
+            })?)
+        } else if { self.cache.read().await.contains_key(key) } {
+            // NOTE: not sure if this case is even working/running
+            Ok({ self.cache.read().await.get(key).unwrap().clone() })
+        } else {
+            {
+                self.network
+                    .write()
+                    .await
+                    .send_msg(key.home, KVMessage::Get(key.clone()))
+                    .await?;
+            }
+            while { self.cache.read().await.get(key) } == None {
+                self.internal_notifier.notified().await;
+            }
+            Ok({ self.cache.read().await.get(key).unwrap().clone() })
+        }
+    }
+    /*
+     pub async fn wait_and_get(
         &self,
         key: &Key,
     ) -> Result<DataFrame, LiquidError> {
@@ -115,6 +144,7 @@ impl KVStore {
             }
         }
     }
+    */
 
     /// Put the data held in `value` to the `KVStore` with the `id` in
     /// `key.home`.
