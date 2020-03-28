@@ -1,14 +1,15 @@
-- Orderly shutdown
-- Build application layer
-  - PMAP(Rower)
-  - filter?
-- Every node has the entire SOR file, should we change?
 - actually use an LRU cache not a hash map
 - fix visibility modifiers for network/kv
 - re-export column + data
+- Build application layer
+  - test PMAP(Rower)
+  - filter?
+- WordCount
+- Every node has the entire SOR file, should we change?
 - Testing
-    - IMP: Check for lock contention
-    - Assume no network errors
 - Random Forest LUL
 - Change printlns to logger
-- Spawn all tasks onto a runtime directly
+- Spawn all tasks onto a runtime directly?
+- application layer documentation
+- seven degrees of Linus
+- Orderly shutdown

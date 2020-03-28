@@ -28,4 +28,6 @@ pub enum LiquidError {
     StreamClosed,
     #[error("Unexpected Message")]
     UnexpectedMessage,
+    #[error("User is dumb")]
+    DumbUserError,
 }

@@ -6,6 +6,7 @@ use crate::network::client::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::{Notify, RwLock};
 
 pub mod kv_store;
@@ -58,18 +59,21 @@ pub struct KVStore {
     network_notifier: Arc<Notify>,
     /// The `id` of the node this `KVStore` is running on
     id: usize,
+    /// A channel to send blobs of data to a higher level
+    blob_sender: Sender<Value>,
 }
 
 /// Represents the kind of messages that can be sent between distributed
 /// `KVStore`s
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum KVMessage {
-    // TODO: difference between `Put` and `Data`? I think we can safely delete
-    //      one of them
+    /// A message used to tell other clients to put the provided data in their local store
     Put(Key, Value),
     /// A message used to request the data for the given `Key` from other nodes
     Get(Key),
-    /// A message used to send a `Key` and its `Value`, usually in response to
-    /// `Get` messages
+    /// A message used to send a `Key` and its `Value`, in response to `Get` messages
     Data(Key, Value),
+    /// A message used to share random blobs of data with other nodes. This provides a lower level
+    /// interface to facilitate other kinds of messages
+    Blob(Value),
 }

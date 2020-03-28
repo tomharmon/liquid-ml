@@ -190,9 +190,6 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
     ) -> Result<(), LiquidError> {
         // Connect to the given client
         let stream = TcpStream::connect(client.1.clone()).await?;
-        //dbg!(stream.recv_buffer_size());
-        //dbg!(stream.send_buffer_size());
-        stream.set_recv_buffer_size(2626560).unwrap();
         let (reader, writer) = split(stream);
         let stream = FramedRead::new(reader, MessageCodec::<RT>::new());
         let mut sink =
@@ -261,9 +258,8 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             msg_id: self.msg_id,
             msg: message,
         };
-        println!("Sending a msg");
         network::send_msg(target_id, m, &mut self.directory).await?;
-        println!("sent the message");
+        println!("sent a message with id, {}", self.msg_id);
         self.msg_id += 1;
         Ok(())
     }
@@ -275,20 +271,17 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         mut reader: FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
         notifier: Arc<Notify>,
     ) {
-        // TODO: make the right callback that we want for handling messages
-        // after sending them thru mpsc channel
         // TODO: need to properly increment message id but that means self
         // needs to be 'static and that propagates some
         tokio::spawn(async move {
             loop {
-                println!("waiting to read msg");
                 let s: Message<RT> =
                     network::read_msg(&mut reader).await.unwrap();
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
-                println!("Got msg");
+                let id = s.msg_id;
                 sender.send(s).await.unwrap();
                 notifier.notify();
-                println!("added msg to queue");
+                println!("Got a msg with id: {}, added to process queue", id);
             }
         });
     }

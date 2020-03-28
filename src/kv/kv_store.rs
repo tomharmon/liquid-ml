@@ -6,6 +6,7 @@ use crate::network::client::Client;
 use bincode::{deserialize, serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::{Notify, RwLock};
 
 /// Defines methods for a `KVStore`
@@ -20,6 +21,7 @@ impl KVStore {
         network: Arc<RwLock<Client<KVMessage>>>,
         network_notifier: Arc<Notify>,
         id: usize,
+        blob_sender: Sender<Value>,
     ) -> Self {
         KVStore {
             data: RwLock::new(HashMap::new()),
@@ -28,6 +30,7 @@ impl KVStore {
             internal_notifier: Notify::new(),
             network_notifier,
             id,
+            blob_sender,
         }
     }
 
@@ -146,6 +149,23 @@ impl KVStore {
         }
     }
 
+    /// Sends the given `blob` to the `KVStore` with the given `target_id`
+    pub async fn send_blob(
+        &self,
+        target_id: usize,
+        blob: Value,
+    ) -> Result<(), LiquidError> {
+        if target_id == self.id {
+            Err(LiquidError::DumbUserError)
+        } else {
+            self.network
+                .write()
+                .await
+                .send_msg(target_id, KVMessage::Blob(blob))
+                .await
+        }
+    }
+
     /// Internal helper to process messages from the queue
     pub async fn process_messages(kv: Arc<KVStore>) -> Result<(), LiquidError> {
         loop {
@@ -161,8 +181,8 @@ impl KVStore {
                 }
             }
             let kv_ptr_clone = kv.clone();
+            let sender_clone = kv.blob_sender.clone();
             tokio::spawn(async move {
-                println!("msg processing task is running");
                 match &msg.msg {
                     KVMessage::Get(k) => {
                         // This should wait until it has the data to respond
@@ -200,6 +220,9 @@ impl KVStore {
                                 .insert(k.clone(), v.clone());
                         }
                         kv_ptr_clone.internal_notifier.notify();
+                    }
+                    KVMessage::Blob(v) => {
+                        sender_clone.send(v.clone()).await;
                     }
                 }
             });
