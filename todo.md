@@ -1,10 +1,11 @@
 - Orderly shutdown
 - Build application layer
   - PMAP(Rower)
-  - run(fn(kv, string) => "T maybe? a future<Result<T>>?")
-  - new("filename", num-clients as usize)
-      - Every node has the entire SOR file and loads a chunk to its memory
-  - new(fn(kv) -> Self)
+  - filter?
+- Every node has the entire SOR file, should we change?
+- actually use an LRU cache not a hash map
+- fix visibility modifiers for network/kv
+- re-export column + data
 - Testing
     - IMP: Check for lock contention
     - Assume no network errors

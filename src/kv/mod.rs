@@ -29,8 +29,11 @@ impl Key {
     /// Creates a new `Key` that is owned by the `KVStore` running on the id
     /// equal to `home`. The given `name` defines where in the `KVStore` the
     /// value is stored.
-    pub fn new(name: String, home: usize) -> Self {
-        Key { name, home }
+    pub fn new(name: &str, home: usize) -> Self {
+        Key {
+            name: String::from(name),
+            home,
+        }
     }
 }
 

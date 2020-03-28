@@ -2,6 +2,7 @@ use crate::dataframe::DataFrame;
 use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key};
 use crate::network::client::Client;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{Notify, RwLock};
 use tokio::task::JoinHandle;
@@ -46,25 +47,34 @@ impl Application {
     }
 
     pub async fn from_sor(
-        filename: &str,
+        file_name: &str,
         my_addr: &str,
         server_addr: &str,
         num_nodes: usize,
     ) -> Result<Self, LiquidError> {
         let app = Application::new(my_addr, server_addr).await?;
-        let file = std::fs::metadata(filename).unwrap();
+        let file = std::fs::metadata(file_name).unwrap();
         // Note: Node ids start at 1
         // TODO: IMPORTANT ROUNDING ERRORS
         let size = file.len() / num_nodes as u64;
         let from = size * (app.node_id - 1) as u64;
         let df = DataFrame::from_sor(
-            String::from(filename),
+            String::from(file_name),
             from as usize,
             size as usize,
         );
-        let key = Key::new(String::from("420"), app.node_id);
+        let key = Key::new("420", app.node_id);
         app.kv.put(&key, df).await?;
         Ok(app)
+    }
+
+    pub async fn run<F, Fut>(self, f: F)
+    where
+        Fut: Future<Output = ()>,
+        F: FnOnce(Arc<KVStore>) -> Fut,
+    {
+        f(self.kv.clone()).await;
+        self.go().await;
     }
 
     pub async fn go(self) {
