@@ -3,6 +3,9 @@ use crate::error::LiquidError;
 use crate::kv::KVMessage;
 use crate::kv::*;
 use crate::network::client::Client;
+use associative_cache::indices::HashDirectMapped;
+use associative_cache::replacement::lru::LruReplacement;
+use associative_cache::{AssociativeCache, WithLruTimestamp};
 use bincode::{deserialize, serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -25,7 +28,13 @@ impl KVStore {
     ) -> Self {
         KVStore {
             data: RwLock::new(HashMap::new()),
-            cache: RwLock::new(HashMap::new()),
+            cache: RwLock::new(AssociativeCache::<
+                Key,
+                WithLruTimestamp<DataFrame>,
+                Capacity1GB,
+                HashDirectMapped,
+                LruReplacement,
+            >::default()),
             network,
             internal_notifier: Notify::new(),
             network_notifier,
@@ -45,15 +54,15 @@ impl KVStore {
     pub async fn get(&self, key: &Key) -> Result<DataFrame, LiquidError> {
         // note: may cause deadlock, might need to change to wait_and_get style
         match { self.cache.read().await.get(key) } {
-            Some(v) => Ok(v.clone()),
+            Some(v) => Ok(*v.clone()),
             None => {
                 let serialized_val = self.get_raw(key).await?;
                 let deserialized: DataFrame = deserialize(&serialized_val[..])?;
                 {
-                    self.cache
-                        .write()
-                        .await
-                        .insert(key.clone(), deserialized.clone());
+                    self.cache.write().await.insert(
+                        key.clone(),
+                        WithLruTimestamp::new(deserialized.clone()),
+                    );
                 }
                 Ok(deserialized)
             }
@@ -79,7 +88,7 @@ impl KVStore {
         key: &Key,
     ) -> Result<DataFrame, LiquidError> {
         if let Some(val) = { self.cache.read().await.get(key) } {
-            return Ok(val.clone());
+            return Ok(*val.clone());
         }
 
         if key.home == self.id {
@@ -89,10 +98,10 @@ impl KVStore {
             let serialized_val = self.get_raw(key).await?;
             let deserialized: DataFrame = deserialize(&serialized_val[..])?;
             {
-                self.cache
-                    .write()
-                    .await
-                    .insert(key.clone(), deserialized.clone());
+                self.cache.write().await.insert(
+                    key.clone(),
+                    WithLruTimestamp::new(deserialized.clone()),
+                );
             }
             Ok(deserialized)
         } else {
@@ -181,7 +190,7 @@ impl KVStore {
                 }
             }
             let kv_ptr_clone = kv.clone();
-            let sender_clone = kv.blob_sender.clone();
+            let sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {
                 match &msg.msg {
                     KVMessage::Get(k) => {
@@ -202,11 +211,10 @@ impl KVStore {
                     }
                     KVMessage::Data(k, v) => {
                         {
-                            kv_ptr_clone
-                                .cache
-                                .write()
-                                .await
-                                .insert(k.clone(), deserialize(v).unwrap());
+                            kv_ptr_clone.cache.write().await.insert(
+                                k.clone(),
+                                WithLruTimestamp::new(deserialize(v).unwrap()),
+                            );
                         }
                         kv_ptr_clone.internal_notifier.notify();
                     }

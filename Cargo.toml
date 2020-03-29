@@ -18,4 +18,5 @@ serde = { version = "1.0.104", features = ["derive"] }
 futures = "0.3.4"
 crossbeam-utils = "0.7.2"
 bytes = "0.5.4"
+associative-cache = "1.0.1"
 
