@@ -154,6 +154,8 @@ impl KVStore {
     }
 
     /// Sends the given `blob` to the `KVStore` with the given `target_id`
+    /// This provides a lower level interface to facilitate other kinds of
+    /// messages
     pub async fn send_blob(
         &self,
         target_id: usize,
@@ -187,7 +189,9 @@ impl KVStore {
     ///    - `Put` message: add the given data to our internal store
     ///    - `Blob` message: send the data up a higher level similar to how
     ///       the `Client` processes messages
-    pub async fn process_messages(kv: Arc<KVStore>) -> Result<(), LiquidError> {
+    pub(crate) async fn process_messages(
+        kv: Arc<KVStore>,
+    ) -> Result<(), LiquidError> {
         loop {
             let msg;
             loop {

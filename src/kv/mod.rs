@@ -16,9 +16,9 @@ mod kv_store;
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct Key {
     /// Defines where in a `KVStore` a value is stored
-    name: String,
+    pub name: String,
     /// Defines which node 'owns' the associated `Value`
-    home: usize,
+    pub home: usize,
 }
 
 /// A serialized blob of data. Is associated with a `Key` which defines where

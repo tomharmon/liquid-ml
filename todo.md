@@ -1,4 +1,6 @@
-- fix visibility modifiers for network/kv
+- fix KVStore::process_messages like Client::accept_new_connections
+- imo, pass in the `sender` and `notifier` to a `Client`, and don't have
+  the `receiver` as a field of the `Client`
 - Build application layer
   - test PMAP(Rower)
   - filter?
@@ -7,7 +9,6 @@
 - Testing
 - Random Forest LUL
 - Change printlns to logger
-- Spawn all tasks onto a runtime directly?
 - application layer documentation
 - seven degrees of Linus
 - Orderly shutdown
