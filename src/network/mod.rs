@@ -62,6 +62,6 @@ pub(crate) fn increment_msg_id(cur_id: usize, id: usize) -> usize {
     std::cmp::max(cur_id, id) + 1
 }
 
-mod client;
-mod message;
-mod server;
+pub mod client;
+pub mod message;
+pub mod server;
