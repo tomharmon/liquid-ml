@@ -1,6 +1,4 @@
-- actually use an LRU cache not a hash map
 - fix visibility modifiers for network/kv
-- re-export column + data
 - Build application layer
   - test PMAP(Rower)
   - filter?

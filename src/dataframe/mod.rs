@@ -9,7 +9,7 @@
 //! `DataFrame`.
 
 use serde::{Deserialize, Serialize};
-use sorer::dataframe::{Column, Data};
+pub use sorer::dataframe::{Column, Data};
 use sorer::schema::DataType;
 
 // hey, inception was a great movie, come on now
