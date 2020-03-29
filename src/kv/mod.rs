@@ -1,26 +1,13 @@
 //! A module for distributed `Key`, `Value` stores. Utilizes the `network`
 //! module to communicate between nodes.
-
 use crate::dataframe::DataFrame;
 use crate::network::client::Client;
-use associative_cache::indices::HashDirectMapped;
-use associative_cache::replacement::lru::LruReplacement;
-use associative_cache::{AssociativeCache, Capacity, WithLruTimestamp};
+use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Notify, RwLock};
-
-/// A struct used in the `associative_cache` crate
-pub(crate) struct Capacity1GB;
-/// Determines the maximum capacity for the cache from the `associative_cache`
-/// crate. This is implementation is for a maximum size of 1GB. The
-/// capacity is eagerly allocated once and never resized.
-impl Capacity for Capacity1GB {
-    /// The number of bytes in 1GB
-    const CAPACITY: usize = 1_073_741_824;
-}
 
 pub mod kv_store;
 
@@ -61,15 +48,7 @@ pub struct KVStore {
     data: RwLock<HashMap<Key, Value>>,
     /// An `LRU` cache of deserialized `DataFrame`s, not all of which are owned
     /// by this `KVStore`.
-    cache: Mutex<
-        AssociativeCache<
-            Key,
-            WithLruTimestamp<DataFrame>,
-            Capacity1GB,
-            HashDirectMapped,
-            LruReplacement,
-        >,
-    >,
+    cache: Mutex<LruCache<Key, DataFrame>>,
     /// The `network` layer, used to send and receive messages and data with
     /// other `KVStore`s
     network: Arc<RwLock<Client<KVMessage>>>,

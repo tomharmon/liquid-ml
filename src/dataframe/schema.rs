@@ -113,7 +113,7 @@ impl Schema {
     }
 
     fn get_idx_of_optional_name(
-        names: &Vec<Option<String>>,
+        names: &[Option<String>],
         name: &str,
     ) -> Option<usize> {
         names.iter().position(|n| match n {

@@ -3,14 +3,14 @@ use crate::error::LiquidError;
 use crate::kv::KVMessage;
 use crate::kv::*;
 use crate::network::client::Client;
-use associative_cache::indices::HashDirectMapped;
-use associative_cache::replacement::lru::LruReplacement;
-use associative_cache::{AssociativeCache, WithLruTimestamp};
 use bincode::{deserialize, serialize};
+use lru::LruCache;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Notify, RwLock};
+
+const MAX_NUM_CACHED_DATAFRAMES: usize = 5;
 
 /// Defines methods for a `KVStore`
 impl KVStore {
@@ -28,13 +28,7 @@ impl KVStore {
     ) -> Self {
         KVStore {
             data: RwLock::new(HashMap::new()),
-            cache: Mutex::new(AssociativeCache::<
-                Key,
-                WithLruTimestamp<DataFrame>,
-                Capacity1GB,
-                HashDirectMapped,
-                LruReplacement,
-            >::default()),
+            cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_DATAFRAMES)),
             network,
             internal_notifier: Notify::new(),
             network_notifier,
@@ -53,16 +47,16 @@ impl KVStore {
     /// `KVStore`, then the error `Err(LiquidError::NotPresent)` is returned
     pub async fn get(&self, key: &Key) -> Result<DataFrame, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
-            return Ok(WithLruTimestamp::into_inner(val.clone()));
+            return Ok(val.clone());
         }
 
         let serialized_val = self.get_raw(key).await?;
         let deserialized: DataFrame = deserialize(&serialized_val[..])?;
         {
-            self.cache.lock().await.insert(
-                key.clone(),
-                WithLruTimestamp::new(deserialized.clone()),
-            );
+            self.cache
+                .lock()
+                .await
+                .put(key.clone(), deserialized.clone());
         }
         Ok(deserialized)
     }
@@ -86,7 +80,7 @@ impl KVStore {
         key: &Key,
     ) -> Result<DataFrame, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
-            return Ok(WithLruTimestamp::into_inner(val.clone()));
+            return Ok(val.clone());
         }
 
         if key.home == self.id {
@@ -96,10 +90,10 @@ impl KVStore {
             let serialized_val = self.get_raw(key).await?;
             let deserialized: DataFrame = deserialize(&serialized_val[..])?;
             {
-                self.cache.lock().await.insert(
-                    key.clone(),
-                    WithLruTimestamp::new(deserialized.clone()),
-                );
+                self.cache
+                    .lock()
+                    .await
+                    .put(key.clone(), deserialized.clone());
             }
             Ok(deserialized)
         } else {
@@ -208,10 +202,11 @@ impl KVStore {
                     }
                     KVMessage::Data(k, v) => {
                         {
-                            kv_ptr_clone.cache.lock().await.insert(
-                                k.clone(),
-                                WithLruTimestamp::new(deserialize(v).unwrap()),
-                            );
+                            kv_ptr_clone
+                                .cache
+                                .lock()
+                                .await
+                                .put(k.clone(), deserialize(v).unwrap());
                         }
                         kv_ptr_clone.internal_notifier.notify();
                     }
