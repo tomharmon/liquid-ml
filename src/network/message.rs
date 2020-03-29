@@ -8,8 +8,8 @@ use serde::Serialize;
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 impl<T> Message<T> {
-    /// Creates a new message.
-    pub(crate) fn new(
+    /// Creates a new `Message`.
+    pub fn new(
         msg_id: usize,
         sender_id: usize,
         target_id: usize,
@@ -25,6 +25,7 @@ impl<T> Message<T> {
 }
 
 impl<T> MessageCodec<T> {
+    /// Creates a new `MessageCodec`
     pub(crate) fn new() -> Self {
         MessageCodec {
             phantom: std::marker::PhantomData,
@@ -36,6 +37,9 @@ impl<T> MessageCodec<T> {
 impl<T: DeserializeOwned> Decoder for MessageCodec<T> {
     type Item = Message<T>;
     type Error = LiquidError;
+    /// Decodes a message by reading the length of the message (at the start of
+    /// a frame) and then reading that many bytes from a buffer to complete the
+    /// frame.
     fn decode(
         &mut self,
         src: &mut BytesMut,
@@ -49,6 +53,9 @@ impl<T: DeserializeOwned> Decoder for MessageCodec<T> {
 
 impl<T: Serialize> Encoder<Message<T>> for MessageCodec<T> {
     type Error = LiquidError;
+    /// Encodes a message by writing the length of the serialized message at
+    /// the start of a frame, and then writing that many bytes into a buffer
+    /// to be sent.
     fn encode(
         &mut self,
         item: Message<T>,

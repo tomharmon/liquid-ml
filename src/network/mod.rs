@@ -1,5 +1,78 @@
-//! A module with methods to communicate with nodes in a distributed system
-//! over TCP, as well as `Client` and `Server` implementations for `LiquidML`
+//! A module with methods to communicate with relatively generic nodes in a
+//! distributed system over TCP, as well as `Client` and `Server`
+//! implementations for `LiquidML`
+//!
+//! The `Server` struct acts as a simple registration server. Once started with
+//! a given `IP:Port` via the `Server::new` method, calling the (blocking)
+//! `Server::accept_new_connections` method will allow  `Client` nodes to also
+//! start up and connect to a distributed system.
+//!
+//! When new `Client`s connect to the `Server`, they send a
+//! `ControlMsg::Introduction` to tell the `Server` the `Client`'s address
+//! (`IP:Port`). The `Server` then responds with a `ControlMsg::Directory` of
+//! all the currently connected `Client`s so that the new `Client` may
+//! connect to them.
+//!
+//!
+//! ## Server Usage
+//! ```rust,no_run
+//! use liquid_ml::error::LiquidError;
+//! use liquid_ml::network::Server;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), LiquidError> {
+//!     let mut s = Server::new("127.0.0.1:9000".to_string()).await?;
+//!     s.accept_new_connections().await?;
+//!     Ok(())
+//! }
+//!
+//! ```
+//!
+//! The `Client` is designed so that it can perform various networking
+//! operations asynchronously. It can listen for messages from
+//! the `Server` or any number of `Client`s (within physical limitations)
+//! concurrently. Messages from the `Server` are processed internally by the
+//! `Client`, while messages from other `Client`s are sent over a `mpsc` channel
+//! and notifies the receiving end when messages are sent. Because of this a
+//! `Client` and the networking layer can be used by higher level components
+//! without tight coupling.
+//!
+//!
+//! Constructing a new `Client` does these things:
+//! 1. Connects to the `Server`
+//! 2. Sends the server our IP:Port address
+//! 3. Server responds with a `RegistrationMsg`
+//! 4. Connects to all other existing `Client`s which spawns a Tokio task
+//!    for each connection that will read messages from the connection,
+//!    publish them to the `mpsc` channel, and notify the receiving end so
+//!    that the receiving end may process them as desired
+//!
+//! ## Client Usage
+//! For a more in-depth and useful example, it may be worthwhile to look at
+//! the source code for the `KVStore`. Here is a toy example that may be
+//! useful for getting started. Assume that the `Server` is already
+//! running:
+//!
+//! ```rust,no_run
+//! use std::sync::Arc;
+//! use tokio::sync::Notify;
+//! use liquid_ml::network::{Client, Message};
+//! use liquid_ml::error::LiquidError;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), LiquidError> {
+//!     let notifier = Arc::new(Notify::new());
+//!     let client = Client::<Message<String>>::new("68.2.3.4:9000",
+//!                                        "69.0.4.20:9000",
+//!                                        notifier.clone()).await.unwrap();
+//!     // see `Client::new` documentation for `new` returns a
+//!     // `Arc<RwLock<Client>>`
+//!     let id = { client.read().await.id };
+//!     let msg = Message::new(1, id, id + 1, "Hi".to_string());
+//!     { client.write().await.send_msg(id + 1, msg).await.unwrap() };
+//!     Ok(())
+//! }
+//! ```
 use crate::error::LiquidError;
 use futures::SinkExt;
 use serde::de::DeserializeOwned;
@@ -17,11 +90,11 @@ use tokio::sync::{
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 /// A connection to another `Client`, used for sending directed communication
-pub struct Connection<T> {
+pub(crate) struct Connection<T> {
     /// The `IP:Port` of another `Client` that we're connected to
-    pub address: String,
+    pub(crate) address: String,
     /// The buffered stream used for sending messages to the other `Client`
-    pub sink: FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>,
+    pub(crate) sink: FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>,
 }
 
 type FramedStream = FramedRead<ReadHalf<TcpStream>, MessageCodec<ControlMsg>>;
@@ -35,11 +108,11 @@ pub struct Client<T> {
     /// The `address` of this `Client`
     pub address: String,
     /// The id of the current message
-    pub msg_id: usize,
+    pub(crate) msg_id: usize,
     /// A directory which is a map of client id to a [`Connection`](Connection)
-    pub directory: HashMap<usize, Connection<T>>,
+    pub(crate) directory: HashMap<usize, Connection<T>>,
     /// A buffered connection to the `Server`
-    pub server: (FramedStream, FramedSink),
+    _server: (FramedStream, FramedSink),
     /// A queue which messages from other `Client`s are added to. After a
     /// `Message<T>` is added to the `receiver`, the layer above this `Client`
     /// is notified there is a new `message` available on the `receiver` via
@@ -59,13 +132,13 @@ pub struct Client<T> {
 /// Represents a registration `Server` in a distributed system.
 pub struct Server {
     /// The `address` of this `Server`
-    pub address: String,
+    pub(crate) _address: String,
     /// The id of the current message
-    pub msg_id: usize,
+    pub(crate) msg_id: usize,
     /// A directory which is a map of client id to a [`Connection`](Connection)
-    pub directory: HashMap<usize, Connection<ControlMsg>>,
+    pub(crate) directory: HashMap<usize, Connection<ControlMsg>>,
     /// A `TcpListener` which listens for connections from new `Client`s
-    pub listener: TcpListener,
+    pub(crate) listener: TcpListener,
 }
 
 /// A message for communication between nodes
@@ -83,7 +156,7 @@ pub struct Message<T> {
 
 /// Control messages to facilitate communication with the registration server
 #[derive(Serialize, Deserialize, Debug)]
-pub enum ControlMsg {
+pub(crate) enum ControlMsg {
     /// A directory message sent by the `Server` to new `Client`s once they
     /// connect to the `Server` so that they know which other `Client`s are
     /// currently connected
@@ -94,8 +167,13 @@ pub enum ControlMsg {
     //TODO : Add a kill message here at some point
 }
 
+/// A message encoder/decoder to help frame messages sent over TCP,
+/// particularly in the case of very large messages. Uses a very simple method
+/// of writing the length of the serialized message at the very start of
+/// a frame, followed by the serialized message. When decoding, this length
+/// is used to determine if a full frame has been read.
 #[derive(Debug)]
-pub struct MessageCodec<T> {
+pub(crate) struct MessageCodec<T> {
     phantom: std::marker::PhantomData<T>,
     pub(crate) codec: LengthDelimitedCodec,
 }

@@ -15,10 +15,6 @@ use tokio::sync::{Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 // TODO: remove 'static
-/// Methods which allow a `Client` node to start up and connect to a distributed
-/// system, listen for new connections from other new `Client`s, send
-/// directed communication to other `Client`s, and respond to messages from
-/// other `Client`s
 impl<
         RT: Send + Sync + DeserializeOwned + Serialize + std::fmt::Debug + 'static,
     > Client<RT>
@@ -34,12 +30,15 @@ impl<
     /// according to however the above layer wants to handle it.
     ///
     /// Constructing the `Client` does these things:
-    /// 1. Connects to the server
-    /// 2. Sends the server our IP:Port address
+    /// 1. Connects to the `Server`
+    /// 2. Sends the server our `IP:Port` address
     /// 3. Server responds with a `RegistrationMsg`
     /// 4. Connects to all other existing `Client`s which spawns a Tokio task
     ///    for each connection that will read messages from the connection
     ///    and handle it.
+    ///
+    /// Creating a new `Client` returns an `Arc<RwLock<Self>>` so that
+    /// the layer above the `Client` can use it concurrently.
     pub async fn new(
         server_addr: &str,
         my_addr: &str,
@@ -63,13 +62,13 @@ impl<
         // The Server sends the addresses of all currently connected clients
         let dir = network::read_msg(&mut stream).await?;
         if let ControlMsg::Directory { dir: d } = dir.msg {
-            let (sender, receiver) = channel::<Message<RT>>(1000);
+            let (sender, receiver) = channel::<Message<RT>>(100);
             let mut c = Client {
                 id: dir.target_id,
                 address: my_addr.to_string(),
                 msg_id: dir.msg_id + 1,
                 directory: HashMap::new(),
-                server: (stream, sink),
+                _server: (stream, sink),
                 receiver,
                 sender,
                 notifier,
@@ -97,9 +96,8 @@ impl<
     /// A blocking function that allows a `Client` to listen for connections
     /// from newly started `Client`s. When a new `Client` connects to this
     /// `Client`, we add the connection to this `Client.directory`
-    /// and spawn a Tokio task to handle further communication from the new
-    /// `Client`
-    pub async fn accept_new_connections(
+    /// and call `Client::recv_msg`
+    async fn accept_new_connections(
         client: Arc<RwLock<Client<RT>>>,
     ) -> Result<(), LiquidError> {
         let listen_address = { client.read().await.address.clone() };
@@ -174,8 +172,12 @@ impl<
     /// `Client.directory` for sending later messages to the `Client`. Finally,
     /// spawn a Tokio task to read further messages from the `Client` and
     /// handle the message.
+    ///
+    /// Note that as long as a `Server` is running, you *really should not* use
+    /// this method. Calling `Client::new` will connect the new `Client` with
+    /// all other currently existing `Client`s automatically.
     #[allow(clippy::map_entry)] // clippy is being dumb
-    pub(crate) async fn connect(
+    pub async fn connect(
         &mut self,
         client: (usize, String),
     ) -> Result<(), LiquidError> {
@@ -233,6 +235,8 @@ impl<
 
     // TODO: abstract/merge with Server::send_msg, they are the same
     /// Send the given `message` to a client with the given `target_id`.
+    /// Id's are automatically assigned by a `Server` during the registration
+    /// period when creating a new `Client` with `Client::new`.
     pub async fn send_msg(
         &mut self,
         target_id: usize,
@@ -252,7 +256,7 @@ impl<
 
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
-    pub(crate) fn recv_msg(
+    fn recv_msg(
         mut sender: Sender<Message<RT>>,
         mut reader: FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
         notifier: Arc<Notify>,

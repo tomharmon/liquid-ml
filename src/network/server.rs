@@ -9,10 +9,6 @@ use tokio::io::split;
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-/// Methods which allow a `Client` node to start up and connect to a distributed
-/// system, listen for new connections from other new `Client`s, send
-/// directed communication to other `Client`s, and respond to messages from
-/// other `Client`s
 impl Server {
     /// Create a new `Server` running on the given `address` in the format of
     /// `IP:Port`
@@ -21,7 +17,7 @@ impl Server {
             listener: TcpListener::bind(&address).await?,
             msg_id: 0,
             directory: HashMap::new(),
-            address,
+            _address: address,
         })
     }
 
