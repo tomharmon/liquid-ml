@@ -14,9 +14,9 @@ use sorer::schema::DataType;
 
 // hey, inception was a great movie, come on now
 #[allow(clippy::module_inception)]
-pub mod dataframe;
-pub mod row;
-pub mod schema;
+mod dataframe;
+mod row;
+mod schema;
 
 /// Represents a DataFrame which contains `Data` stored in a columnar format
 /// and a well-defined `Schema`

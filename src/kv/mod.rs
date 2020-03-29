@@ -9,7 +9,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Notify, RwLock};
 
-pub mod kv_store;
+mod kv_store;
 
 /// A `Key` defines where in a `KVStore` a `Value` is stored, as well as
 /// which node (and thus which `KVStore`) 'owns' the `Value`
