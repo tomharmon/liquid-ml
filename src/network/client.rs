@@ -15,6 +15,9 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
+type FramedStream = FramedRead<ReadHalf<TcpStream>, MessageCodec<ControlMsg>>;
+type FramedSink = FramedWrite<WriteHalf<TcpStream>, MessageCodec<ControlMsg>>;
+
 /// Represents a `Client` node in a distributed system, where Type T is the types
 /// of messages that can be sent between `Client`s
 pub struct Client<T> {
@@ -27,10 +30,7 @@ pub struct Client<T> {
     /// A directory which is a map of client id to a [`Connection`](Connection)
     pub directory: HashMap<usize, Connection<T>>,
     /// A buffered connection to the `Server`
-    pub server: (
-        FramedRead<ReadHalf<TcpStream>, MessageCodec<ControlMsg>>,
-        FramedWrite<WriteHalf<TcpStream>, MessageCodec<ControlMsg>>,
-    ),
+    pub server: (FramedStream, FramedSink),
     /// A Reciever whch acts as a queue for messages
     pub(crate) receiver: Receiver<Message<T>>,
     ///
@@ -134,47 +134,46 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                     increment_msg_id(old_msg_id, intro.msg_id);
             }
             // Make sure we don't have an existing connection to this client
-            let contains_key = {
+            let is_existing_conn = {
                 client.read().await.directory.contains_key(&intro.sender_id)
             };
-            match contains_key {
-                true => return existing_conn_err(stream, sink),
-                false => {
-                    // Add the connection with the new client to this directory
-                    let conn = Connection {
-                        address: addr.clone(),
-                        sink,
-                    };
-                    {
-                        client
-                            .write()
-                            .await
-                            .directory
-                            .insert(intro.sender_id, conn);
-                    }
-                    // spawn a tokio task to handle new messages from the client
-                    // that we just connected to
-                    // NOTE: Not unsafe because message codec has no fields and
-                    // can be converted to a different type without losing meaning
-                    let new_stream = unsafe {
-                        std::mem::transmute::<
-                            FramedRead<
-                                ReadHalf<TcpStream>,
-                                MessageCodec<ControlMsg>,
-                            >,
-                            FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
-                        >(stream)
-                    };
-                    {
-                        let new_sender = client.read().await.sender.clone();
-                        let new_notifier = client.read().await.notifier.clone();
-                        Client::recv_msg(new_sender, new_stream, new_notifier);
-                    }
-                    println!(
-                        "Connected to id: {:#?} at address: {:#?}",
-                        intro.sender_id, addr
-                    );
+            if is_existing_conn {
+                return existing_conn_err(stream, sink);
+            } else {
+                // Add the connection with the new client to this directory
+                let conn = Connection {
+                    address: addr.clone(),
+                    sink,
+                };
+                {
+                    client
+                        .write()
+                        .await
+                        .directory
+                        .insert(intro.sender_id, conn);
                 }
+                // spawn a tokio task to handle new messages from the client
+                // that we just connected to
+                // NOTE: Not unsafe because message codec has no fields and
+                // can be converted to a different type without losing meaning
+                let new_stream = unsafe {
+                    std::mem::transmute::<
+                        FramedRead<
+                            ReadHalf<TcpStream>,
+                            MessageCodec<ControlMsg>,
+                        >,
+                        FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
+                    >(stream)
+                };
+                {
+                    let new_sender = client.read().await.sender.clone();
+                    let new_notifier = client.read().await.notifier.clone();
+                    Client::recv_msg(new_sender, new_stream, new_notifier);
+                }
+                println!(
+                    "Connected to id: {:#?} at address: {:#?}",
+                    intro.sender_id, addr
+                );
             }
         }
     }
@@ -184,6 +183,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
     /// `Client.directory` for sending later messages to the `Client`. Finally,
     /// spawn a Tokio task to read further messages from the `Client` and
     /// handle the message.
+    #[allow(clippy::map_entry)] // clippy is being dumb
     pub(crate) async fn connect(
         &mut self,
         client: (usize, String),
@@ -196,52 +196,47 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             FramedWrite::new(writer, MessageCodec::<ControlMsg>::new());
 
         // Make the connection struct which holds the stream for sending msgs
-
-        match self.directory.contains_key(&client.0) {
-            true => existing_conn_err(stream, sink),
-            false => {
-                sink.send(Message::new(
-                    self.msg_id,
-                    self.id,
-                    0,
-                    ControlMsg::Introduction {
-                        address: self.address.clone(),
-                    },
-                ))
-                .await?;
-                // NOTE: Not unsafe because message codec has no fields and
-                // can be converted to a different type without losing meaning
-                let sink = unsafe {
-                    std::mem::transmute::<
-                        FramedWrite<
-                            WriteHalf<TcpStream>,
-                            MessageCodec<ControlMsg>,
-                        >,
-                        FramedWrite<WriteHalf<TcpStream>, MessageCodec<RT>>,
-                    >(sink)
-                };
-                let conn = Connection {
-                    address: client.1.clone(),
-                    sink,
-                };
-                // Add the connection to our directory
-                self.directory.insert(client.0, conn);
-                // spawn a tokio task to handle new messages from the client
-                // that we just connected to
-                Client::recv_msg(
-                    self.sender.clone(),
-                    stream,
-                    self.notifier.clone(),
-                );
-                // send the client our id and address so they can add us to
-                // their directory
-                self.msg_id += 1;
-                println!(
-                    "Connected to id: {:#?} at address: {:#?}",
-                    client.0, client.1
-                );
-                Ok(())
-            }
+        if self.directory.contains_key(&client.0) {
+            existing_conn_err(stream, sink)
+        } else {
+            sink.send(Message::new(
+                self.msg_id,
+                self.id,
+                0,
+                ControlMsg::Introduction {
+                    address: self.address.clone(),
+                },
+            ))
+            .await?;
+            // NOTE: Not unsafe because message codec has no fields and
+            // can be converted to a different type without losing meaning
+            let sink = unsafe {
+                std::mem::transmute::<
+                    FramedWrite<WriteHalf<TcpStream>, MessageCodec<ControlMsg>>,
+                    FramedWrite<WriteHalf<TcpStream>, MessageCodec<RT>>,
+                >(sink)
+            };
+            let conn = Connection {
+                address: client.1.clone(),
+                sink,
+            };
+            // Add the connection to our directory
+            self.directory.insert(client.0, conn);
+            // spawn a tokio task to handle new messages from the client
+            // that we just connected to
+            Client::recv_msg(
+                self.sender.clone(),
+                stream,
+                self.notifier.clone(),
+            );
+            // send the client our id and address so they can add us to
+            // their directory
+            self.msg_id += 1;
+            println!(
+                "Connected to id: {:#?} at address: {:#?}",
+                client.0, client.1
+            );
+            Ok(())
         }
     }
 

@@ -11,9 +11,7 @@ impl Schema {
     /// Constructs an empty Schema.
     pub fn new() -> Self {
         Schema {
-            schema: Vec::new(),
-            col_names: Vec::new(),
-            row_names: Vec::new(),
+            ..Default::default()
         }
     }
 

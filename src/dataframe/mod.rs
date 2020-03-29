@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use sorer::dataframe::{Column, Data};
 use sorer::schema::DataType;
 
+// hey, inception was a great movie, come on now
+#[allow(clippy::module_inception)]
 pub mod dataframe;
 pub mod row;
 pub mod schema;
@@ -29,7 +31,7 @@ pub struct DataFrame {
 }
 
 /// Represents a `Schema` of a `DataFrame`
-#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug, Default)]
 pub struct Schema {
     /// The `DataType`s of this `Schema`
     pub schema: Vec<DataType>,
@@ -67,7 +69,7 @@ pub trait Fielder {
     fn visit_int(&mut self, i: i64);
 
     /// Called for fields of type `String` with the value of the field
-    fn visit_string(&mut self, s: &String);
+    fn visit_string(&mut self, s: &str);
 
     /// Called for fields where the value of the field is missing
     fn visit_null(&mut self);

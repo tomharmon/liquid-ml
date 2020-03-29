@@ -31,12 +31,13 @@ impl Row {
         data: i64,
     ) -> Result<(), LiquidError> {
         match self.schema.get(col_idx) {
-            Some(DataType::Int) => Ok(match self.data.get(col_idx).unwrap() {
+            Some(DataType::Int) => match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::Int(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::Int(data)
+                    *self.data.get_mut(col_idx).unwrap() = Data::Int(data);
+                    Ok(())
                 }
                 _ => panic!("Something is horribly wrong"),
-            }),
+            },
             None => Err(LiquidError::ColIndexOutOfBounds),
             _ => Err(LiquidError::TypeMismatch),
         }
@@ -51,14 +52,13 @@ impl Row {
         data: f64,
     ) -> Result<(), LiquidError> {
         match self.schema.get(col_idx) {
-            Some(DataType::Float) => {
-                Ok(match self.data.get(col_idx).unwrap() {
-                    Data::Null | Data::Float(_) => {
-                        *self.data.get_mut(col_idx).unwrap() = Data::Float(data)
-                    }
-                    _ => panic!("Something is horribly wrong"),
-                })
-            }
+            Some(DataType::Float) => match self.data.get(col_idx).unwrap() {
+                Data::Null | Data::Float(_) => {
+                    *self.data.get_mut(col_idx).unwrap() = Data::Float(data);
+                    Ok(())
+                }
+                _ => panic!("Something is horribly wrong"),
+            },
             None => Err(LiquidError::ColIndexOutOfBounds),
             _ => Err(LiquidError::TypeMismatch),
         }
@@ -73,12 +73,13 @@ impl Row {
         data: bool,
     ) -> Result<(), LiquidError> {
         match self.schema.get(col_idx) {
-            Some(DataType::Bool) => Ok(match self.data.get(col_idx).unwrap() {
+            Some(DataType::Bool) => match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::Bool(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::Bool(data)
+                    *self.data.get_mut(col_idx).unwrap() = Data::Bool(data);
+                    Ok(())
                 }
                 _ => panic!("Something is horribly wrong"),
-            }),
+            },
             None => Err(LiquidError::ColIndexOutOfBounds),
             _ => Err(LiquidError::TypeMismatch),
         }
@@ -93,15 +94,13 @@ impl Row {
         data: String,
     ) -> Result<(), LiquidError> {
         match self.schema.get(col_idx) {
-            Some(DataType::String) => {
-                Ok(match self.data.get(col_idx).unwrap() {
-                    Data::Null | Data::String(_) => {
-                        *self.data.get_mut(col_idx).unwrap() =
-                            Data::String(data)
-                    }
-                    _ => panic!("Something is horribly wrong"),
-                })
-            }
+            Some(DataType::String) => match self.data.get(col_idx).unwrap() {
+                Data::Null | Data::String(_) => {
+                    *self.data.get_mut(col_idx).unwrap() = Data::String(data);
+                    Ok(())
+                }
+                _ => panic!("Something is horribly wrong"),
+            },
             None => Err(LiquidError::ColIndexOutOfBounds),
             _ => Err(LiquidError::TypeMismatch),
         }
@@ -207,7 +206,7 @@ mod tests {
             self.num_ints += 1;
         }
 
-        fn visit_string(&mut self, _s: &String) {
+        fn visit_string(&mut self, _s: &str) {
             self.num_strings += 1;
         }
 

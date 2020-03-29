@@ -179,16 +179,14 @@ impl KVStore {
             let msg;
             loop {
                 kv.network_notifier.notified().await;
-                match { kv.network.write().await.receiver.try_recv() } {
-                    Ok(v) => {
-                        msg = v;
-                        break;
-                    }
-                    Err(_) => (),
+                if let Ok(v) = { kv.network.write().await.receiver.try_recv() }
+                {
+                    msg = v;
+                    break;
                 }
             }
-            let kv_ptr_clone = kv.clone();
 
+            let kv_ptr_clone = kv.clone();
             let mut sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {
                 match &msg.msg {

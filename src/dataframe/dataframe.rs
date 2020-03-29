@@ -154,7 +154,10 @@ impl DataFrame {
         match self.schema.schema.get(col_idx) {
             Some(DataType::Int) => match self.data.get_mut(col_idx) {
                 Some(Column::Int(col)) => match col.get_mut(row_idx) {
-                    Some(d) => Ok(*d = Some(data)),
+                    Some(d) => {
+                        *d = Some(data);
+                        Ok(())
+                    }
                     None => Err(LiquidError::RowIndexOutOfBounds),
                 },
                 None => Err(LiquidError::ColIndexOutOfBounds),
@@ -175,7 +178,10 @@ impl DataFrame {
         match self.schema.schema.get(col_idx) {
             Some(DataType::Float) => match self.data.get_mut(col_idx) {
                 Some(Column::Float(col)) => match col.get_mut(row_idx) {
-                    Some(d) => Ok(*d = Some(data)),
+                    Some(d) => {
+                        *d = Some(data);
+                        Ok(())
+                    }
                     None => Err(LiquidError::RowIndexOutOfBounds),
                 },
                 None => Err(LiquidError::ColIndexOutOfBounds),
@@ -196,7 +202,10 @@ impl DataFrame {
         match self.schema.schema.get(col_idx) {
             Some(DataType::Bool) => match self.data.get_mut(col_idx) {
                 Some(Column::Bool(col)) => match col.get_mut(row_idx) {
-                    Some(d) => Ok(*d = Some(data)),
+                    Some(d) => {
+                        *d = Some(data);
+                        Ok(())
+                    }
                     None => Err(LiquidError::RowIndexOutOfBounds),
                 },
                 None => Err(LiquidError::ColIndexOutOfBounds),
@@ -217,7 +226,10 @@ impl DataFrame {
         match self.schema.schema.get(col_idx) {
             Some(DataType::String) => match self.data.get_mut(col_idx) {
                 Some(Column::String(col)) => match col.get_mut(row_idx) {
-                    Some(d) => Ok(*d = Some(data)),
+                    Some(d) => {
+                        *d = Some(data);
+                        Ok(())
+                    }
                     None => Err(LiquidError::RowIndexOutOfBounds),
                 },
                 None => Err(LiquidError::ColIndexOutOfBounds),
@@ -359,7 +371,7 @@ fn map_helper<T: Rower>(
     // NOTE: IS THIS THE ~10% slower way to do counted loop???? @tom
     for i in start..end {
         df.fill_row(i, &mut row).unwrap();
-        rower.visit(&mut row);
+        rower.visit(&row);
     }
     rower
 }

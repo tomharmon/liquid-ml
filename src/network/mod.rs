@@ -55,7 +55,7 @@ pub(crate) fn existing_conn_err<T, U>(
     let reader = stream.into_inner();
     let unsplit = reader.unsplit(sink.into_inner());
     unsplit.shutdown(Shutdown::Both)?;
-    return Err(LiquidError::ReconnectionError);
+    Err(LiquidError::ReconnectionError)
 }
 
 pub(crate) fn increment_msg_id(cur_id: usize, id: usize) -> usize {

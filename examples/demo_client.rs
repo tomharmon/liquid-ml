@@ -53,7 +53,7 @@ async fn verifier(kv: Arc<KVStore>) {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let args: Vec<String> = env::args().collect();
-    let app = Application::new(&args[1], "127.0.0.1:9000").await?;
+    let app = Application::new(&args[1], "127.0.0.1:9000", 3).await?;
 
     if app.node_id == 1 {
         app.run(producer).await;
