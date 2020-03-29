@@ -181,7 +181,7 @@ impl KVStore {
                 }
             }
             let kv_ptr_clone = kv.clone();
-            let sender_clone = kv.blob_sender.clone();
+            let mut sender_clone = kv.blob_sender.clone();
             tokio::spawn(async move {
                 match &msg.msg {
                     KVMessage::Get(k) => {
@@ -222,7 +222,7 @@ impl KVStore {
                         kv_ptr_clone.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
-                        sender_clone.send(v.clone()).await;
+                        sender_clone.send(v.clone()).await.unwrap();
                     }
                 }
             });
