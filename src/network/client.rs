@@ -31,10 +31,19 @@ pub struct Client<T> {
     pub directory: HashMap<usize, Connection<T>>,
     /// A buffered connection to the `Server`
     pub server: (FramedStream, FramedSink),
-    /// A Reciever whch acts as a queue for messages
+    /// A queue which messages from other `Client`s are added to. After a
+    /// `Message<T>` is added to the `receiver`, the layer above this `Client`
+    /// is notified there is a new `message` available on the `receiver` via
+    /// the `notifier` so that the above layer can get the message off this
+    /// `receiver` and process it how it wants to.
     pub(crate) receiver: Receiver<Message<T>>,
-    ///
+    /// When this `Client` gets a message, it uses this `sender` to give
+    /// messages to whatever layer above this is using this `Client` for
+    /// networking. The above layer will receive the messages on the
+    /// `receiver`.
     sender: Sender<Message<T>>,
+    /// Used to notify whatever is using this `Client` for networking that a
+    /// message has been received and is available on the `receiver`.
     notifier: Arc<Notify>,
 }
 
@@ -48,6 +57,13 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
 {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
+    ///
+    /// The `notifier` passed in should be used by the layer above this
+    /// `Client` so that this `Client` may notify the above layer when messages
+    /// are received from other `Client`s. When these messages are received,
+    /// the `notifier` will tell that layer that a message was received and that
+    /// a message is available on this `Client`s `receiver` for processing
+    /// according to however the above layer wants to handle it.
     ///
     /// Constructing the `Client` does these things:
     /// 1. Connects to the server
@@ -178,7 +194,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         }
     }
 
-    /// Connect to a running `Client` with the given `(id, IP:Port)` informa)tion.
+    /// Connect to a running `Client` with the given `(id, IP:Port)`.
     /// After connecting, add the `Connection` to the other `Client` to this
     /// `Client.directory` for sending later messages to the `Client`. Finally,
     /// spawn a Tokio task to read further messages from the `Client` and
@@ -267,7 +283,7 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
         notifier: Arc<Notify>,
     ) {
         // TODO: need to properly increment message id but that means self
-        // needs to be 'static and that propagates some
+        // needs to be 'static or mutex'd and that propagates a lot...
         tokio::spawn(async move {
             loop {
                 let s: Message<RT> =

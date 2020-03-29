@@ -1,4 +1,5 @@
 - fix visibility modifiers for network/kv
+- fix project structure -- nice to code with but check docs
 - Build application layer
   - test PMAP(Rower)
   - filter?

@@ -9,13 +9,18 @@ use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 /// A message for communication between nodes
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message<T> {
+    /// The id of this message
     pub(crate) msg_id: usize,
+    /// The id of the sender
     pub(crate) sender_id: usize,
+    /// The id of the node this message is being sent to
     pub(crate) target_id: usize,
+    /// The body of the message
     pub(crate) msg: T,
 }
 
 impl<T> Message<T> {
+    /// Creates a new message.
     pub(crate) fn new(
         msg_id: usize,
         sender_id: usize,
@@ -31,7 +36,7 @@ impl<T> Message<T> {
     }
 }
 
-/// Control messages to facilitate communication with the reqistration server
+/// Control messages to facilitate communication with the registration server
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ControlMsg {
     /// A directory message sent by the `Server` to new `Client`s once they
@@ -46,7 +51,7 @@ pub enum ControlMsg {
 
 #[derive(Debug)]
 pub struct MessageCodec<T> {
-    pub(crate) phantom: std::marker::PhantomData<T>,
+    phantom: std::marker::PhantomData<T>,
     pub(crate) codec: LengthDelimitedCodec,
 }
 
@@ -75,7 +80,6 @@ impl<T: DeserializeOwned> Decoder for MessageCodec<T> {
 
 impl<T: Serialize> Encoder<Message<T>> for MessageCodec<T> {
     type Error = LiquidError;
-
     fn encode(
         &mut self,
         item: Message<T>,
