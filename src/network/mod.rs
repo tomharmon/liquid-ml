@@ -100,8 +100,8 @@ pub(crate) struct Connection<T> {
 type FramedStream = FramedRead<ReadHalf<TcpStream>, MessageCodec<ControlMsg>>;
 type FramedSink = FramedWrite<WriteHalf<TcpStream>, MessageCodec<ControlMsg>>;
 
-/// Represents a `Client` node in a distributed system, where Type T is the types
-/// of messages that can be sent between `Client`s
+/// Represents a `Client` node in a distributed system, where Type `T` is the
+/// types of messages that can be sent between `Client`s
 pub struct Client<T> {
     /// The `id` of this `Client`
     pub id: usize,
@@ -141,7 +141,7 @@ pub struct Server {
     pub(crate) listener: TcpListener,
 }
 
-/// A message for communication between nodes
+/// A message that are sent between nodes for communication
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message<T> {
     /// The id of this message
