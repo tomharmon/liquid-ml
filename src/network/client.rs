@@ -2,8 +2,7 @@
 //! provided for `LiquidML` use cases.
 use crate::error::LiquidError;
 use crate::network;
-use crate::network::message::{ControlMsg, Message, MessageCodec};
-use crate::network::{existing_conn_err, increment_msg_id, Connection};
+use crate::network::*;
 use futures::SinkExt;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -11,41 +10,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{split, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{channel, Sender};
 use tokio::sync::{Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
-
-type FramedStream = FramedRead<ReadHalf<TcpStream>, MessageCodec<ControlMsg>>;
-type FramedSink = FramedWrite<WriteHalf<TcpStream>, MessageCodec<ControlMsg>>;
-
-/// Represents a `Client` node in a distributed system, where Type T is the types
-/// of messages that can be sent between `Client`s
-pub struct Client<T> {
-    /// The `id` of this `Client`
-    pub id: usize,
-    /// The `address` of this `Client`
-    pub address: String,
-    /// The id of the current message
-    pub msg_id: usize,
-    /// A directory which is a map of client id to a [`Connection`](Connection)
-    pub directory: HashMap<usize, Connection<T>>,
-    /// A buffered connection to the `Server`
-    pub server: (FramedStream, FramedSink),
-    /// A queue which messages from other `Client`s are added to. After a
-    /// `Message<T>` is added to the `receiver`, the layer above this `Client`
-    /// is notified there is a new `message` available on the `receiver` via
-    /// the `notifier` so that the above layer can get the message off this
-    /// `receiver` and process it how it wants to.
-    pub(crate) receiver: Receiver<Message<T>>,
-    /// When this `Client` gets a message, it uses this `sender` to give
-    /// messages to whatever layer above this is using this `Client` for
-    /// networking. The above layer will receive the messages on the
-    /// `receiver`.
-    sender: Sender<Message<T>>,
-    /// Used to notify whatever is using this `Client` for networking that a
-    /// message has been received and is available on the `receiver`.
-    pub(crate) notifier: Arc<Notify>,
-}
 
 // TODO: remove 'static
 /// Methods which allow a `Client` node to start up and connect to a distributed

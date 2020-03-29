@@ -1,5 +1,5 @@
 use liquid_ml::error::LiquidError;
-use liquid_ml::network::server::Server;
+use liquid_ml::network::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {

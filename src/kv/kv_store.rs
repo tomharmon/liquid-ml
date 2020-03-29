@@ -1,8 +1,7 @@
 use crate::dataframe::DataFrame;
 use crate::error::LiquidError;
-use crate::kv::KVMessage;
-use crate::kv::*;
-use crate::network::client::Client;
+use crate::kv::{KVMessage, KVStore, Key, Value};
+use crate::network::Client;
 use bincode::{deserialize, serialize};
 use lru::LruCache;
 use std::collections::HashMap;

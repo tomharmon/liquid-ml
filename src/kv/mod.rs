@@ -1,7 +1,7 @@
 //! A module for distributed `Key`, `Value` stores. Utilizes the `network`
 //! module to communicate between nodes.
 use crate::dataframe::DataFrame;
-use crate::network::client::Client;
+use crate::network::Client;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

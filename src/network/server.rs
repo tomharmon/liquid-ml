@@ -3,24 +3,11 @@
 
 use crate::error::LiquidError;
 use crate::network;
-use crate::network::message::*;
-use crate::network::Connection;
+use crate::network::{Connection, ControlMsg, Message, MessageCodec, Server};
 use std::collections::HashMap;
 use tokio::io::split;
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
-
-/// Represents a registration `Server` in a distributed system.
-pub struct Server {
-    /// The `address` of this `Server`
-    pub address: String,
-    /// The id of the current message
-    pub msg_id: usize,
-    /// A directory which is a map of client id to a [`Connection`](Connection)
-    pub directory: HashMap<usize, Connection<ControlMsg>>,
-    /// A `TcpListener` which listens for connections from new `Client`s
-    pub listener: TcpListener,
-}
 
 /// Methods which allow a `Client` node to start up and connect to a distributed
 /// system, listen for new connections from other new `Client`s, send
