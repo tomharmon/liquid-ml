@@ -11,7 +11,6 @@ use tokio::sync::{Mutex, Notify, RwLock};
 
 const MAX_NUM_CACHED_DATAFRAMES: usize = 5;
 
-/// Defines methods for a `KVStore`
 impl KVStore {
     /// Creates a new `KVStore`. The `network` is used to communicate between
     /// distributed `KVStore`s. The `network_notifier` comes from the `network`
@@ -171,7 +170,23 @@ impl KVStore {
         }
     }
 
-    /// Internal helper to process messages from the queue
+    /// Processes messages from the queue that is populated by the
+    /// `network::Client`.
+    ///
+    /// This method processes the messages by doing the following:
+    /// 1. Asynchronously await new notifications from the `Client` that are
+    ///    sent when messages have arrived on the queue.
+    /// 2. Spawn an asynchronous `tokio::task` so as to not block further
+    ///    message processing.
+    /// 3. Based on the message type, do the following:
+    ///    - `Get` message: call `wait_and_get` to get the data, either
+    ///       internally from this `KVStore` or externally over the network
+    ///       from another one. Once we have the data, respond with a `Data`
+    ///       message containing the requested data.
+    ///    - `Data` message: Deserialize the data and put it into our cache
+    ///    - `Put` message: add the given data to our internal store
+    ///    - `Blob` message: send the data up a higher level similar to how
+    ///       the `Client` processes messages
     pub async fn process_messages(kv: Arc<KVStore>) -> Result<(), LiquidError> {
         loop {
             let msg;

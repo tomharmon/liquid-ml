@@ -66,13 +66,16 @@ pub struct KVStore {
 /// `KVStore`s
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum KVMessage {
-    /// A message used to tell other clients to put the provided data in their local store
+    /// A message used to kindly tell other `KVStore`s to put the provided
+    /// `Key` and `Value` in their local store
     Put(Key, Value),
-    /// A message used to request the data for the given `Key` from other nodes
+    /// A message used to request the `Value` for the given `Key` from other
+    /// `KVStore`s
     Get(Key),
-    /// A message used to send a `Key` and its `Value`, in response to `Get` messages
+    /// A message used to send a `Key` and its `Value` in response to `Get`
+    /// messages
     Data(Key, Value),
-    /// A message used to share random blobs of data with other nodes. This provides a lower level
-    /// interface to facilitate other kinds of messages
+    /// A message used to share random blobs of data with other nodes. This
+    /// provides a lower level interface to facilitate other kinds of messages
     Blob(Value),
 }
