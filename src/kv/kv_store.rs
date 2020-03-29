@@ -188,6 +188,7 @@ impl KVStore {
                 }
             }
             let kv_ptr_clone = kv.clone();
+
             let mut sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {
                 match &msg.msg {
@@ -228,7 +229,7 @@ impl KVStore {
                         kv_ptr_clone.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
-                        sender_clone.send(v.clone()).await;
+                        sender_clone.send(v.clone()).await.unwrap();
                     }
                 }
             });

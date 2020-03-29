@@ -106,7 +106,7 @@ impl Application {
                 if self.node_id != self.num_nodes {
                     // we are the last node
                     let blob = serialize(&res)?;
-                    self.kv.send_blob(self.node_id - 1, blob).await;
+                    self.kv.send_blob(self.node_id - 1, blob).await?;
                     Ok(None)
                 } else {
                     let mut blob = self.blob_receiver.recv().await.unwrap();
@@ -114,7 +114,7 @@ impl Application {
                     res = res.join(&external_rower);
                     if self.node_id != 1 {
                         blob = serialize(&res)?;
-                        self.kv.send_blob(self.node_id - 1, blob).await;
+                        self.kv.send_blob(self.node_id - 1, blob).await?;
                         Ok(None)
                     } else {
                         Ok(Some(res))
