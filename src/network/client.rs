@@ -44,7 +44,7 @@ pub struct Client<T> {
     sender: Sender<Message<T>>,
     /// Used to notify whatever is using this `Client` for networking that a
     /// message has been received and is available on the `receiver`.
-    notifier: Arc<Notify>,
+    pub(crate) notifier: Arc<Notify>,
 }
 
 // TODO: remove 'static
@@ -52,8 +52,9 @@ pub struct Client<T> {
 /// system, listen for new connections from other new `Client`s, send
 /// directed communication to other `Client`s, and respond to messages from
 /// other `Client`s
-impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
-    Client<RT>
+impl<
+        RT: Send + Sync + DeserializeOwned + Serialize + std::fmt::Debug + 'static,
+    > Client<RT>
 {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
@@ -73,12 +74,12 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
     ///    for each connection that will read messages from the connection
     ///    and handle it.
     pub async fn new(
-        server_addr: String,
-        my_addr: String,
+        server_addr: &str,
+        my_addr: &str,
         notifier: Arc<Notify>,
-    ) -> Result<Self, LiquidError> {
+    ) -> Result<Arc<RwLock<Self>>, LiquidError> {
         // Connect to the server
-        let server_stream = TcpStream::connect(server_addr.clone()).await?;
+        let server_stream = TcpStream::connect(server_addr).await?;
         let (reader, writer) = split(server_stream);
         let mut stream = FramedRead::new(reader, MessageCodec::new());
         let mut sink = FramedWrite::new(writer, MessageCodec::new());
@@ -88,18 +89,17 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             0,
             0,
             ControlMsg::Introduction {
-                address: my_addr.clone(),
+                address: my_addr.to_string(),
             },
         ))
         .await?;
         // The Server sends the addresses of all currently connected clients
         let dir = network::read_msg(&mut stream).await?;
         if let ControlMsg::Directory { dir: d } = dir.msg {
-            // Todo : Use unbounded channel here
             let (sender, receiver) = channel::<Message<RT>>(1000);
             let mut c = Client {
                 id: dir.target_id,
-                address: my_addr.clone(),
+                address: my_addr.to_string(),
                 msg_id: dir.msg_id + 1,
                 directory: HashMap::new(),
                 server: (stream, sink),
@@ -114,7 +114,14 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
             }
             // TODO: Listen for further messages from the Server, e.g. `Kill` messages
             //self.recv_msg();;
-            Ok(c)
+            let concurrent_client = Arc::new(RwLock::new(c));
+            let concurrent_client_cloned = concurrent_client.clone();
+            tokio::spawn(async move {
+                Client::accept_new_connections(concurrent_client_cloned)
+                    .await
+                    .unwrap();
+            });
+            Ok(concurrent_client)
         } else {
             Err(LiquidError::UnexpectedMessage)
         }
@@ -168,8 +175,6 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                         .directory
                         .insert(intro.sender_id, conn);
                 }
-                // spawn a tokio task to handle new messages from the client
-                // that we just connected to
                 // NOTE: Not unsafe because message codec has no fields and
                 // can be converted to a different type without losing meaning
                 let new_stream = unsafe {
@@ -181,9 +186,12 @@ impl<RT: Send + DeserializeOwned + Serialize + std::fmt::Debug + 'static>
                         FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
                     >(stream)
                 };
+                // spawn a tokio task to handle new messages from the client
+                // that we just connected to
                 {
-                    let new_sender = client.read().await.sender.clone();
-                    let new_notifier = client.read().await.notifier.clone();
+                    let unlocked = client.read().await;
+                    let new_sender = unlocked.sender.clone();
+                    let new_notifier = unlocked.notifier.clone();
                     Client::recv_msg(new_sender, new_stream, new_notifier);
                 }
                 println!(

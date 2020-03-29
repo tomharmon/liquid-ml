@@ -57,7 +57,7 @@ pub struct KVStore {
     /// Used internally for processing network messages
     network_notifier: Arc<Notify>,
     /// The `id` of the node this `KVStore` is running on
-    id: usize,
+    pub(crate) id: usize,
     /// A channel to send blobs of data to a higher level
     blob_sender: Sender<Value>,
 }

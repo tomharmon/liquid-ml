@@ -20,12 +20,17 @@ impl KVStore {
     /// `network` so that this `KVStore` may process and respond to messages.
     /// The `network_notifier` is passed in separately so that `new` is not
     /// `async`.
-    pub fn new(
-        network: Arc<RwLock<Client<KVMessage>>>,
-        network_notifier: Arc<Notify>,
-        id: usize,
+    pub async fn new(
+        server_addr: &str,
+        my_addr: &str,
         blob_sender: Sender<Value>,
     ) -> Self {
+        let network_notifier = Arc::new(Notify::new());
+        let network =
+            Client::new(server_addr, my_addr, network_notifier.clone())
+                .await
+                .unwrap();
+        let id = network.read().await.id;
         KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_DATAFRAMES)),

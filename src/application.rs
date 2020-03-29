@@ -1,15 +1,13 @@
 use crate::dataframe::DataFrame;
 use crate::dataframe::Rower;
 use crate::error::LiquidError;
-use crate::kv::{KVMessage, KVStore, Key, Value};
-use crate::network::client::Client;
+use crate::kv::{KVStore, Key, Value};
 use bincode::{deserialize, serialize};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::sync::{Notify, RwLock};
 use tokio::task::JoinHandle;
 
 pub struct Application {
@@ -18,7 +16,6 @@ pub struct Application {
     pub blob_receiver: Receiver<Value>,
     // TODO: maybe use a runtime here
     msg_processor: JoinHandle<()>,
-    conn_processor: JoinHandle<()>,
     num_nodes: usize,
 }
 
@@ -28,20 +25,9 @@ impl Application {
         server_addr: &str,
         num_nodes: usize,
     ) -> Result<Self, LiquidError> {
-        let notifier = Arc::new(Notify::new());
-        let c = Client::<KVMessage>::new(
-            server_addr.to_string(),
-            my_addr.to_string(),
-            notifier.clone(),
-        )
-        .await?;
-        let node_id = c.id;
-        let arc = Arc::new(RwLock::new(c));
         let (blob_sender, blob_receiver) = channel(2);
-        let kv = KVStore::new(arc.clone(), notifier, node_id, blob_sender);
-        let fut0 = tokio::spawn(async move {
-            Client::accept_new_connections(arc).await.unwrap();
-        });
+        let kv = KVStore::new(server_addr, my_addr, blob_sender).await;
+        let node_id = kv.id;
         let kv_arc = Arc::new(kv);
         let arc_new = kv_arc.clone();
         let fut1 = tokio::spawn(async move {
@@ -52,7 +38,6 @@ impl Application {
             node_id,
             blob_receiver,
             msg_processor: fut1,
-            conn_processor: fut0,
             num_nodes,
         })
     }
@@ -136,6 +121,5 @@ impl Application {
 
     pub async fn go(self) {
         self.msg_processor.await.unwrap();
-        self.conn_processor.await.unwrap();
     }
 }
