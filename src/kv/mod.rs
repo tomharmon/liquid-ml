@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 
 /// A struct used in the `associative_cache` crate
 pub(crate) struct Capacity1GB;
@@ -61,7 +61,7 @@ pub struct KVStore {
     data: RwLock<HashMap<Key, Value>>,
     /// An `LRU` cache of deserialized `DataFrame`s, not all of which are owned
     /// by this `KVStore`.
-    cache: RwLock<
+    cache: Mutex<
         AssociativeCache<
             Key,
             WithLruTimestamp<DataFrame>,

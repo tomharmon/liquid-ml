@@ -10,7 +10,7 @@ use bincode::{deserialize, serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 
 /// Defines methods for a `KVStore`
 impl KVStore {
@@ -28,7 +28,7 @@ impl KVStore {
     ) -> Self {
         KVStore {
             data: RwLock::new(HashMap::new()),
-            cache: RwLock::new(AssociativeCache::<
+            cache: Mutex::new(AssociativeCache::<
                 Key,
                 WithLruTimestamp<DataFrame>,
                 Capacity1GB,
@@ -52,21 +52,19 @@ impl KVStore {
     /// If `key` is not in this `KVStore`s cache or is not owned by this
     /// `KVStore`, then the error `Err(LiquidError::NotPresent)` is returned
     pub async fn get(&self, key: &Key) -> Result<DataFrame, LiquidError> {
-        // note: may cause deadlock, might need to change to wait_and_get style
-        match { self.cache.read().await.get(key) } {
-            Some(v) => Ok(*v.clone()),
-            None => {
-                let serialized_val = self.get_raw(key).await?;
-                let deserialized: DataFrame = deserialize(&serialized_val[..])?;
-                {
-                    self.cache.write().await.insert(
-                        key.clone(),
-                        WithLruTimestamp::new(deserialized.clone()),
-                    );
-                }
-                Ok(deserialized)
-            }
+        if let Some(val) = { self.cache.lock().await.get(key) } {
+            return Ok(WithLruTimestamp::into_inner(val.clone()));
         }
+
+        let serialized_val = self.get_raw(key).await?;
+        let deserialized: DataFrame = deserialize(&serialized_val[..])?;
+        {
+            self.cache.lock().await.insert(
+                key.clone(),
+                WithLruTimestamp::new(deserialized.clone()),
+            );
+        }
+        Ok(deserialized)
     }
 
     /// Get the data for the given `key`. If the key belongs on a different node
@@ -80,15 +78,15 @@ impl KVStore {
     ///    before `wait_and_get` is called. In this case, this function can
     ///    likely be `await`ed
     /// 2. The data will be `put` on this `KVStore` sometime in the
-    ///    future at an unkown time. In this case, this function should
+    ///    future at an unknown time. In this case, this function should
     ///    not be `await`ed but instead given a callback closure via
     ///    calling `and_then` on the returned future
     pub async fn wait_and_get(
         &self,
         key: &Key,
     ) -> Result<DataFrame, LiquidError> {
-        if let Some(val) = { self.cache.read().await.get(key) } {
-            return Ok(*val.clone());
+        if let Some(val) = { self.cache.lock().await.get(key) } {
+            return Ok(WithLruTimestamp::into_inner(val.clone()));
         }
 
         if key.home == self.id {
@@ -98,7 +96,7 @@ impl KVStore {
             let serialized_val = self.get_raw(key).await?;
             let deserialized: DataFrame = deserialize(&serialized_val[..])?;
             {
-                self.cache.write().await.insert(
+                self.cache.lock().await.insert(
                     key.clone(),
                     WithLruTimestamp::new(deserialized.clone()),
                 );
@@ -114,7 +112,7 @@ impl KVStore {
                     .send_msg(key.home, KVMessage::Get(key.clone()))
                     .await?;
             }
-            while { self.cache.read().await.get(key) } == None {
+            while { self.cache.lock().await.get(key) } == None {
                 self.internal_notifier.notified().await;
             }
             self.get(key).await
@@ -190,7 +188,7 @@ impl KVStore {
                 }
             }
             let kv_ptr_clone = kv.clone();
-            let sender_clone = kv_ptr_clone.blob_sender.clone();
+            let mut sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {
                 match &msg.msg {
                     KVMessage::Get(k) => {
@@ -211,7 +209,7 @@ impl KVStore {
                     }
                     KVMessage::Data(k, v) => {
                         {
-                            kv_ptr_clone.cache.write().await.insert(
+                            kv_ptr_clone.cache.lock().await.insert(
                                 k.clone(),
                                 WithLruTimestamp::new(deserialize(v).unwrap()),
                             );
