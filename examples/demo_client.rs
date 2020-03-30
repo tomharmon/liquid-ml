@@ -57,10 +57,13 @@ async fn main() -> Result<(), LiquidError> {
 
     if app.node_id == 1 {
         app.run(producer).await;
+        tokio::time::delay_for(tokio::time::Duration::from_secs(5)).await;
     } else if app.node_id == 2 {
         app.run(summer).await;
+        tokio::time::delay_for(tokio::time::Duration::from_secs(5)).await;
     } else if app.node_id == 3 {
         app.run(verifier).await;
+        tokio::time::delay_for(tokio::time::Duration::from_secs(5)).await;
     }
     Ok(())
 }

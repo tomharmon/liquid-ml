@@ -23,19 +23,25 @@ impl KVStore {
         server_addr: &str,
         my_addr: &str,
         blob_sender: Sender<Value>,
-    ) -> Self {
+    ) -> Arc<Self> {
+        // the Receiver acts as our queue of messages from the network, and
+        // the network uses the Sender to add messages to our queue
         let (sender, receiver) = mpsc::channel(100);
         let network = Client::new(server_addr, my_addr, sender).await.unwrap();
         let id = network.read().await.id;
-        KVStore {
+        let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_DATAFRAMES)),
             network,
             internal_notifier: Notify::new(),
             id,
-            receiver,
             blob_sender,
-        }
+        });
+        let kv_clone = kv.clone();
+        tokio::spawn(async move {
+            KVStore::process_messages(kv_clone, receiver).await.unwrap();
+        });
+        kv
     }
 
     /// `get` is used to retrieve the `Value` associated with the given `key`.
@@ -188,17 +194,18 @@ impl KVStore {
     ///    - `Blob` message: send the data up a higher level similar to how
     ///       the `Client` processes messages
     pub(crate) async fn process_messages(
-        mut kv: Arc<KVStore>,
-        //mut receiver: Receiver<Message<KVMessage>>
+        kv: Arc<KVStore>,
+        mut receiver: Receiver<Message<KVMessage>>,
     ) -> Result<(), LiquidError> {
         loop {
-            let msg = kv.receiver.recv().await.unwrap();
+            println!("processing messages");
+            let msg = receiver.recv().await.unwrap();
             let kv_ptr_clone = kv.clone();
             let mut sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {
                 match &msg.msg {
                     KVMessage::Get(k) => {
-                        // This should wait until it has the data to respond
+                        // This must wait until it has the data to respond
                         let x = kv_ptr_clone.wait_and_get_raw(k).await.unwrap();
                         {
                             kv_ptr_clone

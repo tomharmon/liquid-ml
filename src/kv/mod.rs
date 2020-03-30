@@ -1,12 +1,12 @@
 //! A module for distributed `Key`, `Value` stores. Utilizes the `network`
 //! module to communicate between nodes.
 use crate::dataframe::DataFrame;
-use crate::network::{Client, Message};
+use crate::network::Client;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Notify, RwLock};
 
 mod kv_store;
@@ -56,8 +56,6 @@ pub struct KVStore {
     internal_notifier: Notify,
     /// The `id` of the node this `KVStore` is running on
     pub(crate) id: usize,
-    /// A queue of messages from the `network`.
-    pub receiver: Receiver<Message<KVMessage>>,
     /// A channel to send blobs of data to a higher level
     blob_sender: Sender<Value>,
 }

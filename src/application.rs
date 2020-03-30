@@ -8,14 +8,11 @@ use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::mpsc::{channel, Receiver};
-use tokio::task::JoinHandle;
 
 pub struct Application {
     pub kv: Arc<KVStore>,
     pub node_id: usize,
     pub blob_receiver: Receiver<Value>,
-    // TODO: maybe use a runtime here
-    msg_processor: JoinHandle<()>,
     num_nodes: usize,
 }
 
@@ -26,18 +23,12 @@ impl Application {
         num_nodes: usize,
     ) -> Result<Self, LiquidError> {
         let (blob_sender, blob_receiver) = channel(2);
-        let kv =
-            Arc::new(KVStore::new(server_addr, my_addr, blob_sender).await);
+        let kv = KVStore::new(server_addr, my_addr, blob_sender).await;
         let node_id = kv.id;
-        let kv_cloned = kv.clone();
-        let fut1 = tokio::spawn(async move {
-            KVStore::process_messages(kv_cloned).await.unwrap();
-        });
         Ok(Application {
             kv,
             node_id,
             blob_receiver,
-            msg_processor: fut1,
             num_nodes,
         })
     }
@@ -116,10 +107,5 @@ impl Application {
         F: FnOnce(Arc<KVStore>) -> Fut,
     {
         f(self.kv.clone()).await;
-        self.go().await;
-    }
-
-    pub async fn go(self) {
-        self.msg_processor.await.unwrap();
     }
 }
