@@ -1,11 +1,13 @@
-- Build application layer
-  - test PMAP(Rower)
-  - filter?
-- WordCount
-- Every node has the entire SOR file, should we change?
-- Testing
-- Random Forest LUL
 - Change printlns to logger
-- application layer documentation
+- application layer documentation/update memo
+- Build application layer
+  - test pmap
+  - filter
+- better distributed dataframe functionality
+  - lru cache is not enough as of right now, does not limit memory usage
+  - Every node has the entire SOR file
+- WordCount
+- Testing
 - seven degrees of Linus
+- Random Forest LUL
 - Orderly shutdown

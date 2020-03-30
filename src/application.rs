@@ -1,13 +1,13 @@
 //! This module defines an application the highest level component of a liquid_ml system. The
 //! application exposes a KVStore and a blob receiver that can be used to send random blocs across
-//! the network. The blob receiver is designed to be used for control messages. 
+//! the network. The blob receiver is designed to be used for control messages.
 //!
 //! A user of the liquid_ml system need only instantiate an application and provide it an async
 //! function to be run. The application grants access to its node_id so different tasks can be done
 //! on different nodes.
 //!
 //! Detailed examples that use the application can be found in the examples directory of this
-//! crate.  
+//! crate.
 
 use crate::dataframe::{DataFrame, Rower};
 use crate::error::LiquidError;
@@ -25,7 +25,7 @@ pub struct Application {
     pub kv: Arc<KVStore>,
     /// The id of this node, assigned by the registration server
     pub node_id: usize,
-    /// A receiver for blob messages that can b processed by the user 
+    /// A receiver for blob messages that can b processed by the user
     pub blob_receiver: Receiver<Value>,
     /// the number of nodes in this network
     /// NOTE: Currently panics if the network is inconsistent with this network
