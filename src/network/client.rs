@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{split, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::{channel, Sender};
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::mpsc::Sender;
+use tokio::sync::RwLock;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 // TODO: remove 'static
@@ -21,13 +21,6 @@ impl<
 {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
-    ///
-    /// The `notifier` passed in should be used by the layer above this
-    /// `Client` so that this `Client` may notify the above layer when messages
-    /// are received from other `Client`s. When these messages are received,
-    /// the `notifier` will tell that layer that a message was received and that
-    /// a message is available on this `Client`s `receiver` for processing
-    /// according to however the above layer wants to handle it.
     ///
     /// Constructing the `Client` does these things:
     /// 1. Connects to the `Server`
@@ -42,7 +35,7 @@ impl<
     pub async fn new(
         server_addr: &str,
         my_addr: &str,
-        notifier: Arc<Notify>,
+        sender: Sender<Message<RT>>,
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
@@ -62,16 +55,13 @@ impl<
         // The Server sends the addresses of all currently connected clients
         let dir = network::read_msg(&mut stream).await?;
         if let ControlMsg::Directory { dir: d } = dir.msg {
-            let (sender, receiver) = channel::<Message<RT>>(100);
             let mut c = Client {
                 id: dir.target_id,
                 address: my_addr.to_string(),
                 msg_id: dir.msg_id + 1,
                 directory: HashMap::new(),
                 _server: (stream, sink),
-                receiver,
                 sender,
-                notifier,
             };
 
             // Connect to all the clients
@@ -153,12 +143,8 @@ impl<
                 };
                 // spawn a tokio task to handle new messages from the client
                 // that we just connected to
-                {
-                    let unlocked = client.read().await;
-                    let new_sender = unlocked.sender.clone();
-                    let new_notifier = unlocked.notifier.clone();
-                    Client::recv_msg(new_sender, new_stream, new_notifier);
-                }
+                let new_sender = { client.read().await.sender.clone() };
+                Client::recv_msg(new_sender, new_stream);
                 println!(
                     "Connected to id: {:#?} at address: {:#?}",
                     intro.sender_id, addr
@@ -217,11 +203,7 @@ impl<
             self.directory.insert(client.0, conn);
             // spawn a tokio task to handle new messages from the client
             // that we just connected to
-            Client::recv_msg(
-                self.sender.clone(),
-                stream,
-                self.notifier.clone(),
-            );
+            Client::recv_msg(self.sender.clone(), stream);
             // send the client our id and address so they can add us to
             // their directory
             self.msg_id += 1;
@@ -259,7 +241,6 @@ impl<
     fn recv_msg(
         mut sender: Sender<Message<RT>>,
         mut reader: FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
-        notifier: Arc<Notify>,
     ) {
         // TODO: need to properly increment message id but that means self
         // needs to be 'static or mutex'd and that propagates a lot...
@@ -270,7 +251,6 @@ impl<
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 let id = s.msg_id;
                 sender.send(s).await.unwrap();
-                notifier.notify();
                 println!("Got a msg with id: {}, added to process queue", id);
             }
         });

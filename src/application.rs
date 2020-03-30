@@ -26,15 +26,15 @@ impl Application {
         num_nodes: usize,
     ) -> Result<Self, LiquidError> {
         let (blob_sender, blob_receiver) = channel(2);
-        let kv = KVStore::new(server_addr, my_addr, blob_sender).await;
+        let kv =
+            Arc::new(KVStore::new(server_addr, my_addr, blob_sender).await);
         let node_id = kv.id;
-        let kv_arc = Arc::new(kv);
-        let arc_new = kv_arc.clone();
+        let kv_cloned = kv.clone();
         let fut1 = tokio::spawn(async move {
-            KVStore::process_messages(arc_new).await.unwrap();
+            KVStore::process_messages(kv_cloned).await.unwrap();
         });
         Ok(Application {
-            kv: kv_arc,
+            kv,
             node_id,
             blob_receiver,
             msg_processor: fut1,

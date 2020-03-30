@@ -1,12 +1,13 @@
 use crate::dataframe::DataFrame;
 use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
-use crate::network::Client;
+use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
 use lru::LruCache;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify, RwLock};
 
 const MAX_NUM_CACHED_DATAFRAMES: usize = 5;
@@ -23,19 +24,16 @@ impl KVStore {
         my_addr: &str,
         blob_sender: Sender<Value>,
     ) -> Self {
-        let network_notifier = Arc::new(Notify::new());
-        let network =
-            Client::new(server_addr, my_addr, network_notifier.clone())
-                .await
-                .unwrap();
+        let (sender, receiver) = mpsc::channel(100);
+        let network = Client::new(server_addr, my_addr, sender).await.unwrap();
         let id = network.read().await.id;
         KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_DATAFRAMES)),
             network,
             internal_notifier: Notify::new(),
-            network_notifier,
             id,
+            receiver,
             blob_sender,
         }
     }
@@ -190,19 +188,11 @@ impl KVStore {
     ///    - `Blob` message: send the data up a higher level similar to how
     ///       the `Client` processes messages
     pub(crate) async fn process_messages(
-        kv: Arc<KVStore>,
+        mut kv: Arc<KVStore>,
+        //mut receiver: Receiver<Message<KVMessage>>
     ) -> Result<(), LiquidError> {
         loop {
-            let msg;
-            loop {
-                kv.network_notifier.notified().await;
-                if let Ok(v) = { kv.network.write().await.receiver.try_recv() }
-                {
-                    msg = v;
-                    break;
-                }
-            }
-
+            let msg = kv.receiver.recv().await.unwrap();
             let kv_ptr_clone = kv.clone();
             let mut sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {

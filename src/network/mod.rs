@@ -50,7 +50,7 @@
 //! ## Client Usage
 //! For a more in-depth and useful example, it may be worthwhile to look at
 //! the source code for the `KVStore`. Here is a toy example that may be
-//! useful for getting started. 
+//! useful for getting started.
 //!
 //! Assume that the `Server` is already running at `68.2.3.4:9000`
 //!
@@ -102,14 +102,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::Shutdown;
-use std::sync::Arc;
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::stream::StreamExt;
-use tokio::sync::{
-    mpsc::{Receiver, Sender},
-    Notify,
-};
+use tokio::sync::mpsc::Sender;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 /// A connection to another `Client`, used for sending directed communication
@@ -136,20 +132,11 @@ pub struct Client<T> {
     pub(crate) directory: HashMap<usize, Connection<T>>,
     /// A buffered connection to the `Server`
     _server: (FramedStream, FramedSink),
-    /// A queue which messages from other `Client`s are added to. After a
-    /// `Message<T>` is added to the `receiver`, the layer above this `Client`
-    /// is notified there is a new `message` available on the `receiver` via
-    /// the `notifier` so that the above layer can get the message off this
-    /// `receiver` and process it how it wants to.
-    pub receiver: Receiver<Message<T>>,
-    /// When this `Client` gets a message, it uses this `sender` to give
-    /// messages to whatever layer above this is using this `Client` for
-    /// networking. The above layer will receive the messages on the
-    /// `receiver`.
+    /// When this `Client` gets a message, it uses this `mpsc` channel to give
+    /// messages to whatever layer is using this `Client` for networking. The
+    /// above layer will receive the messages on the other half of this `mpsc`
+    /// channel.
     sender: Sender<Message<T>>,
-    /// Used to notify whatever is using this `Client` for networking that a
-    /// message has been received and is available on the `receiver`.
-    pub(crate) notifier: Arc<Notify>,
 }
 
 /// Represents a registration `Server` in a distributed system.
