@@ -1,6 +1,3 @@
-- fix KVStore::process_messages like Client::accept_new_connections
-- imo, pass in the `sender` and `notifier` to a `Client`, and don't have
-  the `receiver` as a field of the `Client`
 - Build application layer
   - test PMAP(Rower)
   - filter?

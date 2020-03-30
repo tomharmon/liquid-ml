@@ -40,7 +40,7 @@
 //!
 //! Constructing a new `Client` does these things:
 //! 1. Connects to the `Server`
-//! 2. Sends the server our IP:Port address
+//! 2. Sends the server our `IP:Port` address
 //! 3. Server responds with a `RegistrationMsg`
 //! 4. Connects to all other existing `Client`s which spawns a Tokio task
 //!    for each connection that will read messages from the connection,
@@ -54,45 +54,51 @@
 //!
 //! Assume that the `Server` is already running at `68.2.3.4:9000`
 //!
-//! Client 1 starts up, all it does is read messages and print them
+//! Client 1 starts up, all it does is send 'Hi' to Client 2 then the program
+//! exits
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
-//! use tokio::sync::Notify;
+//! use tokio::sync::{Notify, mpsc};
 //! use liquid_ml::network::{Client, Message};
 //! use liquid_ml::error::LiquidError;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), LiquidError> {
-//!     let notifier = Arc::new(Notify::new());
+//!     let (sender, receiver) = mpsc::channel(100);
+//!     let kill_notifier = Arc::new(Notify::new());
 //!     let client = Client::<String>::new("68.2.3.4:9000",
 //!                                        "69.0.4.20:9000",
-//!                                        notifier.clone()).await.unwrap();
-//!     loop {
-//!         // this notifier is notified everytime there is a message from the queue
-//!         notifier.notified().await;
-//!         println!(client.write().await.receiver.recv().await);
-//!     }
+//!                                        sender,
+//!                                        kill_notifier).await.unwrap();
+//!     // see `Client::new` documentation for `new` returns a
+//!     // `Arc<RwLock<Client>>`
+//!     let id = { client.read().await.id };
+//!     { client.write().await.send_msg(id + 1, "Hi".to_string()).await? };
 //!     Ok(())
 //! }
 //! ```
-//! Client 2 starts up and greets client 1
+//!
+//! Client 2 starts up and the message sent by Client 1 is available on the
+//! receiver after it's been sent. The message is popped from the queue and
+//! printed.
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
-//! use tokio::sync::Notify;
+//! use tokio::sync::{Notify, mpsc};
 //! use liquid_ml::network::{Client, Message};
 //! use liquid_ml::error::LiquidError;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), LiquidError> {
-//!     let notifier = Arc::new(Notify::new());
+//!     let (sender, mut receiver) = mpsc::channel(100);
+//!     let kill_notifier = Arc::new(Notify::new());
 //!     let client = Client::<String>::new("68.2.3.4:9000",
 //!                                        "69.80.08.5:9000",
-//!                                        notifier.clone()).await.unwrap();
-//!     // see `Client::new` documentation for `new` returns a
-//!     // `Arc<RwLock<Client>>`
-//!     { client.write().await.send_msg(id + 1, "hello".to_string()).await? };
+//!                                        sender,
+//!                                        kill_notifier).await.unwrap();
+//!     let msg = receiver.recv().await.unwrap();
+//!     println!("{}", msg.msg);
 //!     Ok(())
 //! }
 //! ```
@@ -155,13 +161,13 @@ pub struct Server {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message<T> {
     /// The id of this message
-    pub(crate) msg_id: usize,
+    pub msg_id: usize,
     /// The id of the sender
-    pub(crate) sender_id: usize,
+    pub sender_id: usize,
     /// The id of the node this message is being sent to
-    pub(crate) target_id: usize,
+    pub target_id: usize,
     /// The body of the message
-    pub(crate) msg: T,
+    pub msg: T,
 }
 
 /// Control messages to facilitate communication with the registration server

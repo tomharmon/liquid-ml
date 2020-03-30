@@ -47,6 +47,5 @@ async fn main() -> Result<(), LiquidError> {
             _ => unreachable!(),
         }
     }
-    app.go().await;
     Ok(())
 }
