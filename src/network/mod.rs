@@ -113,11 +113,11 @@ pub(crate) struct Connection<T> {
     /// The `IP:Port` of another `Client` that we're connected to
     pub(crate) address: String,
     /// The buffered stream used for sending messages to the other `Client`
-    pub(crate) sink: FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>,
+    pub(crate) sink: FramedSink<T>,
 }
 
-type FramedStream = FramedRead<ReadHalf<TcpStream>, MessageCodec<ControlMsg>>;
-type FramedSink = FramedWrite<WriteHalf<TcpStream>, MessageCodec<ControlMsg>>;
+type FramedStream<T> = FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>;
+type FramedSink<T> = FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>;
 
 /// Represents a `Client` node in a distributed system, where Type `T` is the
 /// types of messages that can be sent between `Client`s
@@ -131,7 +131,7 @@ pub struct Client<T> {
     /// A directory which is a map of client id to a [`Connection`](Connection)
     pub(crate) directory: HashMap<usize, Connection<T>>,
     /// A buffered connection to the `Server`
-    _server: (FramedStream, FramedSink),
+    _server: (FramedStream<ControlMsg>, FramedSink<ControlMsg>),
     /// When this `Client` gets a message, it uses this `mpsc` channel to give
     /// messages to whatever layer is using this `Client` for networking. The
     /// above layer will receive the messages on the other half of this `mpsc`

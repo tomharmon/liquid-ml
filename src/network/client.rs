@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{split, ReadHalf, WriteHalf};
+use tokio::io::{split, ReadHalf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::RwLock;
@@ -134,11 +134,8 @@ impl<
                 // can be converted to a different type without losing meaning
                 let new_stream = unsafe {
                     std::mem::transmute::<
-                        FramedRead<
-                            ReadHalf<TcpStream>,
-                            MessageCodec<ControlMsg>,
-                        >,
-                        FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
+                        FramedStream<ControlMsg>,
+                        FramedStream<RT>,
                     >(stream)
                 };
                 // spawn a tokio task to handle new messages from the client
@@ -190,10 +187,9 @@ impl<
             // NOTE: Not unsafe because message codec has no fields and
             // can be converted to a different type without losing meaning
             let sink = unsafe {
-                std::mem::transmute::<
-                    FramedWrite<WriteHalf<TcpStream>, MessageCodec<ControlMsg>>,
-                    FramedWrite<WriteHalf<TcpStream>, MessageCodec<RT>>,
-                >(sink)
+                std::mem::transmute::<FramedSink<ControlMsg>, FramedSink<RT>>(
+                    sink,
+                )
             };
             let conn = Connection {
                 address: client.1.clone(),
