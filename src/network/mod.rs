@@ -130,8 +130,8 @@ pub struct Client<T> {
     pub(crate) msg_id: usize,
     /// A directory which is a map of client id to a [`Connection`](Connection)
     pub(crate) directory: HashMap<usize, Connection<T>>,
-    /// A buffered connection to the `Server`
-    _server: (FramedStream<ControlMsg>, FramedSink<ControlMsg>),
+    /// A buffered sink to send messages to the `Server`
+    _server: FramedSink<ControlMsg>,
     /// When this `Client` gets a message, it uses this `mpsc` channel to give
     /// messages to whatever layer is using this `Client` for networking. The
     /// above layer will receive the messages on the other half of this `mpsc`
@@ -174,7 +174,8 @@ pub(crate) enum ControlMsg {
     /// An introduction that a new `Client` sends to all other existing
     /// `Client`s and the server
     Introduction { address: String },
-    //TODO : Add a kill message here at some point
+    /// A message the `Server` sends to `Client`s to inform them to shut down
+    Kill,
 }
 
 /// A message encoder/decoder to help frame messages sent over TCP,

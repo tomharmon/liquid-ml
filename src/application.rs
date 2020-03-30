@@ -7,13 +7,14 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::{mpsc, mpsc::Receiver, Notify};
 
 pub struct Application {
     pub kv: Arc<KVStore>,
     pub node_id: usize,
     pub blob_receiver: Receiver<Value>,
     num_nodes: usize,
+    kill_notifier: Arc<Notify>,
 }
 
 impl Application {
@@ -22,14 +23,22 @@ impl Application {
         server_addr: &str,
         num_nodes: usize,
     ) -> Result<Self, LiquidError> {
-        let (blob_sender, blob_receiver) = channel(2);
-        let kv = KVStore::new(server_addr, my_addr, blob_sender).await;
+        let (blob_sender, blob_receiver) = mpsc::channel(2);
+        let kill_notifier = Arc::new(Notify::new());
+        let kv = KVStore::new(
+            server_addr,
+            my_addr,
+            blob_sender,
+            kill_notifier.clone(),
+        )
+        .await;
         let node_id = kv.id;
         Ok(Application {
             kv,
             node_id,
             blob_receiver,
             num_nodes,
+            kill_notifier,
         })
     }
 
@@ -107,5 +116,6 @@ impl Application {
         F: FnOnce(Arc<KVStore>) -> Fut,
     {
         f(self.kv.clone()).await;
+        self.kill_notifier.notified().await;
     }
 }

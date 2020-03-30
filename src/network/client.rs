@@ -8,10 +8,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{split, ReadHalf};
+use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc::Sender;
-use tokio::sync::RwLock;
+use tokio::sync::{mpsc::Sender, Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 // TODO: remove 'static
@@ -36,10 +35,11 @@ impl<
         server_addr: &str,
         my_addr: &str,
         sender: Sender<Message<RT>>,
+        kill_notifier: Arc<Notify>,
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
-        let (reader, writer) = split(server_stream);
+        let (reader, writer) = io::split(server_stream);
         let mut stream = FramedRead::new(reader, MessageCodec::new());
         let mut sink = FramedWrite::new(writer, MessageCodec::new());
         // Tell the server our address
@@ -60,7 +60,7 @@ impl<
                 address: my_addr.to_string(),
                 msg_id: dir.msg_id + 1,
                 directory: HashMap::new(),
-                _server: (stream, sink),
+                _server: sink,
                 sender,
             };
 
@@ -68,8 +68,11 @@ impl<
             for addr in d {
                 c.connect(addr).await?;
             }
-            // TODO: Listen for further messages from the Server, e.g. `Kill` messages
-            //self.recv_msg();;
+
+            // Listen for further messages from the Server, e.g. `Kill` messages
+            Client::<ControlMsg>::recv_server_msg(stream, kill_notifier);
+
+            // spawn a tokio task for accepting connections from new clients
             let concurrent_client = Arc::new(RwLock::new(c));
             let concurrent_client_cloned = concurrent_client.clone();
             tokio::spawn(async move {
@@ -95,7 +98,7 @@ impl<
         loop {
             // wait on connections from new clients
             let (socket, _) = listener.accept().await?;
-            let (reader, writer) = split(socket);
+            let (reader, writer) = io::split(socket);
             let mut stream =
                 FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
             let sink = FramedWrite::new(writer, MessageCodec::<RT>::new());
@@ -166,7 +169,7 @@ impl<
     ) -> Result<(), LiquidError> {
         // Connect to the given client
         let stream = TcpStream::connect(client.1.clone()).await?;
-        let (reader, writer) = split(stream);
+        let (reader, writer) = io::split(stream);
         let stream = FramedRead::new(reader, MessageCodec::<RT>::new());
         let mut sink =
             FramedWrite::new(writer, MessageCodec::<ControlMsg>::new());
@@ -234,20 +237,31 @@ impl<
 
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
-    fn recv_msg(
-        mut sender: Sender<Message<RT>>,
-        mut reader: FramedRead<ReadHalf<TcpStream>, MessageCodec<RT>>,
-    ) {
+    fn recv_msg(mut sender: Sender<Message<RT>>, mut reader: FramedStream<RT>) {
         // TODO: need to properly increment message id but that means self
         // needs to be 'static or mutex'd and that propagates a lot...
         tokio::spawn(async move {
             loop {
-                let s: Message<RT> =
+                let msg: Message<RT> =
                     network::read_msg(&mut reader).await.unwrap();
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
-                let id = s.msg_id;
-                sender.send(s).await.unwrap();
+                let id = msg.msg_id;
+                sender.send(msg).await.unwrap();
                 println!("Got a msg with id: {}, added to process queue", id);
+            }
+        });
+    }
+
+    fn recv_server_msg(
+        mut reader: FramedStream<ControlMsg>,
+        notifier: Arc<Notify>,
+    ) {
+        tokio::spawn(async move {
+            let kill_msg: Message<ControlMsg> =
+                network::read_msg(&mut reader).await.unwrap();
+            match &kill_msg.msg {
+                ControlMsg::Kill => Ok(notifier.notify()),
+                _ => Err(LiquidError::UnexpectedMessage),
             }
         });
     }
