@@ -50,8 +50,11 @@
 //! ## Client Usage
 //! For a more in-depth and useful example, it may be worthwhile to look at
 //! the source code for the `KVStore`. Here is a toy example that may be
-//! useful for getting started. Assume that the `Server` is already
-//! running:
+//! useful for getting started. 
+//!
+//! Assume that the `Server` is already running at `68.2.3.4:9000`
+//!
+//! Client 1 starts up, all it does is read messages and print them
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
@@ -62,14 +65,34 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), LiquidError> {
 //!     let notifier = Arc::new(Notify::new());
-//!     let client = Client::<Message<String>>::new("68.2.3.4:9000",
+//!     let client = Client::<String>::new("68.2.3.4:9000",
 //!                                        "69.0.4.20:9000",
+//!                                        notifier.clone()).await.unwrap();
+//!     loop {
+//!         // this notifier is notified everytime there is a message from the queue
+//!         notifier.notified().await;
+//!         println!(client.write().await.receiver.recv().await);
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//! Client 2 starts up and greets client 1
+//!
+//! ```rust,no_run
+//! use std::sync::Arc;
+//! use tokio::sync::Notify;
+//! use liquid_ml::network::{Client, Message};
+//! use liquid_ml::error::LiquidError;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), LiquidError> {
+//!     let notifier = Arc::new(Notify::new());
+//!     let client = Client::<String>::new("68.2.3.4:9000",
+//!                                        "69.80.08.5:9000",
 //!                                        notifier.clone()).await.unwrap();
 //!     // see `Client::new` documentation for `new` returns a
 //!     // `Arc<RwLock<Client>>`
-//!     let id = { client.read().await.id };
-//!     let msg = Message::new(1, id, id + 1, "Hi".to_string());
-//!     { client.write().await.send_msg(id + 1, msg).await.unwrap() };
+//!     { client.write().await.send_msg(id + 1, "hello".to_string()).await? };
 //!     Ok(())
 //! }
 //! ```
@@ -118,7 +141,7 @@ pub struct Client<T> {
     /// is notified there is a new `message` available on the `receiver` via
     /// the `notifier` so that the above layer can get the message off this
     /// `receiver` and process it how it wants to.
-    pub(crate) receiver: Receiver<Message<T>>,
+    pub receiver: Receiver<Message<T>>,
     /// When this `Client` gets a message, it uses this `sender` to give
     /// messages to whatever layer above this is using this `Client` for
     /// networking. The above layer will receive the messages on the
