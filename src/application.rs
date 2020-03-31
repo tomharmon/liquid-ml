@@ -52,6 +52,7 @@ impl Application {
             my_addr,
             blob_sender,
             kill_notifier.clone(),
+            Some(num_nodes),
         )
         .await;
         let node_id = kv.id;
@@ -64,13 +65,16 @@ impl Application {
         })
     }
 
-    /// Create a new application and split the given SoR file across all the nodes in the network
-    /// NOTE: Untested and incomplete
+    /// Create a new application and split the given SoR file across all the
+    /// nodes in the network.
+    ///
+    /// Note: assumes the entire SoR file is present on all nodes
     pub async fn from_sor(
         file_name: &str,
         my_addr: &str,
         server_addr: &str,
         num_nodes: usize,
+        df_name: &str,
     ) -> Result<Self, LiquidError> {
         let app = Application::new(my_addr, server_addr, num_nodes).await?;
         let file = std::fs::metadata(file_name).unwrap();
@@ -85,22 +89,19 @@ impl Application {
         let mut buffer = Vec::new();
         reader.seek(SeekFrom::Start(from + size)).unwrap();
         reader.read_until(b'\n', &mut buffer).unwrap();
-        size += buffer.len() as u64 + 1; // maybe +1
+        size += buffer.len() as u64 + 1;
 
         let df = DataFrame::from_sor(
             String::from(file_name),
             from as usize,
             size as usize,
         );
-        let key = Key::new("420", app.node_id);
+        let key = Key::new(df_name, app.node_id);
         app.kv.put(&key, df).await?;
         Ok(app)
     }
 
-    /// NOTE: In development: This function is currently untested
-    ///
-    /// NOTE:
-    ///
+    /// NOTE: 
     /// There is an important design decision that comes with a distinct trade
     /// off here. The trade off is:
     /// 1. Join the last node with the next one until you get to the end. This
@@ -117,11 +118,10 @@ impl Application {
     where
         R: Rower + Serialize + DeserializeOwned + Send + Clone,
     {
-        println!("{}", df_name);
-        match self.kv.get(&Key::new("420", self.node_id)).await {
+        match self.kv.get(&Key::new(df_name, self.node_id)).await {
             Ok(df) => {
                 let mut res = df.pmap(rower);
-                if self.node_id != self.num_nodes {
+                if self.node_id == self.num_nodes {
                     // we are the last node
                     let blob = serialize(&res)?;
                     self.kv.send_blob(self.node_id - 1, blob).await?;

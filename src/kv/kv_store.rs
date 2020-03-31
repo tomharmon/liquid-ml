@@ -24,13 +24,20 @@ impl KVStore {
         my_addr: &str,
         blob_sender: Sender<Value>,
         kill_notifier: Arc<Notify>,
+        num_clients: Option<usize>,
     ) -> Arc<Self> {
         // the Receiver acts as our queue of messages from the network, and
         // the network uses the Sender to add messages to our queue
         let (sender, receiver) = mpsc::channel(100);
-        let network = Client::new(server_addr, my_addr, sender, kill_notifier)
-            .await
-            .unwrap();
+        let network = Client::new(
+            server_addr,
+            my_addr,
+            sender,
+            kill_notifier,
+            num_clients,
+        )
+        .await
+        .unwrap();
         let id = network.read().await.id;
         let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),

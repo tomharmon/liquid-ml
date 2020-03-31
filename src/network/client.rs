@@ -36,6 +36,7 @@ impl<
         my_addr: &str,
         sender: Sender<Message<RT>>,
         kill_notifier: Arc<Notify>,
+        num_clients: Option<usize>,
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
@@ -75,11 +76,25 @@ impl<
             // spawn a tokio task for accepting connections from new clients
             let concurrent_client = Arc::new(RwLock::new(c));
             let concurrent_client_cloned = concurrent_client.clone();
-            tokio::spawn(async move {
-                Client::accept_new_connections(concurrent_client_cloned)
-                    .await
-                    .unwrap();
-            });
+            match num_clients {
+                Some(_) => {
+                    Client::accept_new_connections(
+                        concurrent_client_cloned,
+                        num_clients,
+                    )
+                    .await?
+                }
+                None => {
+                    tokio::spawn(async move {
+                        Client::accept_new_connections(
+                            concurrent_client_cloned,
+                            num_clients,
+                        )
+                        .await
+                        .unwrap();
+                    });
+                }
+            }
             Ok(concurrent_client)
         } else {
             Err(LiquidError::UnexpectedMessage)
@@ -92,10 +107,16 @@ impl<
     /// and call `Client::recv_msg`
     async fn accept_new_connections(
         client: Arc<RwLock<Client<RT>>>,
+        num_clients: Option<usize>,
     ) -> Result<(), LiquidError> {
         let listen_address = { client.read().await.address.clone() };
         let mut listener = TcpListener::bind(listen_address).await?;
+        // Me + All the nodes i'm connected to
+        let mut curr_clients = 1 + { client.read().await.directory.len() };
         loop {
+            if num_clients.is_some() && num_clients.unwrap() == curr_clients {
+                return Ok(());
+            }
             // wait on connections from new clients
             let (socket, _) = listener.accept().await?;
             let (reader, writer) = io::split(socket);
@@ -149,6 +170,7 @@ impl<
                     "Connected to id: {:#?} at address: {:#?}",
                     intro.sender_id, addr
                 );
+                curr_clients += 1;
             }
         }
     }

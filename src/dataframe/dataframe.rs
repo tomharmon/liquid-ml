@@ -304,8 +304,6 @@ impl DataFrame {
         map_helper(self, rower, 0, self.n_rows())
     }
 
-    // TODO: There is a division remainder error (we might be skipping some rows in the last
-    // thread) FIX THIS
     /// Applies the given `rower` to every row in this `DataFrame` in parallel
     /// using `self.n_threads` (which by default is set to the number of
     /// threads available on the machine this `DataFrame` runs on).
@@ -316,10 +314,15 @@ impl DataFrame {
         let mut from = 0;
         thread::scope(|s| {
             let mut threads = Vec::new();
+            let mut i = 0;
             for r in rowers {
-                threads.push(
-                    s.spawn(move |_| map_helper(&self, r, from, from + step)),
-                );
+                i += 1;
+                let to = if i == self.n_threads {
+                    self.n_rows()
+                } else {
+                    from + step
+                };
+                threads.push(s.spawn(move |_| map_helper(&self, r, from, to)));
                 from += step;
             }
             for thread in threads {
