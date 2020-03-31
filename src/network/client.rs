@@ -242,11 +242,12 @@ impl<
         // needs to be 'static or mutex'd and that propagates a lot...
         tokio::spawn(async move {
             loop {
-                let msg: Message<RT> = 
+                let msg: Message<RT> =
                     match network::read_msg(&mut reader).await {
                         Ok(x) => x,
-                        Err(_) => { break; }
-
+                        Err(_) => {
+                            break;
+                        }
                     };
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 let id = msg.msg_id;

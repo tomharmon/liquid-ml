@@ -1,3 +1,4 @@
+use clap::Clap;
 use liquid_ml::application::Application;
 use liquid_ml::dataframe::DataFrame;
 use liquid_ml::error::LiquidError;
@@ -5,6 +6,22 @@ use liquid_ml::kv::{KVStore, Key};
 use sorer::dataframe::{Column, Data};
 use std::env;
 use std::sync::Arc;
+
+/// This is a simple demo client running the Milestone 1 example code.
+#[derive(Clap)]
+#[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
+struct Opts {
+    /// The IP:Port at which the registration server is running
+    #[clap(
+        short = "s",
+        long = "server_addr",
+        default_value = "127.0.0.1:9000"
+    )]
+    server_address: String,
+    /// The IP:Port at which this application must run
+    #[clap(short = "m", long = "my_addr", default_value = "127.0.0.2:9002")]
+    my_address: String,
+}
 
 async fn producer(kv: Arc<KVStore>) {
     let main = Key::new("main", 1);
@@ -52,8 +69,9 @@ async fn verifier(kv: Arc<KVStore>) {
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
-    let args: Vec<String> = env::args().collect();
-    let app = Application::new(&args[1], "127.0.0.1:9000", 3).await?;
+    let opts: Opts = Opts::parse();
+    let app =
+        Application::new(&opts.my_address, &opts.server_address, 3).await?;
 
     if app.node_id == 1 {
         app.run(producer).await;

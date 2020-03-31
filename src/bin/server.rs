@@ -15,6 +15,7 @@ struct Opts {
     #[clap(short = "i", long = "ip", default_value = "127.0.0.1:9000")]
     ip: String,
 }
+
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
