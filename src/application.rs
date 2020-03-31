@@ -15,7 +15,9 @@ use crate::kv::{KVStore, Key, Value};
 use bincode::{deserialize, serialize};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::fs::File;
 use std::future::Future;
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::Arc;
 use tokio::sync::{mpsc, mpsc::Receiver, Notify};
 
@@ -31,7 +33,7 @@ pub struct Application {
     /// NOTE: Currently panics if the network is inconsistent with this network
     num_nodes: usize,
     /// A notifier that gets notified when the server has sent a kill message
-    kill_notifier: Arc<Notify>,
+    pub kill_notifier: Arc<Notify>,
 }
 
 impl Application {
@@ -72,10 +74,19 @@ impl Application {
     ) -> Result<Self, LiquidError> {
         let app = Application::new(my_addr, server_addr, num_nodes).await?;
         let file = std::fs::metadata(file_name).unwrap();
+        let f: File = File::open(file_name).unwrap();
+        let mut reader = BufReader::new(f);
+        let mut size = file.len() / num_nodes as u64;
         // Note: Node ids start at 1
-        // TODO: IMPORTANT ROUNDING ERRORS
-        let size = file.len() / num_nodes as u64;
         let from = size * (app.node_id - 1) as u64;
+
+        // advance the reader to this threads starting index then
+        // find the next newline character
+        let mut buffer = Vec::new();
+        reader.seek(SeekFrom::Start(from + size)).unwrap();
+        reader.read_until(b'\n', &mut buffer).unwrap();
+        size += buffer.len() as u64 + 1; // maybe +1
+
         let df = DataFrame::from_sor(
             String::from(file_name),
             from as usize,

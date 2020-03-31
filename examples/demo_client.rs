@@ -4,7 +4,6 @@ use liquid_ml::dataframe::DataFrame;
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::{KVStore, Key};
 use sorer::dataframe::{Column, Data};
-use std::env;
 use std::sync::Arc;
 
 /// This is a simple demo client running the Milestone 1 example code.

@@ -426,6 +426,18 @@ impl From<Data> for DataFrame {
     }
 }
 
+impl std::fmt::Display for DataFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for i in 0..self.n_rows() {
+            for j in 0..self.n_cols() {
+                write!(f, "<{}>", self.get(j, i).unwrap())?;
+            }
+            write!(f, "\n")?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
