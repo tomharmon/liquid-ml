@@ -1,3 +1,4 @@
+//! The `KVStore`
 use crate::dataframe::DataFrame;
 use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
@@ -5,15 +6,26 @@ use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
 use log::info;
 use lru::LruCache;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify, RwLock};
 
-const MAX_NUM_CACHED_DATAFRAMES: usize = 5;
+const MAX_NUM_CACHED_VALUES: usize = 5;
 
-impl KVStore {
+impl<
+        T: Clone
+            + Serialize
+            + DeserializeOwned
+            + Sync
+            + Send
+            + PartialEq
+            + 'static,
+    > KVStore<T>
+{
     /// Creates a new `KVStore`. The `network` is used to communicate between
     /// distributed `KVStore`s. The `network_notifier` comes from the `network`
     /// and is used to notify this `KVStore` when a new message comes from the
@@ -42,7 +54,7 @@ impl KVStore {
         let id = network.read().await.id;
         let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),
-            cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_DATAFRAMES)),
+            cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
             network,
             internal_notifier: Notify::new(),
             id,
@@ -63,13 +75,13 @@ impl KVStore {
     /// ## Errors
     /// If `key` is not in this `KVStore`s cache or is not owned by this
     /// `KVStore`, then the error `Err(LiquidError::NotPresent)` is returned
-    pub async fn get(&self, key: &Key) -> Result<DataFrame, LiquidError> {
+    pub async fn get(&self, key: &Key) -> Result<T, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
         }
 
         let serialized_val = self.get_raw(key).await?;
-        let deserialized: DataFrame = deserialize(&serialized_val[..])?;
+        let deserialized: T = deserialize(&serialized_val[..])?;
         {
             self.cache
                 .lock()
@@ -93,10 +105,7 @@ impl KVStore {
     ///    future at an unknown time. In this case, this function should
     ///    not be `await`ed but instead given a callback closure via
     ///    calling `and_then` on the returned future
-    pub async fn wait_and_get(
-        &self,
-        key: &Key,
-    ) -> Result<DataFrame, LiquidError> {
+    pub async fn wait_and_get(&self, key: &Key) -> Result<T, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
         }
@@ -106,7 +115,7 @@ impl KVStore {
                 self.internal_notifier.notified().await;
             }
             let serialized_val = self.get_raw(key).await?;
-            let deserialized: DataFrame = deserialize(&serialized_val[..])?;
+            let deserialized: T = deserialize(&serialized_val[..])?;
             {
                 self.cache
                     .lock()
@@ -205,7 +214,7 @@ impl KVStore {
     ///    - `Blob` message: send the data up a higher level similar to how
     ///       the `Client` processes messages
     pub(crate) async fn process_messages(
-        kv: Arc<KVStore>,
+        kv: Arc<KVStore<T>>,
         mut receiver: Receiver<Message<KVMessage>>,
     ) -> Result<(), LiquidError> {
         loop {

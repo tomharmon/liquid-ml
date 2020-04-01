@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, mpsc::Receiver, Notify};
 /// Represents an application
 pub struct Application {
     /// A pointer to the KVStore that stores all the data for the application
-    pub kv: Arc<KVStore>,
+    pub kv: Arc<KVStore<DataFrame>>,
     /// The id of this node, assigned by the registration server
     pub node_id: usize,
     /// A receiver for blob messages that can b processed by the user
@@ -149,7 +149,7 @@ impl Application {
     pub async fn run<F, Fut>(self, f: F)
     where
         Fut: Future<Output = ()>,
-        F: FnOnce(Arc<KVStore>) -> Fut,
+        F: FnOnce(Arc<KVStore<DataFrame>>) -> Fut,
     {
         f(self.kv.clone()).await;
         self.kill_notifier.notified().await;

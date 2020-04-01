@@ -82,7 +82,6 @@ fn reader(file_name: &str, from: u64, to: u64) -> DataFrame {
         }
     }
 
-    //println!("words vec: {:#?}", words.clone());
     df.add_column(Column::String(words), None).unwrap();
 
     df
@@ -113,7 +112,6 @@ async fn main() -> Result<(), LiquidError> {
     size += buffer.len() as u64;
 
     let df = reader(&file_name, from, from + size);
-    //println!("{}", df);
 
     let home_key = Key::new("words", app.node_id);
     app.kv.put(&home_key, df).await?;

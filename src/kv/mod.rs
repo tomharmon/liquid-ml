@@ -1,6 +1,12 @@
 //! A module for distributed `Key`, `Value` stores. Utilizes the `network`
-//! module to communicate between nodes.
-use crate::dataframe::DataFrame;
+//! module to communicate between nodes using `KVMessage`s.
+//!
+//!
+//! Internally `KVStore`s store their data in memory as serialized blobs
+//! (a `Value` aka a `Vec<u8>`). The `KVStore` caches deserialized `Value`s
+//! into their type `T` on a least-recently used basis.
+//!
+//!
 use crate::network::Client;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
@@ -38,17 +44,20 @@ impl Key {
     }
 }
 
-/// A `Key`, `Value` store. `Key`s know which node the values 'belong' to. A
-/// `KVStore` has methods to get and put data on other `KVStore`s. Internally
-/// `KVStore`s store their data in memory as serialized blobs (`Vec<u8>`). The
-/// `KVStore`s also cache deserialized `DataFrame`s on a least-recently used
-/// basis.
-pub struct KVStore {
+/// A distributed `Key`, `Value` store which is generic for type `T`. Since
+/// this is a distributed `KVStore`, `Key`s know which node the values 'belong'
+/// to.
+///
+/// Internally `KVStore`s store their data in memory as serialized blobs
+/// (`Vec<u8>`). The `KVStore` caches deserialized `Value`s into their type
+/// `T` on a least-recently used basis.
+pub struct KVStore<T> {
     /// The data owned by this `KVStore`
     data: RwLock<HashMap<Key, Value>>,
-    /// An `LRU` cache of deserialized `DataFrame`s, not all of which are owned
-    /// by this `KVStore`.
-    cache: Mutex<LruCache<Key, DataFrame>>,
+    /// An `LRU` cache of deserialized values of type `T`. Not all cached
+    /// values belong to this `KVStore`, some of it may come from other
+    /// distributed `KVStore`s not running on this machine.
+    cache: Mutex<LruCache<Key, T>>,
     /// The `network` layer, used to send and receive messages and data with
     /// other `KVStore`s
     network: Arc<RwLock<Client<KVMessage>>>,
@@ -56,7 +65,8 @@ pub struct KVStore {
     internal_notifier: Notify,
     /// The `id` of the node this `KVStore` is running on
     pub(crate) id: usize,
-    /// A channel to send blobs of data to a higher level
+    /// A channel to send blobs of data to a higher level component, in
+    /// `liquid-ml` this would be the `Application`
     blob_sender: Sender<Value>,
 }
 
