@@ -1,4 +1,3 @@
-- Change printlns to logger
 - application layer documentation/update memo
 - Build application layer
   - filter?

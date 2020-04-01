@@ -73,7 +73,7 @@ impl DataFrame {
             Ordering::Less => {
                 // our data is shorter than `col`, must add Data::Null to
                 // all of our columns until they are equal length w/`col`
-                for j in 0..self.n_cols() {
+                for j in 0..self.n_cols() - 1 {
                     let c = self.data.get_mut(j).unwrap();
                     for _ in 0..col.len() - c.len() {
                         match c {

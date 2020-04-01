@@ -2,15 +2,17 @@ use clap::Clap;
 use liquid_ml::application::Application;
 use liquid_ml::dataframe::*;
 use liquid_ml::error::LiquidError;
+use liquid_ml::kv::Key;
 use log::Level;
 use nom::bytes::complete::take_till;
 use nom::character::complete::{alpha1, multispace0};
 use nom::character::is_alphabetic;
-use nom::combinator::map;
+use nom::combinator::{map, opt};
 use nom::sequence::delimited;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
 use simple_logger;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
@@ -33,15 +35,20 @@ struct Opts {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct WordCounter {
-    sum: i64,
+    map: HashMap<String, usize>,
 }
 
 impl Rower for WordCounter {
     fn visit(&mut self, r: &Row) -> bool {
         let i = r.get(0).unwrap();
         match i {
-            Data::Int(val) => {
-                self.sum += *val;
+            Data::String(val) => {
+                match self.map.get_mut(val) {
+                    Some(num_occurences) => *num_occurences += 1,
+                    None => {
+                        self.map.insert(val.clone(), 1);
+                    }
+                };
                 true
             }
             _ => panic!(),
@@ -49,7 +56,14 @@ impl Rower for WordCounter {
     }
 
     fn join(&mut self, other: &Self) -> Self {
-        self.sum += other.sum;
+        for (k, v) in other.map.iter() {
+            match self.map.get_mut(k) {
+                Some(num_occurences) => *num_occurences += v,
+                None => {
+                    self.map.insert(k.clone(), *v);
+                }
+            }
+        }
         self.clone()
     }
 }
@@ -85,7 +99,7 @@ fn reader(file_name: &str, from: u64, to: u64) -> DataFrame {
         to_process = remaining;
     }
 
-    println!("{:?}", words.clone());
+    //println!("{:?}", words.clone());
     df.add_column(Column::String(words), None).unwrap();
 
     df
@@ -97,18 +111,16 @@ async fn main() -> Result<(), LiquidError> {
     simple_logger::init_with_level(Level::Debug).unwrap();
     let num_nodes = 3;
     let file_name = "file";
-    /*let mut app = Application::new(
-        &opts.my_address,
-        &opts.server_address,
-        3
-    ).await?;*/
-    let node_id = 1;
+    let mut app =
+        Application::new(&opts.my_address, &opts.server_address, num_nodes)
+            .await?;
+
     let file = std::fs::metadata(file_name).unwrap();
     let f: File = File::open(file_name).unwrap();
     let mut buf_reader = BufReader::new(f);
     let mut size = file.len() / num_nodes as u64;
     // Note: Node ids start at 1
-    let from = size * (node_id - 1) as u64;
+    let from = size * (app.node_id - 1) as u64;
 
     // advance the reader to this threads starting index then
     // find the next space
@@ -118,8 +130,24 @@ async fn main() -> Result<(), LiquidError> {
     size += buffer.len() as u64;
 
     let df = reader("file", from, from + size);
-    println!("{}", df);
-    println!("{}", df.n_cols());
-    //app.kill_notifier.notified().await;
+    //println!("{}", df);
+    //println!("{}", df.n_cols());
+
+    let home_key = Key::new("words", app.node_id);
+    app.kv.put(&home_key, df).await?;
+
+    let rower = WordCounter {
+        map: HashMap::new(),
+    };
+    let result = app.pmap("words", rower).await?;
+    match result {
+        Some(joined_rower) => {
+            println!("{:#?}", joined_rower.map);
+        }
+        None => println!("done"),
+    }
+
+    app.kill_notifier.notified().await;
+
     Ok(())
 }
