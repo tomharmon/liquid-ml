@@ -14,19 +14,17 @@
 //! connect to them.
 //!
 //!
-//! ## Server Usage
-//! ```rust,no_run
-//! use liquid_ml::error::LiquidError;
-//! use liquid_ml::network::Server;
+//! ## Pre-packaged Server Binary and Server Usage
 //!
-//! #[tokio::main]
-//! async fn main() -> Result<(), LiquidError> {
-//!     let mut s = Server::new("127.0.0.1:9000".to_string()).await?;
-//!     s.accept_new_connections().await?;
-//!     Ok(())
-//! }
+//! An pre-packaged `Server` binary is available in `src/bin/server.rs` and
+//! will fit the needs of `liquid_ml` and your needs if you don't need
+//! to improve or extend the `network` module.
 //!
-//! ```
+//! The `Server` binary may be run using the following command:
+//! `cargo run --bin server -- --address <Optional 'IP:Port' Address>`
+//!
+//! If an IP:Port is not provided, the server defaults to `127.0.0.1:9000`
+//!
 //!
 //! The `Client` is designed so that it can perform various networking
 //! operations asynchronously. It can listen for messages from
@@ -66,13 +64,18 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), LiquidError> {
 //!     let (sender, receiver) = mpsc::channel(100);
+//!     // The `kill_notifier` is used by the `Client` to tell
+//!     // higher-level components that use the `Client` when a `Kill` message
+//!     // is received from the `Server` so that higher-level components
+//!     // can perform orderly shutdown
 //!     let kill_notifier = Arc::new(Notify::new());
 //!     let client = Client::<String>::new("68.2.3.4:9000",
 //!                                        "69.0.4.20:9000",
 //!                                        sender,
-//!                                        kill_notifier).await.unwrap();
-//!     // see `Client::new` documentation for `new` returns a
-//!     // `Arc<RwLock<Client>>`
+//!                                        kill_notifier,
+//!                                        Some(2)).await.unwrap();
+//!     // `Client::new` returns a `Arc<RwLock<Client>>` so that it may
+//!     // be used concurrently
 //!     let id = { client.read().await.id };
 //!     { client.write().await.send_msg(id + 1, "Hi".to_string()).await? };
 //!     Ok(())
@@ -96,7 +99,8 @@
 //!     let client = Client::<String>::new("68.2.3.4:9000",
 //!                                        "69.80.08.5:9000",
 //!                                        sender,
-//!                                        kill_notifier).await.unwrap();
+//!                                        kill_notifier,
+//!                                        Some(2)).await.unwrap();
 //!     let msg = receiver.recv().await.unwrap();
 //!     println!("{}", msg.msg);
 //!     Ok(())

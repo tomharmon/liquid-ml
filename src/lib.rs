@@ -213,9 +213,9 @@
 //! server comes packaged with the `LiquidML` system and can be started by running
 //! the following command:
 //!
-//! ```no_run,compile_fail
-//! cargo run --bin server -- -ip <Optional IP Address>
-//! ```
+//! `
+//! cargo run --bin server -- --address <Optional IP Address>
+//! `
 //!
 //! If an IP is not provided the server defaults to `127.0.0.1:9000`.
 //!
@@ -267,8 +267,38 @@
 //! This form of programming, where the user is unaware of the distributed nature
 //! of the system, is what we want to achieve in our API.
 //!
-//! ```rust,no_run,compile_fail
-//! #[(tokio_main)]
+//! ```rust,no_run
+//! use liquid_ml::dataframe::{Data, Rower, Row};
+//! use liquid_ml::application::Application;
+//! use serde::{Serialize, Deserialize};
+//!
+//! #[derive(Serialize, Deserialize, Clone)]
+//! struct MyRower {
+//!     sum: i64
+//! }
+//!
+//! impl Rower for MyRower {
+//!     fn visit(&mut self, r: &Row) -> bool {
+//!         let i = r.get(0).unwrap();
+//!         match i {
+//!             Data::Int(val) => {
+//!                 if *val < 0 {
+//!                     return false;
+//!                 }
+//!                 self.sum += *val;
+//!                 true
+//!             },
+//!             _ => panic!(),
+//!         }
+//!     }
+//!
+//!     fn join(&mut self, other: &Self) -> Self {
+//!         self.sum += other.sum;
+//!         self.clone()
+//!     }
+//! }
+//!
+//! #[tokio::main]
 //! async fn main() {
 //!     // Starts up a client that will:
 //!     // 1. Register with the `Server` running at the address "192.168.0.0:9000"
@@ -280,35 +310,37 @@
 //!     // 3. Since the `Rower` trait defines how to join chunks, the Application
 //!     //    layer will handle running pmap/map/filter on a local chunk and joining
 //!     //    them globally
-//!     let app = Application::new("foo.sor", 20, "192.168.0.0:9000");
-//!     let r = MyRower::new();
-//!     app.run_pmap(r);
+//!     let mut app = Application::from_sor("foo.sor", "192.155.22.11:9000",
+//!                                     "192.168.0.0:9000", 20, "my-df")
+//!                                     .await
+//!                                     .unwrap();
+//!     let r = MyRower { sum: 0 };
+//!     app.pmap("my-df", r);
 //! }
 //! ```
 //!
-//! A slightly more generic possible use case:
+//! A more generic possible use case:
 //!
-//! ```rust,no_run,compile_fail
-//! #[tokio-main]
+//! ```rust,no_run
+//! use liquid_ml::dataframe::DataFrame;
+//! use liquid_ml::application::Application;
+//! use liquid_ml::kv::KVStore;
+//! use std::sync::Arc;
+//!
+//! async fn something_complicated(kv: Arc<KVStore<DataFrame>>) {
+//!     println!("Use your imagination :D");
+//! }
+//!
+//! #[tokio::main]
 //! async fn main() {
-//!     let app = Application::new("abc.sor", 20, "192.168.0.0:9000");
-//!     app.run(|kv| {
-//!         something complicated
-//!     }).await;
+//!     let app =
+//!         Application::new("192.15.2.1:900", "192.16.0.0:900", 20).await.unwrap();
+//!     app.run(something_complicated).await;
 //! }
 //! ```
 //!
-//!
-//! And the required server:
-//!
-//! ```rust,no_run,compile_fail
-//! #[tokio-main]
-//! async fn main() {
-//!     let server = Server::new("61.42.42.42:9000");
-//!     s.accept_new_connections().await?;
-//!     server.run();
-//! }
-//! ```
+//! The required registration server, used for co-ordination of `Client`s
+//! comes as a pre-packaged binary in this crate.
 //!
 //! # Open Questions
 //! None
@@ -325,9 +357,9 @@
 //! 1. Start the `Server` with this command: `cargo run --bin server`
 //! 2. Start 3 clients, each with a different `IP:Port`, with the following command:
 //!
-//! ```no_run,compile_fail
-//! cargo run --example demo_client <IP:Port>
-//! ```
+//! `
+//! cargo run --example demo_client -- -m <IP:Port>
+//! `
 //!
 //! We also added most of the pieces for orderly shutdown, such as `Kill` messages
 //! and a way for the `Client` to listen for these `Kill` messages from the
@@ -350,28 +382,27 @@
 //! confident in the correctness.
 //!
 //! ## Completed Features
-//! 1. SoRer - robust schema on read file parsing with well tested and documented
-//!    behavior. Performance of over 400MB/s for a 16 column file on machine with
+//! 1. SoRer - robust schema on read file parsing with well tested and umented
+//!    behavior. Performance of over 400MB/s for a 16 column file on machine h
 //!    8GB RAM, Intel i5-4690K CPU with 4 threads.
-//! 2. DataFrame + relevant related APIs - implementations to construct a DataFrame
-//!    from a `.sor` file, map, pmap, and filter, plus all other methods provided
+//! 2. DataFrame + relevant related APIs - implementations to construct a aFrame
+//!    from a `.sor` file, map, pmap, and filter, plus all other methods vided
 //!    in the original DataFrame API and related APIs (Schema etc).
-//! 3. Generic networking API - Currently allows for directed communication between
+//! 3. Generic networking API - Currently allows for directed communication ween
 //!    distributed nodes, using one central server for registration. Is also
 //!    generic across message types. Need to polish off orderly shutdown.
-//! 4. KVStore implemented as required and is able to communicate with other //! KVStores
-//!    and process different messages.
-//! 5. A more fully featured proof of concept version of the application layer has
+//! 4. KVStore implemented as required and is able to communicate with other
+//!    KVStores and process different messages.
+//! 5. A more fully featured proof of concept version of the application layer
 //!    been implemented
 //!
 //! ## Road Map
-//! 0. Build robust integration tests to define how the distributed system works.
+//! 0. Build robust integration tests to define how the distributed system ks.
 //! 1. Fix up orderly shutdown of the network layer.
-//! 2. Make the client a trait so that the KVStore can be tested using a mock client
+//! 2. Make the client a trait so that the KVStore can be tested using a mock ent
 //! 3. Implement the example programs needed to demonstrate functionality of the
 //!    project.
 //! 4. Implement random forest.
-//!
 
 pub mod application;
 pub mod dataframe;
