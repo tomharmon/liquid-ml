@@ -4,6 +4,7 @@ use crate::error::LiquidError;
 use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema_from_file, DataType};
+use std::cmp::Ordering;
 
 use crossbeam_utils::thread;
 
@@ -53,7 +54,6 @@ impl DataFrame {
         &self.schema
     }
 
-    // TODO: balance columns instead of erroring
     /// Adds a `Column` to this `DataFrame` with an optional `name`. Returns
     /// a `LiquidError::NameAlreadyExists` if the given `name` is not unique.
     pub fn add_column(
@@ -61,16 +61,64 @@ impl DataFrame {
         col: Column,
         name: Option<String>,
     ) -> Result<(), LiquidError> {
-        if self.n_cols() > 0 {
-            panic!("todo: fix this");
-        }
-        match col {
+        match &col {
             Column::Int(_) => self.schema.add_column(DataType::Int, name),
             Column::Bool(_) => self.schema.add_column(DataType::Bool, name),
             Column::Float(_) => self.schema.add_column(DataType::Float, name),
             Column::String(_) => self.schema.add_column(DataType::String, name),
         }?;
-        self.data.push(col);
+
+        match self.n_rows().cmp(&col.len()) {
+            Ordering::Equal => self.data.push(col),
+            Ordering::Less => {
+                // our data is shorter than `col`, must add Data::Null to
+                // all of our columns until they are equal length w/`col`
+                for j in 0..self.n_cols() {
+                    let c = self.data.get_mut(j).unwrap();
+                    for _ in 0..col.len() - c.len() {
+                        match c {
+                            Column::Bool(x) => x.push(None),
+                            Column::Int(x) => x.push(None),
+                            Column::Float(x) => x.push(None),
+                            Column::String(x) => x.push(None),
+                        }
+                    }
+                }
+                self.data.push(col)
+            }
+            Ordering::Greater => {
+                // our data is longer than `col`, we must add Data::Null to
+                // `col` until it matches the len of our data
+                let diff = self.n_rows() - col.len();
+                // note that vec![] must be done inside match so types are
+                // correct. a for loop also doesn't work, i tried
+                // Also I know this is ugly but trust me i tried a lot of shit
+                // and this is the only thing that worked
+                match col {
+                    Column::Bool(mut x) => {
+                        let nones = vec![None; diff];
+                        x.extend_from_slice(&nones);
+                        self.data.push(Column::Bool(x))
+                    }
+                    Column::Int(mut x) => {
+                        let nones = vec![None; diff];
+                        x.extend_from_slice(&nones);
+                        self.data.push(Column::Int(x))
+                    }
+                    Column::Float(mut x) => {
+                        let nones = vec![None; diff];
+                        x.extend_from_slice(&nones);
+                        self.data.push(Column::Float(x))
+                    }
+                    Column::String(mut x) => {
+                        let nones = vec![None; diff];
+                        x.extend_from_slice(&nones);
+                        self.data.push(Column::String(x))
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -335,13 +383,9 @@ impl DataFrame {
     /// Return the number of rows in this `DataFrame`.
     pub fn n_rows(&self) -> usize {
         if self.data.len() == 0 {
-            return 0;
-        }
-        match &self.data[0] {
-            Column::Bool(col) => col.len(),
-            Column::Int(col) => col.len(),
-            Column::Float(col) => col.len(),
-            Column::String(col) => col.len(),
+            0
+        } else {
+            self.data[0].len()
         }
     }
 
