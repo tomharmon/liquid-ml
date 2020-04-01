@@ -4,16 +4,10 @@ use liquid_ml::dataframe::*;
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::Key;
 use log::Level;
-use nom::bytes::complete::take_till;
-use nom::character::complete::{alpha1, multispace0};
-use nom::character::is_alphabetic;
-use nom::combinator::{map, opt};
-use nom::sequence::delimited;
-use nom::IResult;
 use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
 /// This is a simple example showing how to load a sor file from disk and
@@ -68,38 +62,27 @@ impl Rower for WordCounter {
     }
 }
 
-fn next_word(input: &[u8]) -> IResult<&[u8], Option<String>> {
-    map(
-        delimited(multispace0, alpha1, take_till(is_alphabetic)),
-        |s| Some(String::from(std::str::from_utf8(s).unwrap())),
-    )(input)
-}
-
 fn reader(file_name: &str, from: u64, to: u64) -> DataFrame {
+    // create a DF with an empty schema since adding the column later
+    // will add to the df schema
     let schema = Schema::from(vec![]);
     let mut df = DataFrame::new(&schema);
+    // open the file
     let file = File::open(file_name).unwrap();
     let mut reader = BufReader::new(file);
-
+    // seek to where we should start reading for this nodes' chunk
     reader.seek(SeekFrom::Start(from as u64)).unwrap();
-    let mut reader = reader.take(to - from);
-    let mut data = Vec::new();
-    reader.read_to_end(&mut data).unwrap();
+    // take 'to - from' bytes (this nodes' chunk)
+    let reader = reader.take(to - from);
 
-    // skip the first word up to ws
     let mut words = Vec::new();
-    let (remaining, _skipped) = next_word(&data).unwrap();
-    let mut to_process = remaining;
-    loop {
-        if to_process.len() == 0 {
-            break;
+    for line in reader.lines() {
+        for word in line.unwrap().split_whitespace() {
+            words.push(Some(word.to_string()));
         }
-        let (remaining, word) = next_word(to_process).unwrap();
-        words.push(word);
-        to_process = remaining;
     }
 
-    //println!("{:?}", words.clone());
+    //println!("words vec: {:#?}", words.clone());
     df.add_column(Column::String(words), None).unwrap();
 
     df
@@ -110,13 +93,13 @@ async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Debug).unwrap();
     let num_nodes = 3;
-    let file_name = "file";
     let mut app =
         Application::new(&opts.my_address, &opts.server_address, num_nodes)
             .await?;
+    let file_name = "examples/hamlet.txt";
 
-    let file = std::fs::metadata(file_name).unwrap();
-    let f: File = File::open(file_name).unwrap();
+    let file = fs::metadata(&file_name).unwrap();
+    let f: File = File::open(&file_name).unwrap();
     let mut buf_reader = BufReader::new(f);
     let mut size = file.len() / num_nodes as u64;
     // Note: Node ids start at 1
@@ -129,9 +112,8 @@ async fn main() -> Result<(), LiquidError> {
     buf_reader.read_until(b' ', &mut buffer).unwrap();
     size += buffer.len() as u64;
 
-    let df = reader("file", from, from + size);
+    let df = reader(&file_name, from, from + size);
     //println!("{}", df);
-    //println!("{}", df.n_cols());
 
     let home_key = Key::new("words", app.node_id);
     app.kv.put(&home_key, df).await?;
