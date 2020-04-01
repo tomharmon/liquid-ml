@@ -2,12 +2,15 @@ use liquid_ml::application::Application;
 use liquid_ml::dataframe::DataFrame;
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::Key;
+use log::Level;
+use simple_logger;
 use sorer::dataframe::{Column, Data};
 use std::env;
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let args: Vec<String> = env::args().collect();
+    simple_logger::init_with_level(Level::Debug).unwrap();
     let app = Application::new(&args[1], "127.0.0.1:9000", 3).await?;
 
     let main = Key::new("main", 1);

@@ -20,6 +20,8 @@ crossbeam-utils = "0.7.2"
 bytes = "0.5.4"
 lru = "0.4.3"
 clap = { git = "https://github.com/clap-rs/clap/" }
+log = "0.4.8"
+simple_logger = "1.6.0"
 
 [dev-dependencies]
 nom = "5.1.1"

@@ -2,7 +2,10 @@ use clap::Clap;
 use liquid_ml::application::Application;
 use liquid_ml::dataframe::{Data, DataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
+use log::Level;
 use serde::{Deserialize, Serialize};
+use simple_logger;
+
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap
 #[derive(Clap)]
@@ -46,6 +49,7 @@ impl Rower for IntSummer {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
+    simple_logger::init_with_level(Level::Debug).unwrap();
     let mut app = Application::from_sor(
         "tests/distributed.sor",
         &opts.my_address,

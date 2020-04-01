@@ -3,6 +3,7 @@ use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
+use log::info;
 use lru::LruCache;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -208,11 +209,11 @@ impl KVStore {
         mut receiver: Receiver<Message<KVMessage>>,
     ) -> Result<(), LiquidError> {
         loop {
-            println!("processing messages");
             let msg = receiver.recv().await.unwrap();
             let kv_ptr_clone = kv.clone();
             let mut sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {
+                info!("Proccessing a message with id: {:#?}", msg.msg_id);
                 match &msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond

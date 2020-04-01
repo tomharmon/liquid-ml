@@ -2,6 +2,8 @@ use clap::Clap;
 use liquid_ml::application::Application;
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::Key;
+use log::Level;
+use simple_logger;
 
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes
@@ -23,6 +25,7 @@ struct Opts {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
+    simple_logger::init_with_level(Level::Debug).unwrap();
     let app = Application::from_sor(
         "tests/distributed.sor",
         &opts.my_address,

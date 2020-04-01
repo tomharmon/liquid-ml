@@ -2,6 +2,7 @@ use clap::Clap;
 use liquid_ml::application::Application;
 use liquid_ml::dataframe::*;
 use liquid_ml::error::LiquidError;
+use log::Level;
 use nom::bytes::complete::take_till;
 use nom::character::complete::{alpha1, multispace0};
 use nom::character::is_alphabetic;
@@ -9,6 +10,7 @@ use nom::combinator::map;
 use nom::sequence::delimited;
 use nom::IResult;
 use serde::{Deserialize, Serialize};
+use simple_logger;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
@@ -92,6 +94,7 @@ fn reader(file_name: &str, from: u64, to: u64) -> DataFrame {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
+    simple_logger::init_with_level(Level::Debug).unwrap();
     let num_nodes = 3;
     let file_name = "file";
     /*let mut app = Application::new(

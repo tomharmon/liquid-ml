@@ -4,6 +4,7 @@ use crate::error::LiquidError;
 use crate::network;
 use crate::network::*;
 use futures::SinkExt;
+use log::info;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -166,7 +167,7 @@ impl<
                 // that we just connected to
                 let new_sender = { client.read().await.sender.clone() };
                 Client::recv_msg(new_sender, new_stream);
-                println!(
+                info!(
                     "Connected to id: {:#?} at address: {:#?}",
                     intro.sender_id, addr
                 );
@@ -228,7 +229,7 @@ impl<
             // send the client our id and address so they can add us to
             // their directory
             self.msg_id += 1;
-            println!(
+            info!(
                 "Connected to id: {:#?} at address: {:#?}",
                 client.0, client.1
             );
@@ -252,7 +253,7 @@ impl<
             msg: message,
         };
         network::send_msg(target_id, m, &mut self.directory).await?;
-        println!("sent a message with id, {}", self.msg_id);
+        info!("sent a message with id, {}", self.msg_id);
         self.msg_id += 1;
         Ok(())
     }
@@ -274,7 +275,10 @@ impl<
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 let id = msg.msg_id;
                 sender.send(msg).await.unwrap();
-                println!("Got a msg with id: {}, added to process queue", id);
+                info!(
+                    "Got a msg with id: {} and added it to process queue",
+                    id
+                );
             }
         });
     }

@@ -4,6 +4,7 @@
 use crate::error::LiquidError;
 use crate::network;
 use crate::network::{Connection, ControlMsg, Message, MessageCodec, Server};
+use log::info;
 use std::collections::HashMap;
 use tokio::io::split;
 use tokio::net::TcpListener;
@@ -44,6 +45,11 @@ impl Server {
             // Make the `RegistrationMsg` to send to the new Client to inform
             // them of already existing nodes.
             let target_id = self.directory.len() + 1;
+            info!(
+                "Connected to address: {:#?}, assigning id: {:#?}",
+                address.clone(),
+                target_id
+            );
             let dir_msg = Message::new(
                 self.msg_id,
                 0,

@@ -3,6 +3,8 @@ use liquid_ml::application::Application;
 use liquid_ml::dataframe::DataFrame;
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::{KVStore, Key};
+use log::Level;
+use simple_logger;
 use sorer::dataframe::{Column, Data};
 use std::sync::Arc;
 
@@ -69,6 +71,7 @@ async fn verifier(kv: Arc<KVStore>) {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
+    simple_logger::init_with_level(Level::Debug).unwrap();
     let app =
         Application::new(&opts.my_address, &opts.server_address, 3).await?;
 
