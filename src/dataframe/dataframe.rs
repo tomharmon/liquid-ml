@@ -12,29 +12,10 @@ impl DataFrame {
     /// Creates a new `DataFrame` from the given file, only reads `len` bytes
     /// starting at the given byte offset `from`.
     pub fn from_sor(file_name: String, from: usize, len: usize) -> Self {
-        let mut schema =
-            Schema::from(infer_schema_from_file(file_name.clone()));
+        let schema = Schema::from(infer_schema_from_file(file_name.clone()));
         let n_threads = num_cpus::get();
         let data =
             from_file(file_name, schema.schema.clone(), from, len, n_threads);
-        // required so that the schema in this `DataFrame` actually has the
-        // correct number of rows.
-        if data.get(0).is_some() {
-            match &data[0] {
-                Column::Bool(x) => {
-                    x.iter().for_each(|_| schema.add_row(None).unwrap())
-                }
-                Column::Int(x) => {
-                    x.iter().for_each(|_| schema.add_row(None).unwrap())
-                }
-                Column::Float(x) => {
-                    x.iter().for_each(|_| schema.add_row(None).unwrap())
-                }
-                Column::String(x) => {
-                    x.iter().for_each(|_| schema.add_row(None).unwrap())
-                }
-            };
-        }
         DataFrame {
             schema,
             data,
@@ -58,7 +39,6 @@ impl DataFrame {
         let schema = Schema {
             schema: schema.schema.clone(),
             col_names: schema.col_names.clone(),
-            row_names: Vec::new(),
         };
 
         DataFrame {
@@ -73,6 +53,7 @@ impl DataFrame {
         &self.schema
     }
 
+    // TODO: balance columns instead of erroring
     /// Adds a `Column` to this `DataFrame` with an optional `name`. Returns
     /// a `LiquidError::NameAlreadyExists` if the given `name` is not unique.
     pub fn add_column(
@@ -80,12 +61,17 @@ impl DataFrame {
         col: Column,
         name: Option<String>,
     ) -> Result<(), LiquidError> {
+        if self.n_cols() > 0 {
+            panic!("todo: fix this");
+        }
         match col {
             Column::Int(_) => self.schema.add_column(DataType::Int, name),
             Column::Bool(_) => self.schema.add_column(DataType::Bool, name),
             Column::Float(_) => self.schema.add_column(DataType::Float, name),
             Column::String(_) => self.schema.add_column(DataType::String, name),
-        }
+        }?;
+        self.data.push(col);
+        Ok(())
     }
 
     /// Get the `Data` at the given `col_idx`, `row_idx` offsets.
@@ -135,12 +121,6 @@ impl DataFrame {
     /// if a `Column` with the given name exists, or `None` otherwise.
     pub fn get_col(&self, col_name: &str) -> Option<usize> {
         self.schema.col_idx(col_name)
-    }
-
-    /// Get the index of the `Row` with the given `row_name`. Returns `Some`
-    /// if a `Row` with the given name exists, or `None` otherwise.
-    pub fn get_row(&self, row_name: &str) -> Option<usize> {
-        self.schema.row_idx(row_name)
     }
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
@@ -295,7 +275,6 @@ impl DataFrame {
             };
         }
 
-        self.schema.row_names.push(None);
         Ok(())
     }
 
@@ -355,7 +334,15 @@ impl DataFrame {
 
     /// Return the number of rows in this `DataFrame`.
     pub fn n_rows(&self) -> usize {
-        self.schema.length()
+        if self.data.len() == 0 {
+            return 0;
+        }
+        match &self.data[0] {
+            Column::Bool(col) => col.len(),
+            Column::Int(col) => col.len(),
+            Column::Float(col) => col.len(),
+            Column::String(col) => col.len(),
+        }
     }
 
     /// Return the number of columns in this `DataFrame`.

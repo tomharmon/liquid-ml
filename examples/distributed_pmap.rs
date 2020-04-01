@@ -51,7 +51,7 @@ async fn main() -> Result<(), LiquidError> {
         &opts.my_address,
         &opts.server_address,
         3,
-        "420"
+        "420",
     )
     .await?;
     let r = app.pmap("420", IntSummer { sum: 0 }).await?;

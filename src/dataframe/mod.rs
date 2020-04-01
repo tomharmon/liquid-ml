@@ -9,8 +9,10 @@
 //! `DataFrame`.
 
 use serde::{Deserialize, Serialize};
-pub use sorer::dataframe::{Column, Data};
-use sorer::schema::DataType;
+pub use sorer::{
+    dataframe::{Column, Data},
+    schema::DataType,
+};
 
 // hey, inception was a great movie, come on now
 #[allow(clippy::module_inception)]
@@ -38,9 +40,6 @@ pub struct Schema {
     /// The optional names of each `Column`, which must be unique if they are
     /// `Some`
     pub col_names: Vec<Option<String>>,
-    /// The optional names of each `Row`, which must be unique if they are
-    /// `Some`
-    pub row_names: Vec<Option<String>>,
 }
 
 /// Represents a single row in a `DataFrame`

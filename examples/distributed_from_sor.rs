@@ -28,7 +28,7 @@ async fn main() -> Result<(), LiquidError> {
         &opts.my_address,
         &opts.server_address,
         3,
-        "420"
+        "420",
     )
     .await?;
 

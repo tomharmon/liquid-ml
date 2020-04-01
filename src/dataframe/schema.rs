@@ -43,37 +43,6 @@ impl Schema {
         }
     }
 
-    /// Add a row to this `Schema`. If `row_name` is `Some` and the name
-    /// already exists in this `Schema`, the row will not be added.
-    pub fn add_row(
-        &mut self,
-        row_name: Option<String>,
-    ) -> Result<(), LiquidError> {
-        match &row_name {
-            Some(_name) => {
-                if !self.row_names.contains(&row_name) {
-                    self.row_names.push(row_name);
-                    Ok(())
-                } else {
-                    Err(LiquidError::NameAlreadyExists)
-                }
-            }
-            None => {
-                self.row_names.push(None);
-                Ok(())
-            }
-        }
-    }
-
-    /// Gets the (optional) name of the row at the given `idx`.
-    /// Returns a result that will `Error` if the `idx` is out of bounds.
-    pub fn row_name(&self, idx: usize) -> Result<&Option<String>, LiquidError> {
-        match self.row_names.get(idx) {
-            Some(name) => Ok(name),
-            None => Err(LiquidError::RowIndexOutOfBounds),
-        }
-    }
-
     /// Gets the (optional) name of the column at the given `idx`.
     /// Returns a result that will `Error` if the `idx` is out of bounds.
     pub fn col_name(&self, idx: usize) -> Result<&Option<String>, LiquidError> {
@@ -97,19 +66,9 @@ impl Schema {
         Schema::get_idx_of_optional_name(&self.col_names, col_name)
     }
 
-    /// Given a row name, returns its index
-    pub fn row_idx(&self, row_name: &str) -> Option<usize> {
-        Schema::get_idx_of_optional_name(&self.row_names, row_name)
-    }
-
     /// The number of columns in this Schema.
     pub fn width(&self) -> usize {
         self.col_names.len()
-    }
-
-    /// The number of rows in this Schema.
-    pub fn length(&self) -> usize {
-        self.row_names.len()
     }
 
     fn get_idx_of_optional_name(
@@ -151,11 +110,7 @@ impl From<&str> for Schema {
             schema.push(Schema::char_to_data_type(c));
             col_names.push(None);
         }
-        Schema {
-            schema,
-            col_names,
-            row_names: Vec::new(),
-        }
+        Schema { schema, col_names }
     }
 }
 
@@ -168,11 +123,7 @@ impl From<Vec<DataType>> for Schema {
             schema.push(t);
             col_names.push(None);
         }
-        Schema {
-            schema,
-            col_names,
-            row_names: Vec::new(),
-        }
+        Schema { schema, col_names }
     }
 }
 
@@ -184,7 +135,6 @@ mod tests {
     fn test_from_data_types() {
         let mut data_types = vec![];
         let mut s = Schema::from(data_types.clone());
-        assert_eq!(s.length(), 0);
         assert_eq!(s.width(), 0);
         data_types = vec![
             DataType::Int,
@@ -197,7 +147,6 @@ mod tests {
         for (idx, data_type) in data_types.iter().enumerate() {
             assert_eq!(data_type, s.col_type(idx).unwrap());
         }
-        assert_eq!(s.length(), 0);
         assert_eq!(s.width(), data_types.len());
     }
 
@@ -205,7 +154,6 @@ mod tests {
     fn test_from_str() {
         let mut types_str = "";
         let mut s = Schema::from(types_str);
-        assert_eq!(s.length(), 0);
         assert_eq!(s.width(), 0);
         types_str = "IIFBS";
         s = Schema::from(types_str);
@@ -219,35 +167,21 @@ mod tests {
         for (idx, data_type) in data_types.iter().enumerate() {
             assert_eq!(data_type, s.col_type(idx).unwrap());
         }
-        assert_eq!(s.length(), 0);
         assert_eq!(s.width(), data_types.len());
     }
 
-    // add_column/add_row
+    // add_column
     #[test]
-    fn test_row_col_getters_setters() {
+    fn test_col_getters_setters() {
         // colummn getters/setters
         let mut s = Schema::new();
-        assert_eq!(s.length(), 0);
         assert_eq!(s.width(), 0);
         s.add_column(DataType::String, None).unwrap();
         assert_eq!(s.width(), 1);
-        assert_eq!(s.length(), 0);
         s.add_column(DataType::Int, Some(String::from("foo")))
             .unwrap();
         assert_eq!(s.width(), 2);
-        assert_eq!(s.length(), 0);
         assert_eq!(s.col_idx("foo"), Some(1));
         assert_eq!(s.col_name(0).unwrap(), &None);
-
-        // row getters/setters
-        s.add_row(None).unwrap();
-        assert_eq!(s.width(), 2);
-        assert_eq!(s.length(), 1);
-        s.add_row(Some(String::from("bar"))).unwrap();
-        assert_eq!(s.width(), 2);
-        assert_eq!(s.length(), 2);
-        assert_eq!(s.row_idx("bar"), Some(1));
-        assert_eq!(s.row_name(0).unwrap(), &None);
     }
 }

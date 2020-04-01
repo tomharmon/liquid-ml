@@ -21,3 +21,6 @@ bytes = "0.5.4"
 lru = "0.4.3"
 clap = { git = "https://github.com/clap-rs/clap/" }
 
+[dev-dependencies]
+nom = "5.1.1"
+

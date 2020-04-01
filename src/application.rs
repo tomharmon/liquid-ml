@@ -15,7 +15,7 @@ use crate::kv::{KVStore, Key, Value};
 use bincode::{deserialize, serialize};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::fs::File;
+use std::fs::{self, File};
 use std::future::Future;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::Arc;
@@ -77,14 +77,14 @@ impl Application {
         df_name: &str,
     ) -> Result<Self, LiquidError> {
         let app = Application::new(my_addr, server_addr, num_nodes).await?;
-        let file = std::fs::metadata(file_name).unwrap();
+        let file = fs::metadata(file_name).unwrap();
         let f: File = File::open(file_name).unwrap();
         let mut reader = BufReader::new(f);
         let mut size = file.len() / num_nodes as u64;
         // Note: Node ids start at 1
         let from = size * (app.node_id - 1) as u64;
 
-        // advance the reader to this threads starting index then
+        // advance the reader to this node's starting index then
         // find the next newline character
         let mut buffer = Vec::new();
         reader.seek(SeekFrom::Start(from + size)).unwrap();
@@ -101,7 +101,7 @@ impl Application {
         Ok(app)
     }
 
-    /// NOTE: 
+    /// NOTE:
     /// There is an important design decision that comes with a distinct trade
     /// off here. The trade off is:
     /// 1. Join the last node with the next one until you get to the end. This
