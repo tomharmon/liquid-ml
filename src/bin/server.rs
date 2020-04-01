@@ -21,7 +21,7 @@ struct Opts {
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Info).unwrap();
-    let mut s = Server::new(opts.ip).await?;
+    let mut s = Server::new(&opts.ip).await?;
     s.accept_new_connections().await?;
     Ok(())
 }

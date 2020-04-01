@@ -13,12 +13,11 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 impl Server {
     /// Create a new `Server` running on the given `address` in the format of
     /// `IP:Port`
-    pub async fn new(address: String) -> Result<Self, LiquidError> {
+    pub async fn new(address: &str) -> Result<Self, LiquidError> {
         Ok(Server {
-            listener: TcpListener::bind(&address).await?,
             msg_id: 0,
             directory: HashMap::new(),
-            _address: address,
+            address: address.to_string(),
         })
     }
 
@@ -28,9 +27,10 @@ impl Server {
     /// not listen for further messages from the `Client` since this is not
     /// required for any desired functionality.
     pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
+        let mut listener = TcpListener::bind(&self.address).await?;
         loop {
             // wait on connections from new clients
-            let (socket, _) = self.listener.accept().await?;
+            let (socket, _) = listener.accept().await?;
             let (reader, writer) = split(socket);
             let mut stream = FramedRead::new(reader, MessageCodec::new());
             let sink = FramedWrite::new(writer, MessageCodec::new());
@@ -72,14 +72,27 @@ impl Server {
     }
 
     // TODO: abstract/merge with Client::send_msg, they are the same
-    /// Send a message to a client with the given `target_id`.
-    pub(crate) async fn send_msg(
+    /// Send the given `message` to a client with the given `target_id`.
+    pub async fn send_msg(
         &mut self,
         target_id: usize,
         message: Message<ControlMsg>,
     ) -> Result<(), LiquidError> {
         network::send_msg(target_id, message, &mut self.directory).await?;
         self.msg_id += 1;
+        Ok(())
+    }
+
+    /// Broadcast the given `message` to all currently connected clients
+    pub async fn broadcast(
+        &mut self,
+        message: ControlMsg,
+    ) -> Result<(), LiquidError> {
+        let d: Vec<usize> = self.directory.iter().map(|(k, _)| *k).collect();
+        for k in d {
+            self.send_msg(k, Message::new(self.msg_id, 0, k, message.clone()))
+                .await?;
+        }
         Ok(())
     }
 }

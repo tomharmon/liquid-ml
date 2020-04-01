@@ -109,7 +109,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::Shutdown;
 use tokio::io::{ReadHalf, WriteHalf};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::stream::StreamExt;
 use tokio::sync::mpsc::Sender;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
@@ -148,13 +148,11 @@ pub struct Client<T> {
 /// Represents a registration `Server` in a distributed system.
 pub struct Server {
     /// The `address` of this `Server`
-    pub(crate) _address: String,
+    pub(crate) address: String,
     /// The id of the current message
     pub(crate) msg_id: usize,
     /// A directory which is a map of client id to a [`Connection`](Connection)
     pub(crate) directory: HashMap<usize, Connection<ControlMsg>>,
-    /// A `TcpListener` which listens for connections from new `Client`s
-    pub(crate) listener: TcpListener,
 }
 
 /// A message that are sent between nodes for communication
@@ -171,8 +169,8 @@ pub struct Message<T> {
 }
 
 /// Control messages to facilitate communication with the registration server
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum ControlMsg {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ControlMsg {
     /// A directory message sent by the `Server` to new `Client`s once they
     /// connect to the `Server` so that they know which other `Client`s are
     /// currently connected

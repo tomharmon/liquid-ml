@@ -5,7 +5,5 @@
   - lru cache is not enough as of right now, does not limit memory usage
   - Every node has the entire SOR file
 - WordCount
-- Testing
 - seven degrees of Linus
 - Random Forest LUL
-- Orderly shutdown
