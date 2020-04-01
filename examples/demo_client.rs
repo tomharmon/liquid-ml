@@ -24,7 +24,7 @@ struct Opts {
     my_address: String,
 }
 
-async fn producer(kv: Arc<KVStore>) {
+async fn producer(kv: Arc<KVStore<DataFrame>>) {
     let main = Key::new("main", 1);
     let ck = Key::new("ck", 1);
     let vals: Vec<Option<i64>> = (0..100_000).map(|x| Some(x)).collect();
@@ -35,7 +35,7 @@ async fn producer(kv: Arc<KVStore>) {
     kv.put(&ck, df2).await.unwrap();
 }
 
-async fn summer(kv: Arc<KVStore>) {
+async fn summer(kv: Arc<KVStore<DataFrame>>) {
     let verif = Key::new("verif", 1);
     let main = Key::new("main", 1);
     let df = kv.wait_and_get(&main).await.unwrap();
@@ -51,7 +51,7 @@ async fn summer(kv: Arc<KVStore>) {
     kv.put(&verif, new_df).await.unwrap();
 }
 
-async fn verifier(kv: Arc<KVStore>) {
+async fn verifier(kv: Arc<KVStore<DataFrame>>) {
     let ck = Key::new("ck", 1);
     let verif = Key::new("verif", 1);
     let df2 = kv.wait_and_get(&ck).await.unwrap();
