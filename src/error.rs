@@ -19,8 +19,6 @@ pub enum LiquidError {
     /// `String`
     #[error("The requested operation doesn't match the schema data type")]
     TypeMismatch,
-    #[error("Must set an index for the row")]
-    NotSet,
     /// A generic error when there is an underlying error with a `TCP`
     /// connection
     #[error("Network error")]

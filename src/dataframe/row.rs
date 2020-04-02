@@ -122,12 +122,10 @@ impl Row {
         self.idx = Some(idx);
     }
 
-    /// Get the current index of this `Row`.
-    pub fn get_idx(&self) -> Result<usize, LiquidError> {
-        match self.idx {
-            Some(index) => Ok(index),
-            None => Err(LiquidError::NotSet),
-        }
+    /// Get the current index of this `Row`. Is `Some` if the index has been
+    /// set, and is `None` otherwise.
+    pub fn get_idx(&self) -> Option<usize> {
+        self.idx.clone()
     }
 
     /// Get a reference of the boxed value at the given `idx`.
@@ -152,14 +150,9 @@ impl Row {
     }
 
     /// Accept a `Fielder` visitor for this row that visits all the elements in
-    /// this `Row`
+    /// this `Row`. Note that this method is only useful if the data held in
+    /// this `Row` is meaningful (ie, not only `Data::Null`).
     pub fn accept<T: Fielder>(&self, f: &mut T) -> Result<(), LiquidError> {
-        let idx = match self.get_idx() {
-            Ok(i) => i,
-            Err(e) => return Err(e),
-        };
-        f.start(idx);
-
         for data in &self.data {
             match data {
                 Data::Int(d) => f.visit_int(*d),
@@ -170,7 +163,6 @@ impl Row {
             }
         }
 
-        f.done();
         Ok(())
     }
 }
@@ -191,10 +183,6 @@ mod tests {
     }
 
     impl Fielder for TestFielder {
-        fn start(&mut self, starting_row_index: usize) {
-            self.start_idx = starting_row_index;
-        }
-
         fn visit_bool(&mut self, _b: bool) {
             self.num_bools += 1;
         }
@@ -214,8 +202,6 @@ mod tests {
         fn visit_null(&mut self) {
             self.num_null += 1;
         }
-
-        fn done(&mut self) {}
     }
 
     fn init() -> (Vec<DataType>, Schema, Row) {
@@ -278,7 +264,7 @@ mod tests {
     #[test]
     fn test_get_set_idx() {
         let (_data_types, _s, mut r) = init();
-        assert_eq!(r.get_idx().is_err(), true);
+        assert_eq!(r.get_idx().is_none(), true);
         r.set_idx(0);
         assert_eq!(r.get_idx().unwrap(), 0);
     }

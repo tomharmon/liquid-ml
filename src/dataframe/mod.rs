@@ -54,11 +54,9 @@ pub struct Row {
     idx: Option<usize>,
 }
 
-/// A field visitor used to iterate and visit all the elements of a `Row`.
+/// A field visitor that may be implemented to iterate and visit all the
+/// elements of a `Row`.
 pub trait Fielder {
-    /// Must be called before visiting a row
-    fn start(&mut self, starting_row_index: usize);
-
     /// Called for fields of type `bool` with the value of the field
     fn visit_bool(&mut self, b: bool);
 
@@ -71,14 +69,13 @@ pub trait Fielder {
     /// Called for fields of type `String` with the value of the field
     fn visit_string(&mut self, s: &str);
 
-    /// Called for fields where the value of the field is missing
+    /// Called for fields where the value of the field is missing. This method
+    /// may be as simple as doing nothing but there are use cases where
+    /// some operations are required.
     fn visit_null(&mut self);
-
-    /// Called when all fields have been seen
-    fn done(&mut self);
 }
 
-/// A trait for vistors who iterate through and process each row of a
+/// A trait for visitors who iterate through and process each row of a
 /// `DataFrame`. Rowers are cloned for parallel execution in `DataFrame::pmap`.
 pub trait Rower {
     /// This function is called once per row. The `Row` object is on loan and
