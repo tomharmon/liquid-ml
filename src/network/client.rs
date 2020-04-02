@@ -37,7 +37,8 @@ impl<
         my_addr: &str,
         sender: Sender<Message<RT>>,
         kill_notifier: Arc<Notify>,
-        num_clients: Option<usize>,
+        num_clients: usize,
+        wait_for_all_clients: bool,
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
@@ -77,24 +78,23 @@ impl<
             // spawn a tokio task for accepting connections from new clients
             let concurrent_client = Arc::new(RwLock::new(c));
             let concurrent_client_cloned = concurrent_client.clone();
-            match num_clients {
-                Some(_) => {
+            if wait_for_all_clients {
+                Client::accept_new_connections(
+                    concurrent_client_cloned,
+                    num_clients,
+                    wait_for_all_clients,
+                )
+                .await?
+            } else {
+                tokio::spawn(async move {
                     Client::accept_new_connections(
                         concurrent_client_cloned,
                         num_clients,
+                        wait_for_all_clients,
                     )
-                    .await?
-                }
-                None => {
-                    tokio::spawn(async move {
-                        Client::accept_new_connections(
-                            concurrent_client_cloned,
-                            num_clients,
-                        )
-                        .await
-                        .unwrap();
-                    });
-                }
+                    .await
+                    .unwrap();
+                });
             }
             Ok(concurrent_client)
         } else {
@@ -108,14 +108,15 @@ impl<
     /// and call `Client::recv_msg`
     async fn accept_new_connections(
         client: Arc<RwLock<Client<RT>>>,
-        num_clients: Option<usize>,
+        num_clients: usize,
+        wait_for_all_clients: bool,
     ) -> Result<(), LiquidError> {
         let listen_address = { client.read().await.address.clone() };
         let mut listener = TcpListener::bind(listen_address).await?;
         // Me + All the nodes i'm connected to
         let mut curr_clients = 1 + { client.read().await.directory.len() };
         loop {
-            if num_clients.is_some() && num_clients.unwrap() == curr_clients {
+            if wait_for_all_clients && num_clients == curr_clients {
                 return Ok(());
             }
             // wait on connections from new clients

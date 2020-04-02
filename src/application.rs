@@ -52,7 +52,8 @@ impl Application {
             my_addr,
             blob_sender,
             kill_notifier.clone(),
-            Some(num_nodes),
+            num_nodes,
+            true,
         )
         .await;
         let node_id = kv.id;

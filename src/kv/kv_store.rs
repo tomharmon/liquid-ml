@@ -1,5 +1,4 @@
 //! The `KVStore`
-use crate::dataframe::DataFrame;
 use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
@@ -26,18 +25,36 @@ impl<
             + 'static,
     > KVStore<T>
 {
-    /// Creates a new `KVStore`. The `network` is used to communicate between
-    /// distributed `KVStore`s. The `network_notifier` comes from the `network`
-    /// and is used to notify this `KVStore` when a new message comes from the
-    /// `network` so that this `KVStore` may process and respond to messages.
-    /// The `network_notifier` is passed in separately so that `new` is not
-    /// `async`.
+    /// Creates a new distributed `KVStore`.
+    ///
+    /// ## Parameters
+    /// - `server_addr`: the `IP:Port` of the registration `Server` used
+    ///    for orchestrating the connection of all distributed nodes in the
+    ///    system.
+    /// - `my_addr` is the `IP:Port` of this `KVStore`.
+    /// - `blob_sender`: is the sending half of an `mpsc` channel that is
+    ///    passed in by the `Application` layer that uses this `KVStore`.
+    ///    Whenever this `KVStore` receives serialized blobs of data from
+    ///    other `KVStore`s in the distributed system, this `KVStore` will
+    ///    use the `blob_sender` to forward the blob to the `Application`.
+    ///    For `liquid_ml`, these blobs are used for joining `Rower`s
+    ///    for distributed `pmap`, though other use cases are possible.
+    /// - `kill_notifier`: is a `Notify` passed in by the `Application` layer.
+    ///    This `KVStore` then passes it down to its `Client` so that when the
+    ///    `Client` gets `Kill` messages from the `Server`, the `Client` can
+    ///    notify the `Application` it is time to shut down in an orderly
+    ///    fashion.
+    /// - `num_clients`: the number of nodes in the distributed system,
+    ///    including this one.
+    /// - `wait_for_all_clients`: whether or not to wait for all other nodes
+    ///    to connect to this one before returning this new `KVStore`.
     pub async fn new(
         server_addr: &str,
         my_addr: &str,
         blob_sender: Sender<Value>,
         kill_notifier: Arc<Notify>,
-        num_clients: Option<usize>,
+        num_clients: usize,
+        wait_for_all_clients: bool,
     ) -> Arc<Self> {
         // the Receiver acts as our queue of messages from the network, and
         // the network uses the Sender to add messages to our queue
@@ -48,6 +65,7 @@ impl<
             sender,
             kill_notifier,
             num_clients,
+            wait_for_all_clients,
         )
         .await
         .unwrap();
@@ -67,9 +85,11 @@ impl<
         kv
     }
 
-    /// `get` is used to retrieve the `Value` associated with the given `key`.
-    /// The difference between `get` and `wait_and_get` is that `get` returns
-    /// an error if the data is not owned by this `KVStore` or is not in its
+    /// Used to retrieve the deserialized `Value` associated with the given
+    /// `key` if the data is held locally on this node in either the cache or
+    /// the store itself. The difference between `get` and `wait_and_get` is
+    /// that `get` returns an error if the data is not owned by this `KVStore`
+    /// or is if it is not owned by this `KVStore` **and** it is not in its
     /// cache.
     ///
     /// ## Errors
@@ -91,20 +111,25 @@ impl<
         Ok(deserialized)
     }
 
-    /// Get the data for the given `key`. If the key belongs on a different node
-    /// then the data will be requested from the node that owns the `key` and
-    /// this method will block until that node responds with the data.
+    /// Get the data for the given `key`. If the key belongs on a different
+    /// node then the data will be requested from the node that owns the `key`
+    /// and `await`ing this method will block until that node responds with the
+    /// data.
     ///
-    /// If the belongs on this `KVStore`, then make sure this function is only
-    /// being used in one of these following ways:
+    /// Make sure that you use this function in only one of the two following
+    /// ways:
     /// 1. You know that the data was `put` some microseconds around when
     ///    `wait_and_get` was called, but can't guarantee it happened exactly
     ///    before `wait_and_get` is called. In this case, this function can
-    ///    likely be `await`ed
+    ///    be `await`ed
     /// 2. The data will be `put` on this `KVStore` sometime in the
     ///    future at an unknown time. In this case, this function should
     ///    not be `await`ed but instead given a callback closure via
     ///    calling `and_then` on the returned future
+    ///
+    /// If you do not do that, for example you `await` the second case,
+    /// then you will waste a lot of time waiting for the data to be
+    /// transferred over the network.
     pub async fn wait_and_get(&self, key: &Key) -> Result<T, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
@@ -140,7 +165,7 @@ impl<
         }
     }
 
-    /// Put the data held in `value` to the `KVStore` with the `id` in
+    /// Puts the data held in `value` to the `KVStore` with the `id` in
     /// `key.home`.
     ///
     /// ## If `key` belongs to this `KVStore`
@@ -157,7 +182,7 @@ impl<
     pub async fn put(
         &self,
         key: &Key,
-        value: DataFrame,
+        value: T,
     ) -> Result<Option<Value>, LiquidError> {
         let serial = serialize(&value)?;
         if key.home == self.id {
@@ -200,10 +225,10 @@ impl<
     /// `network::Client`.
     ///
     /// This method processes the messages by doing the following:
-    /// 1. Asynchronously await new notifications from the `Client` that are
-    ///    sent when messages have arrived on the queue.
-    /// 2. Spawn an asynchronous `tokio::task` so as to not block further
-    ///    message processing.
+    /// 1. Asynchronously await new messages from the `Client` that are
+    ///    sent over an `mpsc` channel.
+    /// 2. Spawn an asynchronous `tokio::task` to respond to the newly
+    ///    received message so as to not block further message processing.
     /// 3. Based on the message type, do the following:
     ///    - `Get` message: call `wait_and_get` to get the data, either
     ///       internally from this `KVStore` or externally over the network
