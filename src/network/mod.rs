@@ -51,7 +51,7 @@
 //!
 //! Assume that the `Server` is already running at `68.2.3.4:9000`
 //!
-//! Client 1 starts up, waits for Client 2 to connect, and sends 'Hi' to 
+//! Client 1 starts up, waits for Client 2 to connect, and sends 'Hi' to
 //! Client 2 then the program exits
 //!
 //! ```rust,no_run
@@ -82,7 +82,7 @@
 //! ```
 //!
 //! Client 2 starts up, waits to connect to Client 1, and then the message
-//! sent by Client 1 is available on the receiver after it's been sent. The 
+//! sent by Client 1 is available on the receiver after it's been sent. The
 //! message is popped from the queue and printed.
 //!
 //! ```rust,no_run
@@ -123,6 +123,9 @@ pub(crate) struct Connection<T> {
     pub(crate) address: String,
     /// The buffered stream used for sending messages to the other `Client`
     pub(crate) sink: FramedSink<T>,
+    /// The total amount of memory (in `KiB`) the `Client` we're connected to
+    /// is allowed to receive at one time
+    pub(crate) memory: u64,
 }
 
 type FramedStream<T> = FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>;
@@ -146,6 +149,9 @@ pub struct Client<T> {
     /// above layer will receive the messages on the other half of this `mpsc`
     /// channel.
     sender: Sender<Message<T>>,
+    /// The total amount of memory (in `KiB`) this `Client` can receive at
+    /// one time from other `Client`s
+    memory: u64,
 }
 
 /// Represents a registration `Server` in a distributed system.
@@ -182,7 +188,7 @@ pub enum ControlMsg {
     Directory { dir: Vec<(usize, String)> },
     /// An introduction that a new `Client` sends to all other existing
     /// `Client`s and the server
-    Introduction { address: String },
+    Introduction { address: String, memory: u64 },
     /// A message the `Server` sends to `Client`s to inform them to shut down
     Kill,
 }

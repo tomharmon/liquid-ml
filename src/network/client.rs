@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc::Sender, Notify, RwLock};
@@ -46,13 +47,19 @@ impl<
         let (reader, writer) = io::split(server_stream);
         let mut stream = FramedRead::new(reader, MessageCodec::new());
         let mut sink = FramedWrite::new(writer, MessageCodec::new());
-        // Tell the server our address
+        let memory =
+            System::new_with_specifics(RefreshKind::new().with_memory())
+                .get_total_memory()
+                / 2;
+        // Tell the server our address and how much data (in `KiB`) other
+        // Clients are allowed to send us at one time
         sink.send(Message::new(
             0,
             0,
             0,
             ControlMsg::Introduction {
                 address: my_addr.to_string(),
+                memory,
             },
         ))
         .await?;
@@ -66,6 +73,7 @@ impl<
                 directory: HashMap::new(),
                 _server: sink,
                 sender,
+                memory,
             };
 
             // Connect to all the clients

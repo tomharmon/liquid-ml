@@ -97,6 +97,9 @@ pub struct KVStore<T> {
     /// A channel to send blobs of data to a higher level component, in
     /// `liquid-ml` this would be the `Application`
     blob_sender: Sender<Value>,
+    /// The total amount of RAM (in `KiB`) available on the machine this
+    /// `KVStore` is running on
+    ram: u64,
 }
 
 /// Represents the kind of messages that can be sent between distributed

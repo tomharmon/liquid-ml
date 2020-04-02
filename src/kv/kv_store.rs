@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify, RwLock};
@@ -69,7 +70,9 @@ impl<
         )
         .await
         .unwrap();
-        let id = network.read().await.id;
+        let id = { network.read().await.id };
+        let ram = System::new_with_specifics(RefreshKind::new().with_memory())
+            .get_total_memory();
         let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
