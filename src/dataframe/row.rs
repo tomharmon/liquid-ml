@@ -117,7 +117,7 @@ impl Row {
         }
     }
 
-    /// Set the row offset in the daaframe for this `Row`.
+    /// Set the row offset in the dataframe for this `Row`.
     pub fn set_idx(&mut self, idx: usize) {
         self.idx = Some(idx);
     }
@@ -151,7 +151,8 @@ impl Row {
         }
     }
 
-    /// Accept a visitor for this row that vists all the elements in this `Row`.
+    /// Accept a `Fielder` visitor for this row that visits all the elements in
+    /// this `Row`
     pub fn accept<T: Fielder>(&self, f: &mut T) -> Result<(), LiquidError> {
         let idx = match self.get_idx() {
             Ok(i) => i,

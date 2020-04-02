@@ -42,8 +42,7 @@
 //! 3. Server responds with a `RegistrationMsg`
 //! 4. Connects to all other existing `Client`s which spawns a Tokio task
 //!    for each connection that will read messages from the connection,
-//!    publish them to the `mpsc` channel, and notify the receiving end so
-//!    that the receiving end may process them as desired
+//!    publish them to the `mpsc` channel, and notify the receiving end so that the receiving end may process them as desired
 //!
 //! ## Client Usage
 //! For a more in-depth and useful example, it may be worthwhile to look at
@@ -52,8 +51,8 @@
 //!
 //! Assume that the `Server` is already running at `68.2.3.4:9000`
 //!
-//! Client 1 starts up, all it does is send 'Hi' to Client 2 then the program
-//! exits
+//! Client 1 starts up, waits for Client 2 to connect, and sends 'Hi' to 
+//! Client 2 then the program exits
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
@@ -73,7 +72,7 @@
 //!                                        "69.0.4.20:9000",
 //!                                        sender,
 //!                                        kill_notifier,
-//!                                        Some(2)).await.unwrap();
+//!                                        2, true).await.unwrap();
 //!     // `Client::new` returns a `Arc<RwLock<Client>>` so that it may
 //!     // be used concurrently
 //!     let id = { client.read().await.id };
@@ -82,9 +81,9 @@
 //! }
 //! ```
 //!
-//! Client 2 starts up and the message sent by Client 1 is available on the
-//! receiver after it's been sent. The message is popped from the queue and
-//! printed.
+//! Client 2 starts up, waits to connect to Client 1, and then the message
+//! sent by Client 1 is available on the receiver after it's been sent. The 
+//! message is popped from the queue and printed.
 //!
 //! ```rust,no_run
 //! use std::sync::Arc;
@@ -100,7 +99,7 @@
 //!                                        "69.80.08.5:9000",
 //!                                        sender,
 //!                                        kill_notifier,
-//!                                        Some(2)).await.unwrap();
+//!                                        2, true).await.unwrap();
 //!     let msg = receiver.recv().await.unwrap();
 //!     println!("{}", msg.msg);
 //!     Ok(())

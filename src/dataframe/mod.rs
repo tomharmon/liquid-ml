@@ -2,11 +2,11 @@
 //! created from a [`SoR`](https://docs.rs/sorer/0.1.0/sorer/) file,
 //! or by adding `Column`s or `Row`s manually.
 //!
-//! The `DataFrame` is lightly inpsired by those found in `R` or `pandas`, and
-//! supports optionally named columns and rows. You may analyze the data in a
-//! `DataFrame` in a horizontally scalable manner across many machines by
-//! implementing the `Rower` trait to perform `map` or `filter` operations on a
-//! `DataFrame`.
+//! The `DataFrame` is lightly inspired by those found in `R` or `pandas`, and
+//! supports optionally named columns. You may analyze the data in a
+//! `DataFrame` across many distributed machines in a horizontally scalable
+//! manner by implementing the `Rower` trait to perform `map` or `filter`
+//! operations on a `DataFrame`.
 
 use serde::{Deserialize, Serialize};
 pub use sorer::{
@@ -42,7 +42,8 @@ pub struct Schema {
     pub col_names: Vec<Option<String>>,
 }
 
-/// Represents a single row in a `DataFrame`
+/// Represents a single row in a `DataFrame`. Has a clone of the `DataFrame`s
+/// `Schema` and holds data as a `Vec<Data>`.
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub struct Row {
     /// A clone of the `Schema` of the `DataFrame` this `Row` is from.
@@ -53,7 +54,7 @@ pub struct Row {
     idx: Option<usize>,
 }
 
-/// A field visitor invoked by a `Row`.
+/// A field visitor used to iterate and visit all the elements of a `Row`.
 pub trait Fielder {
     /// Must be called before visiting a row
     fn start(&mut self, starting_row_index: usize);
