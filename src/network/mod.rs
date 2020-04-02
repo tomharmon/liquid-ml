@@ -129,10 +129,10 @@ pub(crate) struct Connection<T> {
 type FramedStream<T> = FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>;
 type FramedSink<T> = FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>;
 
-/// Represents a `Client` node in a distributed system, where Type `T` is the
-/// types of messages that can be sent between `Client`s
+/// Represents a `Client` node in a distributed system that is generic for type
+/// `T`, where `T` is the types of messages that can be sent between `Client`s
 pub struct Client<T> {
-    /// The `id` of this `Client`
+    /// The `id` of this `Client`, assigned by the `Server` on startup
     pub id: usize,
     /// The `address` of this `Client`
     pub address: String,
@@ -159,7 +159,8 @@ pub struct Server {
     pub(crate) directory: HashMap<usize, Connection<ControlMsg>>,
 }
 
-/// A message that are sent between nodes for communication
+/// A message that can sent between nodes for communication. The message
+/// is generic for type `T`
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Message<T> {
     /// The id of this message
@@ -172,7 +173,8 @@ pub struct Message<T> {
     pub msg: T,
 }
 
-/// Control messages to facilitate communication with the registration server
+/// Control messages to facilitate communication with the registration `Server`
+/// and other `Client`s
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ControlMsg {
     /// A directory message sent by the `Server` to new `Client`s once they

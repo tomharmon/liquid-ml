@@ -1,10 +1,10 @@
 //! A module for distributed `Key`, `Value` stores that hold their data in
-//! memory. Utilizes the `network` module to communicate between nodes using
-//! `KVMessage`s.
+//! memory and are generic for values of type `T`.
 //!
-//! A `KVStore` is essentially a very simple in-memory database (with no
-//! persistence) that stores data as a collection of key-value pairs where
-//! a `Key` is a unique identifier to a `Value`.
+//! A `KVStore` is essentially a very simple in-memory distributed database
+//! (with no persistence) that stores data as a collection of key-value pairs
+//! where a `Key` is a unique identifier to a `Value`. The `KVStore` utilizes
+//! the `network` module to communicate between nodes using `KVMessage`s.
 //!
 //! Internally `KVStore`s store their data in memory as serialized blobs
 //! (a `Value` aka a `Vec<u8>`). The `KVStore` caches deserialized `Value`s

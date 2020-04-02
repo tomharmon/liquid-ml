@@ -25,7 +25,8 @@ impl<
     /// Constructing the `Client` does these things:
     /// 1. Connects to the `Server`
     /// 2. Sends the server our `IP:Port` address
-    /// 3. Server responds with a `RegistrationMsg`
+    /// 3. Server responds with a `ControlMsg::Directory` containing the
+    ///    addresses of all other currently connected `Client`s
     /// 4. Connects to all other existing `Client`s which spawns a Tokio task
     ///    for each connection that will read messages from the connection
     ///    and handle it.
@@ -184,7 +185,9 @@ impl<
     /// handle the message.
     ///
     /// Note that as long as a `Server` is running, you *really should not* use
-    /// this method. Calling `Client::new` will connect the new `Client` with
+    /// this method unless you want to add `Client`s to the system that is
+    /// only connected to certain other `Client`s and not the entire system.
+    /// Calling `Client::new` will connect the new `Client` with
     /// all other currently existing `Client`s automatically.
     #[allow(clippy::map_entry)] // clippy is being dumb
     pub async fn connect(
