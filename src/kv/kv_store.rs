@@ -17,8 +17,7 @@ use tokio::sync::{Mutex, Notify, RwLock};
 const MAX_NUM_CACHED_VALUES: usize = 5;
 
 impl<
-        T: Clone
-            + Serialize
+        T: Serialize
             + DeserializeOwned
             + Sync
             + Send
