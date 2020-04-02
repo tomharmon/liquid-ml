@@ -76,17 +76,18 @@ pub trait Fielder {
 }
 
 /// A trait for visitors who iterate through and process each row of a
-/// `DataFrame`. Rowers are cloned for parallel execution in `DataFrame::pmap`.
+/// `DataFrame`. In `DataFrame::pmap`, `Rower`s are cloned for parallel
+/// execution.
 pub trait Rower {
-    /// This function is called once per row. The `Row` object is on loan and
-    /// should not be retained as it is going to be reused in the next
-    /// call. The return value is used in filters to indicate that a row
-    /// should be kept.
+    /// This function is called once per row.  The return value is used in
+    /// `DataFrame::filter` to indicate whether a row should be kept.
     fn visit(&mut self, r: &Row) -> bool;
 
     // TODO: join should take `self` to avoid unnecessary clones
     /// Once traversal of the `DataFrame` is complete the rowers that were
-    /// split off will be joined.  There will be one join per split. The
-    /// original object will be the last to be called join on.
+    /// cloned for parallel execution for `DataFrame::pmap` will be joined to
+    /// obtain the final result.  There will be one join for each cloned
+    /// `Rower`. The original `Rower` will be the last to be called join on,
+    /// and that `Rower` will contain the final results.
     fn join(&mut self, other: &Self) -> Self;
 }
