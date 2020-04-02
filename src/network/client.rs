@@ -9,7 +9,6 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc::Sender, Notify, RwLock};
@@ -47,10 +46,6 @@ impl<
         let (reader, writer) = io::split(server_stream);
         let mut stream = FramedRead::new(reader, MessageCodec::new());
         let mut sink = FramedWrite::new(writer, MessageCodec::new());
-        let memory =
-            System::new_with_specifics(RefreshKind::new().with_memory())
-                .get_total_memory()
-                / 2;
         // Tell the server our address and how much data (in `KiB`) other
         // Clients are allowed to send us at one time
         sink.send(Message::new(
@@ -59,56 +54,57 @@ impl<
             0,
             ControlMsg::Introduction {
                 address: my_addr.to_string(),
-                memory,
             },
         ))
         .await?;
         // The Server sends the addresses of all currently connected clients
-        let dir = network::read_msg(&mut stream).await?;
-        if let ControlMsg::Directory { dir: d } = dir.msg {
-            let mut c = Client {
-                id: dir.target_id,
-                address: my_addr.to_string(),
-                msg_id: dir.msg_id + 1,
-                directory: HashMap::new(),
-                _server: sink,
-                sender,
-                memory,
-            };
+        let dir_msg = network::read_msg(&mut stream).await?;
+        let dir = if let ControlMsg::Directory { dir } = dir_msg.msg {
+            dir
+        } else {
+            return Err(LiquidError::UnexpectedMessage);
+        };
 
-            // Connect to all the clients
-            for addr in d {
-                c.connect(addr).await?;
-            }
+        let mut c = Client {
+            id: dir_msg.target_id,
+            address: my_addr.to_string(),
+            msg_id: dir_msg.msg_id + 1,
+            directory: HashMap::new(),
+            _server: sink,
+            sender,
+        };
 
-            // Listen for further messages from the Server, e.g. `Kill` messages
-            Client::<ControlMsg>::recv_server_msg(stream, kill_notifier);
+        // Connect to all the clients
+        for addr in dir {
+            c.connect(addr).await?;
+        }
 
-            // spawn a tokio task for accepting connections from new clients
-            let concurrent_client = Arc::new(RwLock::new(c));
-            let concurrent_client_cloned = concurrent_client.clone();
-            if wait_for_all_clients {
+        // Listen for further messages from the Server, e.g. `Kill` messages
+        Client::<ControlMsg>::recv_server_msg(stream, kill_notifier);
+
+        // spawn a tokio task for accepting connections from new clients
+        let concurrent_client = Arc::new(RwLock::new(c));
+        let concurrent_client_cloned = concurrent_client.clone();
+        if wait_for_all_clients {
+            Client::accept_new_connections(
+                concurrent_client_cloned,
+                num_clients,
+                wait_for_all_clients,
+            )
+            .await?
+        } else {
+            tokio::spawn(async move {
                 Client::accept_new_connections(
                     concurrent_client_cloned,
                     num_clients,
                     wait_for_all_clients,
                 )
-                .await?
-            } else {
-                tokio::spawn(async move {
-                    Client::accept_new_connections(
-                        concurrent_client_cloned,
-                        num_clients,
-                        wait_for_all_clients,
-                    )
-                    .await
-                    .unwrap();
-                });
-            }
-            Ok(concurrent_client)
-        } else {
-            Err(LiquidError::UnexpectedMessage)
+                .await
+                .unwrap();
+            });
         }
+
+        Ok(concurrent_client)
     }
 
     /// A blocking function that allows a `Client` to listen for connections
@@ -135,54 +131,52 @@ impl<
                 FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
             let sink = FramedWrite::new(writer, MessageCodec::<RT>::new());
             let intro = network::read_msg(&mut stream).await?;
-            let addr =
-                if let ControlMsg::Introduction { address: a } = intro.msg {
-                    a
+            let address =
+                if let ControlMsg::Introduction { address } = intro.msg {
+                    address
                 } else {
                     return Err(LiquidError::UnexpectedMessage);
                 };
-            let old_msg_id = { client.read().await.msg_id };
+
+            // increment the message id and check if there was an existing
+            // connection
+            let is_existing_conn;
             {
-                client.write().await.msg_id =
-                    increment_msg_id(old_msg_id, intro.msg_id);
+                let mut unlocked = client.write().await;
+                unlocked.msg_id =
+                    increment_msg_id(unlocked.msg_id, intro.msg_id);
+                is_existing_conn =
+                    unlocked.directory.contains_key(&intro.sender_id);
             }
-            // Make sure we don't have an existing connection to this client
-            let is_existing_conn = {
-                client.read().await.directory.contains_key(&intro.sender_id)
-            };
+
             if is_existing_conn {
                 return existing_conn_err(stream, sink);
-            } else {
-                // Add the connection with the new client to this directory
-                let conn = Connection {
-                    address: addr.clone(),
-                    sink,
-                };
-                {
-                    client
-                        .write()
-                        .await
-                        .directory
-                        .insert(intro.sender_id, conn);
-                }
-                // NOTE: Not unsafe because message codec has no fields and
-                // can be converted to a different type without losing meaning
-                let new_stream = unsafe {
-                    std::mem::transmute::<
-                        FramedStream<ControlMsg>,
-                        FramedStream<RT>,
-                    >(stream)
-                };
-                // spawn a tokio task to handle new messages from the client
-                // that we just connected to
-                let new_sender = { client.read().await.sender.clone() };
-                Client::recv_msg(new_sender, new_stream);
-                info!(
-                    "Connected to id: {:#?} at address: {:#?}",
-                    intro.sender_id, addr
-                );
-                curr_clients += 1;
             }
+
+            // Add the connection with the new client to this directory
+            let conn = Connection {
+                address: address.clone(),
+                sink,
+            };
+            {
+                client.write().await.directory.insert(intro.sender_id, conn);
+            }
+            // NOTE: Not unsafe because message codec has no fields and
+            // can be converted to a different type without losing meaning
+            let new_stream = unsafe {
+                std::mem::transmute::<FramedStream<ControlMsg>, FramedStream<RT>>(
+                    stream,
+                )
+            };
+            // spawn a tokio task to handle new messages from the client
+            // that we just connected to
+            let new_sender = { client.read().await.sender.clone() };
+            Client::recv_msg(new_sender, new_stream);
+            info!(
+                "Connected to id: {:#?} at address: {:#?}",
+                intro.sender_id, address
+            );
+            curr_clients += 1;
         }
     }
 
@@ -245,6 +239,7 @@ impl<
                 "Connected to id: {:#?} at address: {:#?}",
                 client.0, client.1
             );
+
             Ok(())
         }
     }

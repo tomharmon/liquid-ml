@@ -8,7 +8,7 @@ use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU64, Arc};
 use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -71,8 +71,10 @@ impl<
         .await
         .unwrap();
         let id = { network.read().await.id };
-        let ram = System::new_with_specifics(RefreshKind::new().with_memory())
-            .get_total_memory();
+        let max_cache_size =
+            System::new_with_specifics(RefreshKind::new().with_memory())
+                .get_total_memory()
+                * 0.25 as u64;
         let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
@@ -80,6 +82,8 @@ impl<
             internal_notifier: Notify::new(),
             id,
             blob_sender,
+            max_cache_size,
+            current_cache_size: AtomicU64::new(0),
         });
         let kv_clone = kv.clone();
         tokio::spawn(async move {
@@ -98,18 +102,17 @@ impl<
     /// ## Errors
     /// If `key` is not in this `KVStore`s cache or is not owned by this
     /// `KVStore`, then the error `Err(LiquidError::NotPresent)` is returned
-    pub async fn get(&self, key: &Key) -> Result<T, LiquidError> {
+    pub async fn get(&self, key: &Key) -> Result<Arc<T>, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
         }
 
         let serialized_val = self.get_raw(key).await?;
-        let deserialized: T = deserialize(&serialized_val[..])?;
+        let deserialized: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
+        let k = key.clone();
+        let v = deserialized.clone();
         {
-            self.cache
-                .lock()
-                .await
-                .put(key.clone(), deserialized.clone());
+            self.cache.lock().await.put(k, v);
         }
         Ok(deserialized)
     }
@@ -133,7 +136,7 @@ impl<
     /// If you do not do that, for example you `await` the second case,
     /// then you will waste a lot of time waiting for the data to be
     /// transferred over the network.
-    pub async fn wait_and_get(&self, key: &Key) -> Result<T, LiquidError> {
+    pub async fn wait_and_get(&self, key: &Key) -> Result<Arc<T>, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
         }
@@ -143,12 +146,12 @@ impl<
                 self.internal_notifier.notified().await;
             }
             let serialized_val = self.get_raw(key).await?;
-            let deserialized: T = deserialize(&serialized_val[..])?;
+            let deserialized: Arc<T> =
+                Arc::new(deserialize(&serialized_val[..])?);
+            let k = key.clone();
+            let v = deserialized.clone();
             {
-                self.cache
-                    .lock()
-                    .await
-                    .put(key.clone(), deserialized.clone());
+                self.cache.lock().await.put(k, v);
             }
             Ok(deserialized)
         } else {
@@ -194,13 +197,8 @@ impl<
             self.internal_notifier.notify();
             Ok(opt_old_data)
         } else {
-            {
-                self.network
-                    .write()
-                    .await
-                    .send_msg(key.home, KVMessage::Put(key.clone(), serial))
-                    .await?
-            }
+            let msg = KVMessage::Put(key.clone(), serial);
+            self.network.write().await.send_msg(key.home, msg).await?;
             Ok(None)
         }
     }
@@ -250,47 +248,38 @@ impl<
             let kv_ptr_clone = kv.clone();
             let mut sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {
-                info!("Proccessing a message with id: {:#?}", msg.msg_id);
-                match &msg.msg {
+                info!("Processing a message with id: {:#?}", msg.msg_id);
+                match msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond
-                        let x = kv_ptr_clone.wait_and_get_raw(k).await.unwrap();
+                        let v =
+                            kv_ptr_clone.wait_and_get_raw(&k).await.unwrap();
                         {
                             kv_ptr_clone
                                 .network
                                 .write()
                                 .await
-                                .send_msg(
-                                    msg.sender_id,
-                                    KVMessage::Data(k.clone(), x),
-                                )
+                                .send_msg(msg.sender_id, KVMessage::Data(k, v))
                                 .await
                                 .unwrap();
                         }
                     }
                     KVMessage::Data(k, v) => {
+                        let v: Arc<T> = Arc::new(deserialize(&v).unwrap());
                         {
-                            kv_ptr_clone
-                                .cache
-                                .lock()
-                                .await
-                                .put(k.clone(), deserialize(v).unwrap());
+                            kv_ptr_clone.cache.lock().await.put(k, v);
                         }
                         kv_ptr_clone.internal_notifier.notify();
                     }
                     KVMessage::Put(k, v) => {
                         // Note is the home id actually my id should we check?
                         {
-                            kv_ptr_clone
-                                .data
-                                .write()
-                                .await
-                                .insert(k.clone(), v.clone());
+                            kv_ptr_clone.data.write().await.insert(k, v);
                         }
                         kv_ptr_clone.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
-                        sender_clone.send(v.clone()).await.unwrap();
+                        sender_clone.send(v).await.unwrap();
                     }
                 }
             });
@@ -315,7 +304,7 @@ impl<
             }
             Ok(self.get_raw(key).await?)
         } else {
-            Ok(serialize(&self.wait_and_get(key).await?)?)
+            Ok(serialize(&*self.wait_and_get(key).await?)?)
         }
     }
 }

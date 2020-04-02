@@ -40,7 +40,7 @@ use crate::network::Client;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{atomic::AtomicU64, Arc};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Notify, RwLock};
 
@@ -86,7 +86,7 @@ pub struct KVStore<T> {
     /// An `LRU` cache of deserialized values of type `T`. Not all cached
     /// values belong to this `KVStore`, some of it may come from other
     /// distributed `KVStore`s not running on this machine.
-    cache: Mutex<LruCache<Key, T>>,
+    cache: Mutex<LruCache<Key, Arc<T>>>,
     /// The `network` layer, used to send and receive messages and data with
     /// other `KVStore`s
     network: Arc<RwLock<Client<KVMessage>>>,
@@ -97,9 +97,11 @@ pub struct KVStore<T> {
     /// A channel to send blobs of data to a higher level component, in
     /// `liquid-ml` this would be the `Application`
     blob_sender: Sender<Value>,
-    /// The total amount of RAM (in `KiB`) available on the machine this
-    /// `KVStore` is running on
-    ram: u64,
+    /// The total amount of memory (in `KiB`) this `KVStore` is allowed
+    /// to keep in its cache
+    max_cache_size: u64,
+    /// The current size of the cache
+    current_cache_size: AtomicU64,
 }
 
 /// Represents the kind of messages that can be sent between distributed

@@ -123,9 +123,6 @@ pub(crate) struct Connection<T> {
     pub(crate) address: String,
     /// The buffered stream used for sending messages to the other `Client`
     pub(crate) sink: FramedSink<T>,
-    /// The total amount of memory (in `KiB`) the `Client` we're connected to
-    /// is allowed to receive at one time
-    pub(crate) memory: u64,
 }
 
 type FramedStream<T> = FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>;
@@ -149,9 +146,6 @@ pub struct Client<T> {
     /// above layer will receive the messages on the other half of this `mpsc`
     /// channel.
     sender: Sender<Message<T>>,
-    /// The total amount of memory (in `KiB`) this `Client` can receive at
-    /// one time from other `Client`s
-    memory: u64,
 }
 
 /// Represents a registration `Server` in a distributed system.
@@ -188,7 +182,7 @@ pub enum ControlMsg {
     Directory { dir: Vec<(usize, String)> },
     /// An introduction that a new `Client` sends to all other existing
     /// `Client`s and the server
-    Introduction { address: String, memory: u64 },
+    Introduction { address: String },
     /// A message the `Server` sends to `Client`s to inform them to shut down
     Kill,
 }
