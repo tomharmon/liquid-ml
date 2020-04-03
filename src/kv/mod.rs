@@ -40,7 +40,7 @@ use crate::network::Client;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{Mutex, Notify, RwLock};
 
@@ -97,11 +97,9 @@ pub struct KVStore<T> {
     /// A channel to send blobs of data to a higher level component, in
     /// `liquid-ml` this would be the `Application`
     blob_sender: Sender<Value>,
-    /// The total amount of memory (in `KiB`) this `KVStore` is allowed
+    /// The total amount of memory (in bytes) this `KVStore` is allowed
     /// to keep in its cache
     max_cache_size: u64,
-    /// The current size of the cache
-    current_cache_size: AtomicU64,
 }
 
 /// Represents the kind of messages that can be sent between distributed

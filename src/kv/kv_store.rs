@@ -3,18 +3,22 @@ use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
+use deepsize::DeepSizeOf;
+use log::error;
 use log::info;
 use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::{atomic::AtomicU64, Arc};
+use std::sync::Arc;
 use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify, RwLock};
 
-const MAX_NUM_CACHED_VALUES: usize = 5;
+const MAX_NUM_CACHED_VALUES: usize = 10;
+const BYTES_PER_KIB: f64 = 1024.0;
+const BYTES_PER_GB: f64 = 1_073_741_824.0;
 
 impl<
         T: Serialize
@@ -22,6 +26,7 @@ impl<
             + Sync
             + Send
             + PartialEq
+            + DeepSizeOf
             + 'static,
     > KVStore<T>
 {
@@ -70,10 +75,15 @@ impl<
         .await
         .unwrap();
         let id = { network.read().await.id };
-        let max_cache_size =
-            System::new_with_specifics(RefreshKind::new().with_memory())
-                .get_total_memory()
-                * 0.25 as u64;
+        let memo_info_kind = RefreshKind::new().with_memory();
+        let sys = System::new_with_specifics(memo_info_kind);
+        let total_memory = sys.get_total_memory() as f64;
+        let max_cache_size = total_memory * BYTES_PER_KIB * 0.33;
+        let max_cache_size_in_gb = max_cache_size / BYTES_PER_GB;
+        info!(
+            "KVStore has a max cache size of {} GB",
+            max_cache_size_in_gb
+        );
         let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
@@ -81,8 +91,7 @@ impl<
             internal_notifier: Notify::new(),
             id,
             blob_sender,
-            max_cache_size,
-            current_cache_size: AtomicU64::new(0),
+            max_cache_size: max_cache_size as u64,
         });
         let kv_clone = kv.clone();
         tokio::spawn(async move {
@@ -108,11 +117,8 @@ impl<
 
         let serialized_val = self.get_raw(key).await?;
         let deserialized: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
-        let k = key.clone();
         let v = deserialized.clone();
-        {
-            self.cache.lock().await.put(k, v);
-        }
+        self.add_to_cache(key, v).await?;
         Ok(deserialized)
     }
 
@@ -147,11 +153,8 @@ impl<
             let serialized_val = self.get_raw(key).await?;
             let deserialized: Arc<T> =
                 Arc::new(deserialize(&serialized_val[..])?);
-            let k = key.clone();
             let v = deserialized.clone();
-            {
-                self.cache.lock().await.put(k, v);
-            }
+            self.add_to_cache(key, v).await?;
             Ok(deserialized)
         } else {
             // The data is not supposed to be owned by this node, we must
@@ -305,5 +308,41 @@ impl<
         } else {
             Ok(serialize(&*self.wait_and_get(key).await?)?)
         }
+    }
+
+    async fn add_to_cache(
+        &self,
+        key: &Key,
+        value: Arc<T>,
+    ) -> Result<(), LiquidError> {
+        let k = key.clone();
+        let v_size = value.deep_size_of() as u64;
+        {
+            let mut unlocked = self.cache.lock().await;
+            let mut cache_size = unlocked
+                .iter()
+                .fold(0, |acc, (_, v)| acc + v.deep_size_of())
+                as u64;
+            while cache_size + v_size > self.max_cache_size {
+                let opt_kv = unlocked.pop_lru();
+                match opt_kv {
+                    Some((_, temp)) => {
+                        let temp_size = temp.deep_size_of();
+                        info!(
+                            "Popped cached value of size {} bytes",
+                            temp_size
+                        );
+                        cache_size -= temp_size as u64
+                    }
+                    None => {
+                        error!("Tried to add a DF of size {} to an empty cache with max cache size of {}", v_size, self.max_cache_size);
+                        panic!()
+                    }
+                }
+            }
+            info!("Added value of size {} bytes to cache", v_size);
+            unlocked.put(k, value);
+        }
+        Ok(())
     }
 }

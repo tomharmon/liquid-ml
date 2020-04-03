@@ -8,6 +8,7 @@
 //! manner by implementing the `Rower` trait to perform `map` or `filter`
 //! operations on a `DataFrame`.
 
+use deepsize::DeepSizeOf;
 use serde::{Deserialize, Serialize};
 pub use sorer::{
     dataframe::{Column, Data},
@@ -22,7 +23,7 @@ mod schema;
 
 /// Represents a DataFrame which contains `Data` stored in a columnar format
 /// and a well-defined `Schema`
-#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug, DeepSizeOf)]
 pub struct DataFrame {
     /// The `Schema` of this `DataFrame`
     pub schema: Schema,
@@ -33,7 +34,9 @@ pub struct DataFrame {
 }
 
 /// Represents a `Schema` of a `DataFrame`
-#[derive(Serialize, Deserialize, PartialEq, Clone, Debug, Default)]
+#[derive(
+    Serialize, Deserialize, PartialEq, Clone, Debug, Default, DeepSizeOf,
+)]
 pub struct Schema {
     /// The `DataType`s of this `Schema`
     pub schema: Vec<DataType>,
