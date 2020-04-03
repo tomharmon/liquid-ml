@@ -122,7 +122,10 @@ async fn main() -> Result<(), LiquidError> {
     let result = app.pmap("words", rower).await?;
     match result {
         Some(joined_rower) => {
-            println!("{:#?}", joined_rower.map);
+            let mut sorted: Vec<_> =
+                joined_rower.map.into_iter().map(|(k, v)| (k, v)).collect();
+            sorted.sort_by(|(_, v1), (_, v2)| v1.cmp(v2));
+            println!("{:#?}", sorted);
         }
         None => println!("done"),
     }
