@@ -51,7 +51,7 @@
 //!
 //! Assume that the `Server` is already running at `68.2.3.4:9000`
 //!
-//! Client 1 starts up, waits for Client 2 to connect, and sends 'Hi' to 
+//! Client 1 starts up, waits for Client 2 to connect, and sends 'Hi' to
 //! Client 2 then the program exits
 //!
 //! ```rust,no_run
@@ -82,7 +82,7 @@
 //! ```
 //!
 //! Client 2 starts up, waits to connect to Client 1, and then the message
-//! sent by Client 1 is available on the receiver after it's been sent. The 
+//! sent by Client 1 is available on the receiver after it's been sent. The
 //! message is popped from the queue and printed.
 //!
 //! ```rust,no_run

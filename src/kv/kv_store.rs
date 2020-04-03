@@ -3,25 +3,30 @@ use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
+use deepsize::DeepSizeOf;
+use log::error;
 use log::info;
 use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::sync::{Mutex, Notify, RwLock};
 
-const MAX_NUM_CACHED_VALUES: usize = 5;
+const MAX_NUM_CACHED_VALUES: usize = 10;
+const BYTES_PER_KIB: f64 = 1024.0;
+const BYTES_PER_GB: f64 = 1_073_741_824.0;
 
 impl<
-        T: Clone
-            + Serialize
+        T: Serialize
             + DeserializeOwned
             + Sync
             + Send
             + PartialEq
+            + DeepSizeOf
             + 'static,
     > KVStore<T>
 {
@@ -69,7 +74,16 @@ impl<
         )
         .await
         .unwrap();
-        let id = network.read().await.id;
+        let id = { network.read().await.id };
+        let memo_info_kind = RefreshKind::new().with_memory();
+        let sys = System::new_with_specifics(memo_info_kind);
+        let total_memory = sys.get_total_memory() as f64;
+        let max_cache_size = total_memory * BYTES_PER_KIB * 0.33;
+        let max_cache_size_in_gb = max_cache_size / BYTES_PER_GB;
+        info!(
+            "KVStore has a max cache size of {} GB",
+            max_cache_size_in_gb
+        );
         let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
@@ -77,6 +91,7 @@ impl<
             internal_notifier: Notify::new(),
             id,
             blob_sender,
+            max_cache_size: max_cache_size as u64,
         });
         let kv_clone = kv.clone();
         tokio::spawn(async move {
@@ -95,19 +110,15 @@ impl<
     /// ## Errors
     /// If `key` is not in this `KVStore`s cache or is not owned by this
     /// `KVStore`, then the error `Err(LiquidError::NotPresent)` is returned
-    pub async fn get(&self, key: &Key) -> Result<T, LiquidError> {
+    pub async fn get(&self, key: &Key) -> Result<Arc<T>, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
         }
 
         let serialized_val = self.get_raw(key).await?;
-        let deserialized: T = deserialize(&serialized_val[..])?;
-        {
-            self.cache
-                .lock()
-                .await
-                .put(key.clone(), deserialized.clone());
-        }
+        let deserialized: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
+        let v = deserialized.clone();
+        self.add_to_cache(key, v).await?;
         Ok(deserialized)
     }
 
@@ -130,7 +141,7 @@ impl<
     /// If you do not do that, for example you `await` the second case,
     /// then you will waste a lot of time waiting for the data to be
     /// transferred over the network.
-    pub async fn wait_and_get(&self, key: &Key) -> Result<T, LiquidError> {
+    pub async fn wait_and_get(&self, key: &Key) -> Result<Arc<T>, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
         }
@@ -140,13 +151,10 @@ impl<
                 self.internal_notifier.notified().await;
             }
             let serialized_val = self.get_raw(key).await?;
-            let deserialized: T = deserialize(&serialized_val[..])?;
-            {
-                self.cache
-                    .lock()
-                    .await
-                    .put(key.clone(), deserialized.clone());
-            }
+            let deserialized: Arc<T> =
+                Arc::new(deserialize(&serialized_val[..])?);
+            let v = deserialized.clone();
+            self.add_to_cache(key, v).await?;
             Ok(deserialized)
         } else {
             // The data is not supposed to be owned by this node, we must
@@ -191,13 +199,8 @@ impl<
             self.internal_notifier.notify();
             Ok(opt_old_data)
         } else {
-            {
-                self.network
-                    .write()
-                    .await
-                    .send_msg(key.home, KVMessage::Put(key.clone(), serial))
-                    .await?
-            }
+            let msg = KVMessage::Put(key.clone(), serial);
+            self.network.write().await.send_msg(key.home, msg).await?;
             Ok(None)
         }
     }
@@ -247,47 +250,38 @@ impl<
             let kv_ptr_clone = kv.clone();
             let mut sender_clone = kv_ptr_clone.blob_sender.clone();
             tokio::spawn(async move {
-                info!("Proccessing a message with id: {:#?}", msg.msg_id);
-                match &msg.msg {
+                info!("Processing a message with id: {:#?}", msg.msg_id);
+                match msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond
-                        let x = kv_ptr_clone.wait_and_get_raw(k).await.unwrap();
+                        let v =
+                            kv_ptr_clone.wait_and_get_raw(&k).await.unwrap();
                         {
                             kv_ptr_clone
                                 .network
                                 .write()
                                 .await
-                                .send_msg(
-                                    msg.sender_id,
-                                    KVMessage::Data(k.clone(), x),
-                                )
+                                .send_msg(msg.sender_id, KVMessage::Data(k, v))
                                 .await
                                 .unwrap();
                         }
                     }
                     KVMessage::Data(k, v) => {
+                        let v: Arc<T> = Arc::new(deserialize(&v).unwrap());
                         {
-                            kv_ptr_clone
-                                .cache
-                                .lock()
-                                .await
-                                .put(k.clone(), deserialize(v).unwrap());
+                            kv_ptr_clone.cache.lock().await.put(k, v);
                         }
                         kv_ptr_clone.internal_notifier.notify();
                     }
                     KVMessage::Put(k, v) => {
                         // Note is the home id actually my id should we check?
                         {
-                            kv_ptr_clone
-                                .data
-                                .write()
-                                .await
-                                .insert(k.clone(), v.clone());
+                            kv_ptr_clone.data.write().await.insert(k, v);
                         }
                         kv_ptr_clone.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
-                        sender_clone.send(v.clone()).await.unwrap();
+                        sender_clone.send(v).await.unwrap();
                     }
                 }
             });
@@ -312,7 +306,43 @@ impl<
             }
             Ok(self.get_raw(key).await?)
         } else {
-            Ok(serialize(&self.wait_and_get(key).await?)?)
+            Ok(serialize(&*self.wait_and_get(key).await?)?)
         }
+    }
+
+    async fn add_to_cache(
+        &self,
+        key: &Key,
+        value: Arc<T>,
+    ) -> Result<(), LiquidError> {
+        let k = key.clone();
+        let v_size = value.deep_size_of() as u64;
+        {
+            let mut unlocked = self.cache.lock().await;
+            let mut cache_size = unlocked
+                .iter()
+                .fold(0, |acc, (_, v)| acc + v.deep_size_of())
+                as u64;
+            while cache_size + v_size > self.max_cache_size {
+                let opt_kv = unlocked.pop_lru();
+                match opt_kv {
+                    Some((_, temp)) => {
+                        let temp_size = temp.deep_size_of();
+                        info!(
+                            "Popped cached value of size {} bytes",
+                            temp_size
+                        );
+                        cache_size -= temp_size as u64
+                    }
+                    None => {
+                        error!("Tried to add a DF of size {} to an empty cache with max cache size of {}", v_size, self.max_cache_size);
+                        panic!()
+                    }
+                }
+            }
+            info!("Added value of size {} bytes to cache", v_size);
+            unlocked.put(k, value);
+        }
+        Ok(())
     }
 }
