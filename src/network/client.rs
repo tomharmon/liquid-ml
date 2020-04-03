@@ -46,8 +46,7 @@ impl<
         let (reader, writer) = io::split(server_stream);
         let mut stream = FramedRead::new(reader, MessageCodec::new());
         let mut sink = FramedWrite::new(writer, MessageCodec::new());
-        // Tell the server our address and how much data (in `KiB`) other
-        // Clients are allowed to send us at one time
+        // Tell the server our address
         sink.send(Message::new(
             0,
             0,
