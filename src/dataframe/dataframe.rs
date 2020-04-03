@@ -450,18 +450,18 @@ fn filter_helper<T: Rower>(
     start: usize,
     end: usize,
 ) -> DataFrame {
-    let mut df = DataFrame::new(&df.schema);
+    let mut df2 = DataFrame::new(&df.schema);
     let mut row = Row::new(&df.schema);
     dbg!(start, end);
 
     for i in start..end {
         df.fill_row(i, &mut row).unwrap();
         if r.visit(&row) {
-            df.add_row(&row).unwrap();
+            df2.add_row(&row).unwrap();
         }
     }
 
-    df
+    df2
 }
 
 fn map_helper<T: Rower>(
@@ -470,8 +470,8 @@ fn map_helper<T: Rower>(
     start: usize,
     end: usize,
 ) -> T {
-    println!("hello world");
-    dbg!(start, end);
+    //println!("hello world");
+    //dbg!(start, end);
     let mut row = Row::new(&df.schema);
     // NOTE: IS THIS THE ~10% slower way to do counted loop???? @tom
     for i in start..end {
@@ -617,7 +617,7 @@ mod tests {
         rower = df.map(rower);
         assert_eq!(1000 * 1000 / 4, rower.sum);
         assert_eq!(1000, df.n_rows());
-        assert_eq!(0, 1);
+        //assert_eq!(0, 1);
     }
 
     #[test]
