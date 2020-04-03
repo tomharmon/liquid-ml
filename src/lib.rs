@@ -291,9 +291,9 @@
 //!         }
 //!     }
 //!
-//!     fn join(&mut self, other: &Self) -> Self {
+//!     fn join(mut self, other: Self) -> Self {
 //!         self.sum += other.sum;
-//!         self.clone()
+//!         self
 //!     }
 //! }
 //!

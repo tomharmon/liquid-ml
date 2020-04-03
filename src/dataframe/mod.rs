@@ -21,8 +21,8 @@ mod dataframe;
 mod row;
 mod schema;
 
-/// Represents a DataFrame which contains `Data` stored in a columnar format
-/// and a well-defined `Schema`
+/// Represents a local `DataFrame` which contains `Data` stored in a columnar
+/// format and a well-defined `Schema`
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug, DeepSizeOf)]
 pub struct DataFrame {
     /// The `Schema` of this `DataFrame`
@@ -86,11 +86,10 @@ pub trait Rower {
     /// `DataFrame::filter` to indicate whether a row should be kept.
     fn visit(&mut self, r: &Row) -> bool;
 
-    // TODO: join should take `self` to avoid unnecessary clones
     /// Once traversal of the `DataFrame` is complete the rowers that were
     /// cloned for parallel execution for `DataFrame::pmap` will be joined to
     /// obtain the final result.  There will be one join for each cloned
     /// `Rower`. The original `Rower` will be the last to be called join on,
     /// and that `Rower` will contain the final results.
-    fn join(&mut self, other: &Self) -> Self;
+    fn join(self, other: Self) -> Self;
 }

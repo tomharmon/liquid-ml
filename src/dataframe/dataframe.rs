@@ -376,9 +376,9 @@ impl DataFrame {
         .unwrap();
         let acc = new_rowers.pop().unwrap();
         new_rowers
-            .iter_mut()
+            .into_iter()
             .rev()
-            .fold(acc, |prev, x| x.join(&prev))
+            .fold(acc, |prev, x| x.join(prev))
     }
 
     /// Creates a new `DataFrame` by applying the given `rower` to every row
@@ -426,7 +426,7 @@ impl DataFrame {
         new_dfs
             .into_iter()
             .rev()
-            .fold(acc, |prev, x| x.join(prev).unwrap())
+            .fold(acc, |prev, x| x.combine(prev).unwrap())
     }
 
     /// Consumes this `DataFrame` and the given `other` `DataFrame`, returning
@@ -440,7 +440,7 @@ impl DataFrame {
     ///
     /// # Errors
     /// If this `DataFrame` and `other`'s schema have different `DataType`s
-    pub fn join(mut self, other: Self) -> Result<Self, LiquidError> {
+    pub fn combine(mut self, other: Self) -> Result<Self, LiquidError> {
         if self.get_schema().schema != other.get_schema().schema {
             return Err(LiquidError::TypeMismatch);
         }
@@ -605,9 +605,9 @@ mod tests {
             }
         }
 
-        fn join(&mut self, other: &Self) -> Self {
+        fn join(mut self, other: Self) -> Self {
             self.sum += other.sum;
-            self.clone()
+            self
         }
     }
 
@@ -629,16 +629,16 @@ mod tests {
     }
 
     #[test]
-    fn test_join_err_case() {
+    fn test_combine_err_case() {
         let s = Schema::from(vec![DataType::Int]);
         let df1 = DataFrame::new(&s);
         let s = Schema::from(vec![DataType::Bool]);
         let df2 = DataFrame::new(&s);
-        assert!(df1.join(df2).is_err());
+        assert!(df1.combine(df2).is_err());
     }
 
     #[test]
-    fn test_join() {
+    fn test_combine() {
         let s = Schema::from(vec![]);
         let mut df1 = DataFrame::new(&s);
         let mut df2 = DataFrame::new(&s);
@@ -650,14 +650,14 @@ mod tests {
         let col4 = Column::Bool(vec![Some(true), Some(true), Some(true)]);
         df2.add_column(col3, None).unwrap();
         df2.add_column(col4, None).unwrap();
-        let res = df1.join(df2);
+        let res = df1.combine(df2);
         assert!(res.is_ok());
-        let joined = res.unwrap();
+        let combined = res.unwrap();
         let mut res_schema = Schema::from(vec![DataType::Int, DataType::Bool]);
         *res_schema.col_names.get_mut(0).unwrap() = Some("col1".to_string());
-        assert_eq!(joined.get_schema(), &res_schema);
+        assert_eq!(combined.get_schema(), &res_schema);
         let r = PosIntSummer { sum: 0 };
-        assert_eq!(joined.map(r).sum, 21);
+        assert_eq!(combined.map(r).sum, 21);
     }
 
     #[test]

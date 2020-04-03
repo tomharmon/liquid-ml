@@ -49,7 +49,7 @@ impl Rower for WordCounter {
         }
     }
 
-    fn join(&mut self, other: &Self) -> Self {
+    fn join(mut self, other: Self) -> Self {
         for (k, v) in other.map.iter() {
             match self.map.get_mut(k) {
                 Some(num_occurences) => *num_occurences += v,
@@ -58,7 +58,7 @@ impl Rower for WordCounter {
                 }
             }
         }
-        self.clone()
+        self
     }
 }
 

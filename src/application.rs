@@ -139,7 +139,7 @@ impl Application {
                 } else {
                     let mut blob = self.blob_receiver.recv().await.unwrap();
                     let external_rower: R = deserialize(&blob[..])?;
-                    res = res.join(&external_rower);
+                    res = res.join(external_rower);
                     if self.node_id != 1 {
                         blob = serialize(&res)?;
                         self.kv.send_blob(self.node_id - 1, blob).await?;
