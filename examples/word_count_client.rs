@@ -95,7 +95,7 @@ async fn main() -> Result<(), LiquidError> {
     let mut app =
         Application::new(&opts.my_address, &opts.server_address, num_nodes)
             .await?;
-    let file_name = "examples/hamlet.txt";
+    let file_name = "examples/100k.txt";
 
     let file = fs::metadata(&file_name).unwrap();
     let f: File = File::open(&file_name).unwrap();
