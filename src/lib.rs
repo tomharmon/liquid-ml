@@ -224,8 +224,7 @@
 //! with `get`, `wait_and_get`, `put`, and `send_blob`. We also implemented a
 //! method for processing messages (`process_messages`). See their documentation
 //! for further details. The `KVStore` implementation is in a close to
-//! completed state. There a few TODOs regarding cache management and graceful
-//! shutdown of the `process_messages` loop.
+//! completed state.
 //!
 //! ## DataFrame
 //! The `DataFrame` and supporting classes loosely implement the management
