@@ -64,8 +64,7 @@ async fn main() -> Result<(), LiquidError> {
         Some(x) => println!("the sum is : {}", x.sum),
     }
 
-    let df =
-        DataFrame::from_sor("tests/distributed.sor".to_string(), 0, 1000000);
+    let df = DataFrame::from_sor("tests/distributed.sor", 0, 1000000);
     let r2 = df.pmap(IntSummer { sum: 0 });
     println!("summing locally yields: {}", r2.sum);
     let r3 = df.map(IntSummer { sum: 0 });

@@ -258,7 +258,7 @@
 //! ```rust
 //! use liquid_ml::dataframe::DataFrame;
 //!
-//! let df = DataFrame::from_sor("tests/test.sor".to_string(), 0, 1000);
+//! let df = DataFrame::from_sor("tests/test.sor", 0, 1000);
 //! assert_eq!(df.n_cols(), 4);
 //! assert_eq!(df.n_rows(), 2);
 //! ```

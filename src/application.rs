@@ -92,11 +92,7 @@ impl Application {
         reader.read_until(b'\n', &mut buffer).unwrap();
         size += buffer.len() as u64 + 1;
 
-        let df = DataFrame::from_sor(
-            String::from(file_name),
-            from as usize,
-            size as usize,
-        );
+        let df = DataFrame::from_sor(file_name, from as usize, size as usize);
         let key = Key::new(df_name, app.node_id);
         app.kv.put(&key, df).await?;
         Ok(app)
