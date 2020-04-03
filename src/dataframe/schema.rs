@@ -63,22 +63,15 @@ impl Schema {
 
     /// Given a column name, returns its index
     pub fn col_idx(&self, col_name: &str) -> Option<usize> {
-        Schema::get_idx_of_optional_name(&self.col_names, col_name)
+        self.col_names.iter().position(|n| match n {
+            Some(name) => col_name == name,
+            None => false,
+        })
     }
 
     /// The number of columns in this Schema.
     pub fn width(&self) -> usize {
         self.col_names.len()
-    }
-
-    fn get_idx_of_optional_name(
-        names: &[Option<String>],
-        name: &str,
-    ) -> Option<usize> {
-        names.iter().position(|n| match n {
-            Some(col_name) => col_name == name,
-            None => false,
-        })
     }
 
     fn char_to_data_type(c: char) -> DataType {

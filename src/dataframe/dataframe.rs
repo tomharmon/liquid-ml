@@ -5,6 +5,7 @@ use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema, DataType};
 use std::cmp::Ordering;
+use std::convert::TryInto;
 
 use crossbeam_utils::thread;
 
@@ -97,22 +98,22 @@ impl DataFrame {
                 match col {
                     Column::Bool(mut x) => {
                         let nones = vec![None; diff];
-                        x.extend_from_slice(&nones);
+                        x.extend(nones.into_iter());
                         self.data.push(Column::Bool(x))
                     }
                     Column::Int(mut x) => {
                         let nones = vec![None; diff];
-                        x.extend_from_slice(&nones);
+                        x.extend(nones.into_iter());
                         self.data.push(Column::Int(x))
                     }
                     Column::Float(mut x) => {
                         let nones = vec![None; diff];
-                        x.extend_from_slice(&nones);
+                        x.extend(nones.into_iter());
                         self.data.push(Column::Float(x))
                     }
                     Column::String(mut x) => {
                         let nones = vec![None; diff];
-                        x.extend_from_slice(&nones);
+                        x.extend(nones.into_iter());
                         self.data.push(Column::String(x))
                     }
                 }
@@ -326,8 +327,10 @@ impl DataFrame {
         Ok(())
     }
 
-    /// Applies the given `rower` sequentially to every row in this `DataFrame`.
+    /// Applies the given `rower` synchronously to every row in this
+    /// `DataFrame`.
     pub fn map<T: Rower>(&self, rower: T) -> T {
+        dbg!("wtf");
         map_helper(self, rower, 0, self.n_rows())
     }
 
@@ -365,8 +368,14 @@ impl DataFrame {
     }
 
     /// Create a new `DataFrame`, constructed from rows for which the given
-    /// `Rower` returned true from its `accept` method.
-    pub fn filter<T: Rower>(&self, r: &mut T) -> Self {
+    /// `Rower` returned true from its `accept` method. Is run synchronously.
+    pub fn filter<T: Rower>(&self, rower: &mut T) -> Self {
+        filter_helper(self, rower, 0, self.n_rows())
+    }
+
+    /// Create a new `DataFrame`, constructed from rows for which the given
+    /// `Rower` returned true from its `accept` method. Is run synchronously.
+    pub fn pfilter<T: Rower>(&self, r: &mut T) -> Self {
         let mut df = DataFrame::new(&self.schema);
         let mut row = Row::new(&self.schema);
 
@@ -378,6 +387,46 @@ impl DataFrame {
         }
 
         df
+    }
+
+    /// Consumes this `DataFrame` and the given `other` `DataFrame`, returning
+    /// a combined `DataFrame` if successful.
+    ///
+    /// - The columns names and the number of threads (for `pmap`/`pfilter`)
+    ///   for the resulting `DataFrame` are from this `DataFrame` and the
+    ///   `other` column names and `n_threads` are ignored
+    /// - The data of the `other` DataFrame is appended to the data of this
+    ///   DataFrame
+    ///
+    /// # Errors
+    /// If this `DataFrame` and `other`'s schema have different `DataType`s
+    pub fn join(mut self, other: Self) -> Result<Self, LiquidError> {
+        if self.get_schema().schema != other.get_schema().schema {
+            return Err(LiquidError::TypeMismatch);
+        }
+
+        for (col_idx, col) in other.data.into_iter().enumerate() {
+            match self.data.get_mut(col_idx).unwrap() {
+                Column::Bool(result_col) => {
+                    let x: Vec<Option<bool>> = col.try_into().unwrap();
+                    result_col.extend(x.into_iter())
+                }
+                Column::Int(result_col) => {
+                    let x: Vec<Option<i64>> = col.try_into().unwrap();
+                    result_col.extend(x.into_iter())
+                }
+                Column::Float(result_col) => {
+                    let x: Vec<Option<f64>> = col.try_into().unwrap();
+                    result_col.extend(x.into_iter())
+                }
+                Column::String(result_col) => {
+                    let x: Vec<Option<String>> = col.try_into().unwrap();
+                    result_col.extend(x.into_iter())
+                }
+            }
+        }
+
+        Ok(self)
     }
 
     /// Return the number of rows in this `DataFrame`.
@@ -395,12 +444,34 @@ impl DataFrame {
     }
 }
 
+fn filter_helper<T: Rower>(
+    df: &DataFrame,
+    r: &mut T,
+    start: usize,
+    end: usize,
+) -> DataFrame {
+    let mut df = DataFrame::new(&df.schema);
+    let mut row = Row::new(&df.schema);
+    dbg!(start, end);
+
+    for i in start..end {
+        df.fill_row(i, &mut row).unwrap();
+        if r.visit(&row) {
+            df.add_row(&row).unwrap();
+        }
+    }
+
+    df
+}
+
 fn map_helper<T: Rower>(
     df: &DataFrame,
     mut rower: T,
     start: usize,
     end: usize,
 ) -> T {
+    println!("hello world");
+    dbg!(start, end);
     let mut row = Row::new(&df.schema);
     // NOTE: IS THIS THE ~10% slower way to do counted loop???? @tom
     for i in start..end {
@@ -521,17 +592,47 @@ mod tests {
     }
 
     #[test]
+    fn test_join_err_case() {
+        let s = Schema::from(vec![DataType::Int]);
+        let df1 = DataFrame::new(&s);
+        let s = Schema::from(vec![DataType::Bool]);
+        let df2 = DataFrame::new(&s);
+        assert!(df1.join(df2).is_err());
+    }
+
+    #[test]
+    fn test_join() {
+        let s = Schema::from(vec![DataType::Int]);
+        let df1 = DataFrame::new(&s);
+        let df2 = DataFrame::new(&s);
+        let res = df1.join(df2);
+        assert!(res.is_ok());
+    }
+
+    #[test]
     fn test_map() {
+        println!("uhhh");
         let df = init();
         let mut rower = PosIntSummer { sum: 0 };
         rower = df.map(rower);
         assert_eq!(1000 * 1000 / 4, rower.sum);
         assert_eq!(1000, df.n_rows());
+        assert_eq!(0, 1);
     }
 
     #[test]
     fn test_pmap() {
         let df = init();
+        let mut rower = PosIntSummer { sum: 0 };
+        rower = df.pmap(rower);
+        assert_eq!(1000 * 1000 / 4, rower.sum);
+        assert_eq!(1000, df.n_rows());
+    }
+
+    #[test]
+    fn test_pmap_w_1_thread() {
+        let mut df = init();
+        df.n_threads = 1;
         let mut rower = PosIntSummer { sum: 0 };
         rower = df.pmap(rower);
         assert_eq!(1000 * 1000 / 4, rower.sum);
