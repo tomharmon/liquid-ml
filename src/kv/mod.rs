@@ -80,6 +80,7 @@ impl Key {
 /// Internally `KVStore`s store their data in memory as serialized blobs
 /// (`Vec<u8>`). The `KVStore` caches deserialized `Value`s into their type
 /// `T` on a least-recently used basis.
+#[derive(Debug)]
 pub struct KVStore<T> {
     /// The data owned by this `KVStore`
     data: RwLock<HashMap<Key, Value>>,

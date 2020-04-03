@@ -118,6 +118,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 /// A connection to another `Client`, used for sending directed communication
+#[derive(Debug)]
 pub(crate) struct Connection<T> {
     /// The `IP:Port` of another `Client` that we're connected to
     pub(crate) address: String,
@@ -130,6 +131,7 @@ type FramedSink<T> = FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>;
 
 /// Represents a `Client` node in a distributed system that is generic for type
 /// `T`, where `T` is the types of messages that can be sent between `Client`s
+#[derive(Debug)]
 pub struct Client<T> {
     /// The `id` of this `Client`, assigned by the `Server` on startup
     pub id: usize,
