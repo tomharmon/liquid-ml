@@ -29,17 +29,17 @@ pub struct Application {
     pub node_id: usize,
     /// A receiver for blob messages that can b processed by the user
     pub blob_receiver: Receiver<Value>,
-    /// the number of nodes in this network
-    /// NOTE: Currently panics if the network is inconsistent with this network
+    /// The number of nodes in this network
+    /// NOTE: Panics if `num_nodes` is inconsistent with this network
     num_nodes: usize,
     /// A notifier that gets notified when the server has sent a kill message
     pub kill_notifier: Arc<Notify>,
 }
 
 impl Application {
-    /// Create a new liquid_ml application
-    /// Needs the address at which the server is listening and its own address along with how many
-    /// nodes are on this network
+    /// Create a new `liquid_ml` application that runs at `my_addr` and will
+    /// wait to connect to `num_nodes` nodes after registering with the
+    /// `Server` at the `server_addr` before returning.
     pub async fn new(
         my_addr: &str,
         server_addr: &str,
@@ -67,7 +67,8 @@ impl Application {
     }
 
     /// Create a new application and split the given SoR file across all the
-    /// nodes in the network.
+    /// nodes in the network. Assigns a key with the name `df_name` to
+    /// the `DataFrame` chunk for this node.
     ///
     /// Note: assumes the entire SoR file is present on all nodes
     pub async fn from_sor(
@@ -98,15 +99,27 @@ impl Application {
         Ok(app)
     }
 
+    /// Perform a distributed map operation on the `DataFrame` associated with
+    /// the `df_name` with the given `rower`. Returns `Some(rower)` (of the
+    /// joined results) if the `node_id` of this `Application` is `1`, and
+    /// `None` otherwise.
+    ///
+    /// A local `pmap` is used on each node to map over that nodes' chunk.
+    /// By default, each node will use the number of threads available on that
+    /// machine.
+    ///
     /// NOTE:
     /// There is an important design decision that comes with a distinct trade
     /// off here. The trade off is:
     /// 1. Join the last node with the next one until you get to the end. This
     ///    has reduced memory requirements but a performance impact because
     ///    of the synchronous network calls
-    /// 2. Join all nodes with one node. This has increased memory requirements
-    ///    but greater performance because all nodes can asynchronously send
-    ///    to the joiner at one time.
+    /// 2. Join all nodes with one node by sending network messages
+    ///    concurrently to the final node. This has increased memory
+    ///    requirements and greater complexity but greater performance because
+    ///    all nodes can asynchronously send to one node at the same time.
+    ///
+    /// This implementation went with option 1 for simplicity reasons
     pub async fn pmap<R>(
         &mut self,
         df_name: &str,
