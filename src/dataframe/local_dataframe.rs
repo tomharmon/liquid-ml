@@ -393,7 +393,7 @@ impl LocalDataFrame {
     /// sequentially in this `DataFrame` and adding rows to the new `DataFrame`
     /// for rows for which the given `rower` return true from its `accept`
     /// method. The `rower` is cloned `n_threads` times, according to the
-    /// value of `n_threads` for this `DataFrame`. Each `rower` gets operates
+    /// value of `n_threads` for this `DaqtaFrame`. Each `rower` gets operates
     /// on a chunk of this `DataFrame` and are run in parallel.
     ///
     /// `n_threads` defaults to the number of cores available on this machine.
