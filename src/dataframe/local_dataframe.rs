@@ -1,5 +1,5 @@
 //! Defines functionality for the `DataFrame`
-use crate::dataframe::{DataFrame, Row, Rower, Schema};
+use crate::dataframe::{LocalDataFrame, Row, Rower, Schema};
 use crate::error::LiquidError;
 use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
@@ -10,7 +10,7 @@ use std::convert::TryInto;
 use crossbeam_utils::thread;
 
 /// An interface for a `DataFrame`, inspired by those used in `pandas` and `R`.
-impl DataFrame {
+impl LocalDataFrame {
     /// Creates a new `DataFrame` from the given file, only reads `len` bytes
     /// starting at the given byte offset `from`.
     pub fn from_sor(file_name: &str, from: usize, len: usize) -> Self {
@@ -18,7 +18,7 @@ impl DataFrame {
         let n_threads = num_cpus::get();
         let data =
             from_file(file_name, schema.schema.clone(), from, len, n_threads);
-        DataFrame {
+        LocalDataFrame {
             schema,
             data,
             n_threads,
@@ -43,7 +43,7 @@ impl DataFrame {
             col_names: schema.col_names.clone(),
         };
 
-        DataFrame {
+        LocalDataFrame {
             schema,
             data,
             n_threads: num_cpus::get(),
@@ -485,12 +485,12 @@ impl DataFrame {
 }
 
 fn filter_helper<T: Rower>(
-    df: &DataFrame,
+    df: &LocalDataFrame,
     r: &mut T,
     start: usize,
     end: usize,
-) -> DataFrame {
-    let mut df2 = DataFrame::new(&df.schema);
+) -> LocalDataFrame {
+    let mut df2 = LocalDataFrame::new(&df.schema);
     let mut row = Row::new(&df.schema);
 
     for i in start..end {
@@ -504,7 +504,7 @@ fn filter_helper<T: Rower>(
 }
 
 fn map_helper<T: Rower>(
-    df: &DataFrame,
+    df: &LocalDataFrame,
     mut rower: T,
     start: usize,
     end: usize,
@@ -518,14 +518,14 @@ fn map_helper<T: Rower>(
     rower
 }
 
-impl From<Column> for DataFrame {
+impl From<Column> for LocalDataFrame {
     /// Construct a new `DataFrame` with the given `column`.
     fn from(column: Column) -> Self {
-        DataFrame::from(vec![column])
+        LocalDataFrame::from(vec![column])
     }
 }
 
-impl From<Vec<Column>> for DataFrame {
+impl From<Vec<Column>> for LocalDataFrame {
     /// Construct a new `DataFrame` with the given `columns`.
     fn from(data: Vec<Column>) -> Self {
         let mut schema = Schema::new();
@@ -546,7 +546,7 @@ impl From<Vec<Column>> for DataFrame {
             };
         }
         let n_threads = num_cpus::get();
-        DataFrame {
+        LocalDataFrame {
             schema,
             n_threads,
             data,
@@ -554,7 +554,7 @@ impl From<Vec<Column>> for DataFrame {
     }
 }
 
-impl From<Data> for DataFrame {
+impl From<Data> for LocalDataFrame {
     /// Construct a new `DataFrame` with the given `scalar` value.
     fn from(scalar: Data) -> Self {
         let c = match scalar {
@@ -564,11 +564,11 @@ impl From<Data> for DataFrame {
             Data::String(x) => Column::String(vec![Some(x)]),
             Data::Null => panic!("Can't make a DataFrame from a null value"),
         };
-        DataFrame::from(c)
+        LocalDataFrame::from(c)
     }
 }
 
-impl std::fmt::Display for DataFrame {
+impl std::fmt::Display for LocalDataFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for i in 0..self.n_rows() {
             for j in 0..self.n_cols() {
@@ -611,10 +611,10 @@ mod tests {
         }
     }
 
-    fn init() -> DataFrame {
+    fn init() -> LocalDataFrame {
         let s = Schema::from(vec![DataType::Int]);
         let mut r = Row::new(&s);
-        let mut df = DataFrame::new(&s);
+        let mut df = LocalDataFrame::new(&s);
 
         for i in 0..1000 {
             if i % 2 == 0 {
@@ -631,17 +631,17 @@ mod tests {
     #[test]
     fn test_combine_err_case() {
         let s = Schema::from(vec![DataType::Int]);
-        let df1 = DataFrame::new(&s);
+        let df1 = LocalDataFrame::new(&s);
         let s = Schema::from(vec![DataType::Bool]);
-        let df2 = DataFrame::new(&s);
+        let df2 = LocalDataFrame::new(&s);
         assert!(df1.combine(df2).is_err());
     }
 
     #[test]
     fn test_combine() {
         let s = Schema::from(vec![]);
-        let mut df1 = DataFrame::new(&s);
-        let mut df2 = DataFrame::new(&s);
+        let mut df1 = LocalDataFrame::new(&s);
+        let mut df2 = LocalDataFrame::new(&s);
         let col1 = Column::Int(vec![Some(1), Some(2), Some(3)]);
         let col2 = Column::Bool(vec![Some(false), Some(false), Some(false)]);
         df1.add_column(col1, Some("col1".to_string())).unwrap();

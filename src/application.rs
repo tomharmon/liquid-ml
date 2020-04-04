@@ -9,7 +9,7 @@
 //! Detailed examples that use the application can be found in the examples directory of this
 //! crate.
 
-use crate::dataframe::{DataFrame, Rower};
+use crate::dataframe::{LocalDataFrame, Rower};
 use crate::error::LiquidError;
 use crate::kv::{KVStore, Key, Value};
 use bincode::{deserialize, serialize};
@@ -24,7 +24,7 @@ use tokio::sync::{mpsc, mpsc::Receiver, Notify};
 /// Represents an application
 pub struct Application {
     /// A pointer to the KVStore that stores all the data for the application
-    pub kv: Arc<KVStore<DataFrame>>,
+    pub kv: Arc<KVStore<LocalDataFrame>>,
     /// The id of this node, assigned by the registration server
     pub node_id: usize,
     /// A receiver for blob messages that can b processed by the user
