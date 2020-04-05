@@ -93,7 +93,7 @@ impl Application {
         reader.read_until(b'\n', &mut buffer).unwrap();
         size += buffer.len() as u64 + 1;
 
-        let df = DataFrame::from_sor(file_name, from as usize, size as usize);
+        let df = LocalDataFrame::from_sor(file_name, from as usize, size as usize);
         let key = Key::new(df_name, app.node_id);
         app.kv.put(&key, df).await?;
         Ok(app)
@@ -159,9 +159,10 @@ impl Application {
     pub async fn run<F, Fut>(self, f: F)
     where
         Fut: Future<Output = ()>,
-        F: FnOnce(Arc<KVStore<DataFrame>>) -> Fut,
+        F: FnOnce(Arc<KVStore<LocalDataFrame>>) -> Fut,
     {
         f(self.kv.clone()).await;
         self.kill_notifier.notified().await;
     }
 }
+

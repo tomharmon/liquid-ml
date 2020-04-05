@@ -172,20 +172,6 @@ impl DistributedDataFrame {
     }
 }
 
-impl From<Column> for DistributedDataFrame {
-    /// Construct a new `DataFrame` with the given `column`.
-    fn from(column: Column) -> Self {
-        unimplemented!()
-    }
-}
-
-impl From<Vec<Column>> for DistributedDataFrame {
-    /// Construct a new `DataFrame` with the given `columns`.
-    fn from(data: Vec<Column>) -> Self {
-                unimplemented!()
-    }
-}
-
 fn get_len(data: &Vec<Column>) -> usize {
     match data.get(0) {
             None => 0,
@@ -196,11 +182,4 @@ fn get_len(data: &Vec<Column>) -> usize {
                 Column::String(c) => c.len(),
             }
         }
-}
-
-impl From<Data> for DistributedDataFrame {
-    /// Construct a new `DataFrame` with the given `scalar` value.
-    fn from(scalar: Data) -> Self {
-        unimplemented!()
-    }
 }
