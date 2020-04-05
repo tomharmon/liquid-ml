@@ -5,13 +5,11 @@ use crate::dataframe::{
 use crate::error::LiquidError;
 use crate::kv::{KVStore, Key};
 use bincode::{deserialize, serialize};
-use crossbeam_utils::thread;
-use num_cpus;
 use serde::{de::DeserializeOwned, Serialize};
-use sorer::dataframe::{from_file, Column, Data};
-use sorer::schema::{infer_schema, DataType};
-use std::cmp::Ordering;
-use std::convert::TryInto;
+use sorer::dataframe::{Column, Data};
+//use sorer::schema::{infer_schema, DataType};
+use tokio::sync::{Mutex, mpsc::Receiver};
+use std::sync::Arc;
 
 const ROW_COUNT_PER_KEY: usize = 1000;
 
@@ -27,7 +25,48 @@ impl DistributedDataFrame {
     ) -> Self {
         unimplemented!()
     }
+    
+    pub async fn new(mut data: Vec<Column>, 
+        kv: Arc<Mutex<KVStore<LocalDataFrame>>>, 
+        name: String, 
+        num_nodes: usize, 
+        receiver: Arc<Mutex<Receiver<Vec<u8>>>>) -> Result<Self, LiquidError> {
+        let mut to_process = get_len(&data); 
+        let mut chunk_idx = 0;
+        let mut keys = Vec::new();
+        let mut schema = Schema::new();
+        while to_process > 0 {
+            let mut new_data = Vec::new();
+            for c in &mut data {
+                let new_c = match c {
+                    Column::Int(i) => Column::Int(i.drain(0..ROW_COUNT_PER_KEY).collect()),
+                    Column::Bool(i) => Column::Bool(i.drain(0..ROW_COUNT_PER_KEY).collect()),
+                    Column::Float(i) => Column::Float(i.drain(0..ROW_COUNT_PER_KEY).collect()),
+                    Column::String(i) => Column::String(i.drain(0..ROW_COUNT_PER_KEY).collect()),
+                };
+                new_data.push(new_c);
+            }
+            let ldf = LocalDataFrame::from(new_data);
+            let key = Key::new(&format!("{}_{}", name, chunk_idx), (chunk_idx % num_nodes) + 1);
+            schema = ldf.get_schema().clone();
+            { kv.lock().await.put(&key, ldf).await?; }
+            keys.push(key);
+            chunk_idx+=1;
+            to_process = get_len(&data);
+        }
 
+        let node_id = { kv.lock().await.id };
+        
+        Ok(DistributedDataFrame {
+            schema,
+            receiver,
+            data: keys,
+            kv,
+            num_nodes,
+            node_id, 
+        })
+
+    }
     /// Obtains a reference to this `DataFrame`s schema.
     pub fn get_schema(&self) -> &Schema {
         &self.schema
@@ -96,7 +135,7 @@ impl DistributedDataFrame {
     /// This implementation went with option 1 for simplicity reasons
     pub async fn map<T: Rower + Clone + Send + Serialize + DeserializeOwned>(
         &self,
-        rower: T,
+        mut rower: T,
     ) -> Result<Option<T>, LiquidError> {
         let my_keys: Vec<&Key> = self
             .data
@@ -143,8 +182,20 @@ impl From<Column> for DistributedDataFrame {
 impl From<Vec<Column>> for DistributedDataFrame {
     /// Construct a new `DataFrame` with the given `columns`.
     fn from(data: Vec<Column>) -> Self {
-        unimplemented!()
+                unimplemented!()
     }
+}
+
+fn get_len(data: &Vec<Column>) -> usize {
+    match data.get(0) {
+            None => 0,
+            Some(x) => match x {
+                Column::Int(c) => c.len(),
+                Column::Float(c) => c.len(),
+                Column::Bool(c) => c.len(),
+                Column::String(c) => c.len(),
+            }
+        }
 }
 
 impl From<Data> for DistributedDataFrame {

@@ -47,8 +47,6 @@ pub struct DistributedDataFrame {
     kv: Arc<Mutex<KVStore<LocalDataFrame>>>,
     /// Blob Receiver for sending sharing rowers between dataframes.
     receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
-    /// Number of threads for this computer
-    pub n_threads: usize,
     /// Keys that point to data in different nodes.
     pub data: Vec<Key>,
     /// The id of this node
