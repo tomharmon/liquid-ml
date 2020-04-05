@@ -8,7 +8,7 @@
 //!
 //! Detailed examples that use the application can be found in the examples directory of this
 //! crate.
-
+/*
 use crate::dataframe::{LocalDataFrame, Rower};
 use crate::error::LiquidError;
 use crate::kv::{KVStore, Key, Value};
@@ -165,4 +165,5 @@ impl Application {
         self.kill_notifier.notified().await;
     }
 }
+*/
 

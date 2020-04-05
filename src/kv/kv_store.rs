@@ -60,7 +60,7 @@ impl<
         kill_notifier: Arc<Notify>,
         num_clients: usize,
         wait_for_all_clients: bool,
-    ) -> Arc<Self> {
+    ) -> Arc<Mutex<Self>> {
         // the Receiver acts as our queue of messages from the network, and
         // the network uses the Sender to add messages to our queue
         let (sender, receiver) = mpsc::channel(100);
@@ -84,7 +84,7 @@ impl<
             "KVStore has a max cache size of {} GB",
             max_cache_size_in_gb
         );
-        let kv = Arc::new(KVStore {
+        let kv = Arc::new(Mutex::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
             network,
@@ -92,7 +92,7 @@ impl<
             id,
             blob_sender,
             max_cache_size: max_cache_size as u64,
-        });
+        }));
         let kv_clone = kv.clone();
         tokio::spawn(async move {
             KVStore::process_messages(kv_clone, receiver).await.unwrap();
@@ -242,15 +242,16 @@ impl<
     ///    - `Blob` message: send the data up a higher level similar to how
     ///       the `Client` processes messages
     pub(crate) async fn process_messages(
-        kv: Arc<KVStore<T>>,
+        kv: Arc<Mutex<KVStore<T>>>,
         mut receiver: Receiver<Message<KVMessage>>,
     ) -> Result<(), LiquidError> {
         loop {
             let msg = receiver.recv().await.unwrap();
             let kv_ptr_clone = kv.clone();
-            let mut sender_clone = kv_ptr_clone.blob_sender.clone();
+            let mut sender_clone = { kv_ptr_clone.lock().await.blob_sender.clone() };
             tokio::spawn(async move {
                 info!("Processing a message with id: {:#?}", msg.msg_id);
+                let kv_ptr_clone = kv_ptr_clone.lock().await;
                 match msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond

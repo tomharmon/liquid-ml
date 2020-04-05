@@ -17,54 +17,65 @@ const ROW_COUNT_PER_KEY: usize = 1000;
 impl DistributedDataFrame {
     /// Creates a new `DataFrame` from the given file, only reads `len` bytes
     /// starting at the given byte offset `from`.
-    pub fn from_sor(
+    /*pub fn from_sor(
         file_name: &str,
         from: usize,
         len: usize,
         kv: KVStore<LocalDataFrame>,
     ) -> Self {
         unimplemented!()
-    }
+    }*/
     
     pub async fn new(mut data: Vec<Column>, 
         kv: Arc<Mutex<KVStore<LocalDataFrame>>>, 
         name: String, 
         num_nodes: usize, 
         receiver: Arc<Mutex<Receiver<Vec<u8>>>>) -> Result<Self, LiquidError> {
-        let mut to_process = get_len(&data); 
-        let mut chunk_idx = 0;
-        let mut keys = Vec::new();
-        let mut schema = Schema::new();
-        while to_process > 0 {
-            let mut new_data = Vec::new();
-            for c in &mut data {
-                let new_c = match c {
-                    Column::Int(i) => Column::Int(i.drain(0..ROW_COUNT_PER_KEY).collect()),
-                    Column::Bool(i) => Column::Bool(i.drain(0..ROW_COUNT_PER_KEY).collect()),
-                    Column::Float(i) => Column::Float(i.drain(0..ROW_COUNT_PER_KEY).collect()),
-                    Column::String(i) => Column::String(i.drain(0..ROW_COUNT_PER_KEY).collect()),
-                };
-                new_data.push(new_c);
-            }
-            let ldf = LocalDataFrame::from(new_data);
-            let key = Key::new(&format!("{}_{}", name, chunk_idx), (chunk_idx % num_nodes) + 1);
-            schema = ldf.get_schema().clone();
-            { kv.lock().await.put(&key, ldf).await?; }
-            keys.push(key);
-            chunk_idx+=1;
-            to_process = get_len(&data);
-        }
-
         let node_id = { kv.lock().await.id };
-        
-        Ok(DistributedDataFrame {
-            schema,
-            receiver,
-            data: keys,
-            kv,
-            num_nodes,
-            node_id, 
-        })
+        if node_id == 1 {
+            let mut to_process = get_len(&data); 
+            let mut chunk_idx = 0;
+            let mut keys = Vec::new();
+            let mut schema = Schema::new();
+            while to_process > 0 {
+                let mut new_data = Vec::new();
+                for c in &mut data {
+                    let new_c = match c {
+                        Column::Int(i) => Column::Int(i.drain(0..ROW_COUNT_PER_KEY).collect()),
+                        Column::Bool(i) => Column::Bool(i.drain(0..ROW_COUNT_PER_KEY).collect()),
+                        Column::Float(i) => Column::Float(i.drain(0..ROW_COUNT_PER_KEY).collect()),
+                        Column::String(i) => Column::String(i.drain(0..ROW_COUNT_PER_KEY).collect()),
+                    };
+                    new_data.push(new_c);
+                }
+                let ldf = LocalDataFrame::from(new_data);
+                let key = Key::new(&format!("{}_{}", name, chunk_idx), (chunk_idx % num_nodes) + 1);
+                schema = ldf.get_schema().clone();
+                { kv.lock().await.put(&key, ldf).await?; }
+                keys.push(key);
+                chunk_idx+=1;
+                to_process = get_len(&data);
+            }
+            
+            let build = serialize(&(keys.clone(), schema.clone()))?; 
+            for i in 2..num_nodes {
+                kv.lock().await.send_blob(i, build.clone()).await?;
+            }
+            
+            Ok(DistributedDataFrame {
+                schema,
+                receiver,
+                data: keys,
+                kv,
+                num_nodes,
+                node_id, 
+            })
+         } else {
+            let (data, schema) = deserialize(&receiver.lock().await.recv().await.unwrap())?;
+            Ok(DistributedDataFrame {
+                data,schema, kv, num_nodes, node_id, receiver
+            })
+        }
 
     }
     /// Obtains a reference to this `DataFrame`s schema.
