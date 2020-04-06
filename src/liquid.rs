@@ -70,6 +70,12 @@ impl Application {
         self.df.insert(name.to_string(), ddf);
         Ok(())
     }
+
+    pub async fn create_sor(&mut self, name: &str, file_name: &str) -> Result<(), LiquidError> {
+        let ddf = DistributedDataFrame::from_sor(file_name, self.kv.clone(), name.to_string(), self.num_nodes, self.blob_receiver.clone()).await?;
+        self.df.insert(name.to_string(), ddf);
+        Ok(())
+    }
     
     pub async fn pmap<T: Rower + Serialize + Clone + DeserializeOwned + Send>(&self, name: &str, rower: T) -> Result<Option<T>, LiquidError> {
         let df = match self.df.get(name) {

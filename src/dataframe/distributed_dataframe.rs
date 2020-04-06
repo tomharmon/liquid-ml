@@ -6,25 +6,90 @@ use crate::error::LiquidError;
 use crate::kv::{KVStore, Key};
 use bincode::{deserialize, serialize};
 use serde::{de::DeserializeOwned, Serialize};
-use sorer::dataframe::{Column, Data};
+use sorer::dataframe::{Column, Data, from_file};
 //use sorer::schema::{infer_schema, DataType};
 use tokio::sync::{Mutex, mpsc::Receiver};
 use std::sync::Arc;
 
 const ROW_COUNT_PER_KEY: usize = 1000;
+const BYTES_PER_GB: usize = 1_000;//_741_824;
 
 /// An interface for a `DataFrame`, inspired by those used in `pandas` and `R`.
 impl DistributedDataFrame {
-    /// Creates a new `DataFrame` from the given file, only reads `len` bytes
-    /// starting at the given byte offset `from`.
-    /*pub fn from_sor(
+    /// Creates a new `DataFrame` from the given file
+    pub async fn from_sor(
         file_name: &str,
-        from: usize,
-        len: usize,
-        kv: KVStore<LocalDataFrame>,
-    ) -> Self {
-        unimplemented!()
-    }*/
+        kv: Arc<Mutex<KVStore<LocalDataFrame>>>, 
+        name: String, 
+        num_nodes: usize, 
+        receiver: Arc<Mutex<Receiver<Vec<u8>>>>) -> Result<Self, LiquidError> {
+            let node_id = { kv.lock().await.id };
+            if node_id == 1 {
+                // Reads the SOR File in 1 GB chunks
+                // Buffered reading of the sor file
+                let mut chunk_idx = 0;
+                let mut keys = Vec::new();
+                let schema = sorer::schema::infer_schema(file_name);
+                let from = 0;
+                // Bug: Panics if file doesnt exist
+                let mut data = from_file(file_name, schema.clone(), from, BYTES_PER_GB, 8); // fix the 8 
+                println!("{:?}", data);
+                //from += BYTES_PER_GB;
+                while get_len(&data) > 0 {
+                    /*if get_len(&data) < ROW_COUNT_PER_KEY {
+                        let more_data = from_file(file_name, schema.clone(), from, BYTES_PER_GB, 8);
+                        from += BYTES_PER_GB;
+                        // NOTE: Using into_iter for more data seems better but such patterns are
+                        // currently not stable
+                        for (c1, c2)  in data.iter_mut().zip(more_data.iter()) {
+                            match (c1, c2) {
+                                (Column::Int(x), Column::Int(y)) => x.extend(y),
+                                (Column::Bool(x), Column::Bool(y)) => x.extend(y),
+                                (Column::Float(x), Column::Float(y)) => x.extend(y),
+                                (Column::String(x), Column::String(y)) => y.into_iter().for_each(|s| x.push(s.clone())),
+                                _ => unreachable!()
+                            }
+                        }
+                    }*/
+                    let mut new_data = Vec::new();
+                    let count = ROW_COUNT_PER_KEY.min(get_len(&data));
+                    for c in &mut data {
+                        let new_c = match c {
+                            Column::Int(i) => Column::Int(i.drain(0..count).collect()),
+                            Column::Bool(i) => Column::Bool(i.drain(0..count).collect()),
+                            Column::Float(i) => Column::Float(i.drain(0..count).collect()),
+                            Column::String(i) => Column::String(i.drain(0..count).collect()),
+                        };
+                        new_data.push(new_c);
+                    }
+                    let ldf = LocalDataFrame::from(new_data);
+                    let key = Key::new(&format!("{}_{}", name, chunk_idx), (chunk_idx % num_nodes) + 1);
+                    { kv.lock().await.put(&key, ldf).await?; }
+                    keys.push(key);
+                    chunk_idx+=1;
+                }
+               
+                let schema = Schema::from(schema);
+                let build = serialize(&(keys.clone(), schema.clone()))?; 
+                for i in 2..(num_nodes + 1) {
+                    kv.lock().await.send_blob(i, build.clone()).await?;
+                }
+            
+                Ok(DistributedDataFrame {
+                    schema,
+                    receiver,
+                    data: keys,
+                    kv,
+                    num_nodes,
+                    node_id, 
+                })
+         } else {
+            let (data, schema) = { deserialize(&receiver.lock().await.recv().await.unwrap())? };
+            Ok(DistributedDataFrame {
+                data,schema, kv, num_nodes, node_id, receiver
+            })
+         }
+    }
     
     pub async fn new(mut data: Vec<Column>, 
         kv: Arc<Mutex<KVStore<LocalDataFrame>>>, 
