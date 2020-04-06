@@ -58,7 +58,7 @@ impl DistributedDataFrame {
             }
             
             let build = serialize(&(keys.clone(), schema.clone()))?; 
-            for i in 2..num_nodes {
+            for i in 2..(num_nodes + 1) {
                 kv.lock().await.send_blob(i, build.clone()).await?;
             }
             
@@ -71,7 +71,7 @@ impl DistributedDataFrame {
                 node_id, 
             })
          } else {
-            let (data, schema) = deserialize(&receiver.lock().await.recv().await.unwrap())?;
+            let (data, schema) = { deserialize(&receiver.lock().await.recv().await.unwrap())? };
             Ok(DistributedDataFrame {
                 data,schema, kv, num_nodes, node_id, receiver
             })
@@ -153,12 +153,15 @@ impl DistributedDataFrame {
             .iter()
             .filter(|k| k.home == self.node_id)
             .collect();
-        let unlocked_kv = self.kv.lock().await;
-        for key in my_keys {
-            let ldf = unlocked_kv.get(key).await?;
-            rower = ldf.pmap(rower);
+        {
+            let unlocked_kv = self.kv.lock().await;
+            for key in my_keys {
+                let ldf = unlocked_kv.get(key).await?;
+                rower = ldf.pmap(rower);
+            }
         }
         if self.node_id == self.num_nodes {
+            let unlocked_kv = self.kv.lock().await;
             // we are the last node
             let blob = serialize(&rower)?;
             unlocked_kv.send_blob(self.node_id - 1, blob).await?;
@@ -167,6 +170,7 @@ impl DistributedDataFrame {
             let mut blob = self.receiver.lock().await.recv().await.unwrap();
             let external_rower: T = deserialize(&blob[..])?;
             rower = rower.join(external_rower);
+            let unlocked_kv = self.kv.lock().await;
             if self.node_id != 1 {
                 blob = serialize(&rower)?;
                 unlocked_kv.send_blob(self.node_id - 1, blob).await?;

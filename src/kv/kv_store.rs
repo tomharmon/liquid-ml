@@ -251,10 +251,10 @@ impl<
             let mut sender_clone = { kv_ptr_clone.lock().await.blob_sender.clone() };
             tokio::spawn(async move {
                 info!("Processing a message with id: {:#?}", msg.msg_id);
-                let kv_ptr_clone = kv_ptr_clone.lock().await;
                 match msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond
+                        let kv_ptr_clone = kv_ptr_clone.lock().await;
                         let v =
                             kv_ptr_clone.wait_and_get_raw(&k).await.unwrap();
                         {
@@ -268,6 +268,7 @@ impl<
                         }
                     }
                     KVMessage::Data(k, v) => {
+                        let kv_ptr_clone = kv_ptr_clone.lock().await;
                         let v: Arc<T> = Arc::new(deserialize(&v).unwrap());
                         {
                             kv_ptr_clone.cache.lock().await.put(k, v);
@@ -277,9 +278,10 @@ impl<
                     KVMessage::Put(k, v) => {
                         // Note is the home id actually my id should we check?
                         {
-                            kv_ptr_clone.data.write().await.insert(k, v);
-                        }
+                        let kv_ptr_clone = kv_ptr_clone.lock().await;
+                        kv_ptr_clone.data.write().await.insert(k, v);
                         kv_ptr_clone.internal_notifier.notify();
+                        }
                     }
                     KVMessage::Blob(v) => {
                         sender_clone.send(v).await.unwrap();
