@@ -126,6 +126,7 @@ async fn main() -> Result<(), LiquidError> {
                 joined_rower.map.into_iter().map(|(k, v)| (k, v)).collect();
             sorted.sort_by(|(_, v1), (_, v2)| v1.cmp(v2));
             println!("{:#?}", sorted);
+            println!("Number of different words: {}", sorted.len());
         }
         None => println!("done"),
     }
