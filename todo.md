@@ -11,3 +11,4 @@
   chunks automatically?
 - Testing (esp would be good around chunking to ensure no off by one errors)
 - investigate if we should use `tokio::spawn_blocking` anywhere
+- on master branch, change get_col to get_col_idx and add real get_col function
