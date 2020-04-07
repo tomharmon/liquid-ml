@@ -55,7 +55,7 @@ async fn main() -> Result<(), LiquidError> {
         &opts.server_address,
         3,
     ).await?;
-    app.create_sor("dist", "tests/distributed.sor").await?;
+    app.df_from_sor("dist", "tests/distributed.sor").await?;
     println!("{:?}", app.df.get("dist").unwrap().data);
     let r = app.pmap("dist", IntSummer { sum: 0 }).await?;
     match r {

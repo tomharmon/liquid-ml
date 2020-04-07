@@ -61,33 +61,27 @@ impl Rower for WordCounter {
     }
 }
 
-fn reader(file_name: &str) -> Vec<Option<String>> {
+fn reader() -> Vec<Column> {
     // open the file
-    let file = File::open(file_name).unwrap();
-    let mut reader = BufReader::new(file);
-    // seek to where we should start reading for this nodes' chunk
+    let file = File::open("examples/100k.txt").unwrap();
+    let reader = BufReader::new(file);
+// seek to where we should start reading for this nodes' chunk
     let mut words = Vec::new();
     for line in reader.lines() {
         for word in line.unwrap().split_whitespace() {
             words.push(Some(word.to_string()));
         }
     }
-    words
+    vec![Column::String(words)]
 }
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Debug).unwrap();
-    let num_nodes = 3;
-    let mut app =
-        Application::new(&opts.my_address, &opts.server_address, num_nodes)
-            .await?;
-    let file_name = "examples/100k.txt";
+    let mut app = Application::new(&opts.my_address, &opts.server_address, 3).await?;
 
-
-    let words = vec![Column::String(reader(&file_name))];
-    app.create_df("words", words).await?;
+    app.df_from_fun("words", reader).await?;
 
     let rower = WordCounter {
         map: HashMap::new(),
@@ -96,7 +90,9 @@ async fn main() -> Result<(), LiquidError> {
     let result = app.pmap("words", rower).await?;
     match result {
         Some(joined_rower) => {
-            println!("{:#?}", joined_rower.map);
+            let mut as_vec : Vec<(&String, &usize)> = joined_rower.map.iter().collect();
+            as_vec.sort_by(|(a, _), (b, _)| a.cmp(b));
+            as_vec.iter().for_each(|(x, y)| println!("{}: {}", x, y));
         }
         None => println!("done"),
     }

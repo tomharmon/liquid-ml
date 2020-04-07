@@ -65,13 +65,18 @@ impl Application {
         })
     }
 
-    pub async fn create_df(&mut self, name: &str, data: Vec<Column>) -> Result<(), LiquidError> {
+    pub async fn df_from_fun(&mut self, name: &str, data_generator: fn() -> Vec<Column>) -> Result<(), LiquidError> {
+        let data = if self.node_id == 1 {
+            Some(data_generator())
+        } else {
+            None
+        };
         let ddf = DistributedDataFrame::new(data, self.kv.clone(), name.to_string(), self.num_nodes, self.blob_receiver.clone()).await?;
         self.df.insert(name.to_string(), ddf);
         Ok(())
     }
 
-    pub async fn create_sor(&mut self, name: &str, file_name: &str) -> Result<(), LiquidError> {
+    pub async fn df_from_sor(&mut self, name: &str, file_name: &str) -> Result<(), LiquidError> {
         let ddf = DistributedDataFrame::from_sor(file_name, self.kv.clone(), name.to_string(), self.num_nodes, self.blob_receiver.clone()).await?;
         self.df.insert(name.to_string(), ddf);
         Ok(())
