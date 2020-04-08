@@ -1,6 +1,5 @@
 use bincode::{deserialize, serialize};
 use clap::Clap;
-use futures::future::try_join_all;
 use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
 use liquid_ml::liquid::Application;
@@ -8,7 +7,6 @@ use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::collections::HashSet;
-use tokio::join;
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap
 #[derive(Clap)]
@@ -91,12 +89,11 @@ async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Error).unwrap();
     let mut app =
-        Application::new(&opts.my_address, &opts.server_address, 6).await?;
+        Application::new(&opts.my_address, &opts.server_address, 4).await?;
     // NOTE: IS this table needed?
     //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
     app.df_from_sor("commits", "/home/tom/code/7degrees/smol_commits.ltgt")
         .await?;
-    println!("Finished distributing chunks");
     // NOTE: IS this table needed?
     //app.df_from_sor("projects", "~/code/7degrees/projects.ltgt").await?;
 
@@ -120,16 +117,13 @@ async fn main() -> Result<(), LiquidError> {
             Some(rower) => {
                 let serialized = serialize(&rower)?;
                 let unlocked = app.kv.lock().await;
-                let mut futs = Vec::new();
+                // Could send concurrently does it matter?
                 for i in 2..(app.num_nodes + 1) {
-                    futs.push(unlocked.send_blob(i, serialized.clone()));
+                    unlocked.send_blob(i, serialized.clone()).await?;
                 }
-                try_join_all(futs).await?;
-
                 rower
             }
         };
-        println!("project pmap done");
         users = pr.users;
         projects = pr.new_projects;
         let mut ur = UserRower {
@@ -147,15 +141,13 @@ async fn main() -> Result<(), LiquidError> {
             Some(rower) => {
                 let serialized = serialize(&rower)?;
                 let unlocked = app.kv.lock().await;
-                let mut futs = Vec::new();
+                // Could send concurrently does it matter?
                 for i in 2..(app.num_nodes + 1) {
-                    futs.push(unlocked.send_blob(i, serialized.clone()))
+                    unlocked.send_blob(i, serialized.clone()).await?;
                 }
-                try_join_all(futs).await?;
                 rower
             }
         };
-        println!("user pmap done");
         users = ur.new_users;
         projects = ur.projects;
     }
