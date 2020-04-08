@@ -5,6 +5,7 @@ use liquid_ml::error::LiquidError;
 use liquid_ml::liquid::Application;
 use log::Level;
 use serde::{Deserialize, Serialize};
+use futures::future::try_join_all;
 use simple_logger;
 use std::collections::HashSet;
 /// This is a simple example showing how to load a sor file from disk and
@@ -87,9 +88,9 @@ impl Rower for UserRower {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Info).unwrap();
+    simple_logger::init_with_level(Level::Error).unwrap();
     let mut app =
-        Application::new(&opts.my_address, &opts.server_address, 4).await?;
+        Application::new(&opts.my_address, &opts.server_address, 6).await?;
     // NOTE: IS this table needed?
     //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
     app.df_from_sor("commits", "/home/tom/code/7degrees/smol_commits.ltgt")
