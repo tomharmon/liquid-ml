@@ -9,14 +9,14 @@
 //! Detailed examples that use the application can be found in the examples directory of this
 //! crate.
 
-use crate::dataframe::{LocalDataFrame, DistributedDataFrame, Rower, Column};
+use crate::dataframe::{Column, DistributedDataFrame, LocalDataFrame, Rower};
 use crate::error::LiquidError;
 use crate::kv::{KVStore, Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::sync::Arc;
-use tokio::sync::{mpsc, mpsc::Receiver, Notify, Mutex};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{mpsc, mpsc::Receiver, Mutex, Notify};
 
 /// Represents an application
 pub struct Application {
@@ -31,7 +31,7 @@ pub struct Application {
     pub num_nodes: usize,
     /// A notifier that gets notified when the server has sent a kill message
     pub kill_notifier: Arc<Notify>,
-    pub df: HashMap<String, DistributedDataFrame>
+    pub df: HashMap<String, DistributedDataFrame>,
 }
 
 impl Application {
@@ -54,41 +54,67 @@ impl Application {
             true,
         )
         .await;
-        let node_id = {kv.lock().await.id};
+        let node_id = { kv.lock().await.id };
         Ok(Application {
             kv,
             node_id,
             blob_receiver: Arc::new(Mutex::new(blob_receiver)),
             num_nodes,
             kill_notifier,
-            df: HashMap::new()
+            df: HashMap::new(),
         })
     }
 
-    pub async fn df_from_fun(&mut self, name: &str, data_generator: fn() -> Vec<Column>) -> Result<(), LiquidError> {
+    pub async fn df_from_fun(
+        &mut self,
+        name: &str,
+        data_generator: fn() -> Vec<Column>,
+    ) -> Result<(), LiquidError> {
         let data = if self.node_id == 1 {
             Some(data_generator())
         } else {
             None
         };
-        let ddf = DistributedDataFrame::new(data, self.kv.clone(), name.to_string(), self.num_nodes, self.blob_receiver.clone()).await?;
+        let ddf = DistributedDataFrame::new(
+            data,
+            self.kv.clone(),
+            name.to_string(),
+            self.num_nodes,
+            self.blob_receiver.clone(),
+        )
+        .await?;
         self.df.insert(name.to_string(), ddf);
         Ok(())
     }
 
-    pub async fn df_from_sor(&mut self, name: &str, file_name: &str) -> Result<(), LiquidError> {
-        let ddf = DistributedDataFrame::from_sor(file_name, self.kv.clone(), name.to_string(), self.num_nodes, self.blob_receiver.clone()).await?;
+    pub async fn df_from_sor(
+        &mut self,
+        name: &str,
+        file_name: &str,
+    ) -> Result<(), LiquidError> {
+        let ddf = DistributedDataFrame::from_sor(
+            file_name,
+            self.kv.clone(),
+            name.to_string(),
+            self.num_nodes,
+            self.blob_receiver.clone(),
+        )
+        .await?;
         self.df.insert(name.to_string(), ddf);
         Ok(())
     }
-    
-    pub async fn pmap<T: Rower + Serialize + Clone + DeserializeOwned + Send>(&self, name: &str, rower: T) -> Result<Option<T>, LiquidError> {
+
+    pub async fn pmap<
+        T: Rower + Serialize + Clone + DeserializeOwned + Send,
+    >(
+        &self,
+        name: &str,
+        rower: T,
+    ) -> Result<Option<T>, LiquidError> {
         let df = match self.df.get(name) {
             Some(x) => x,
             None => return Err(LiquidError::NotPresent),
         };
         df.map(rower).await
     }
-
 }
-

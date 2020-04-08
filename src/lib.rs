@@ -407,5 +407,5 @@ pub mod application;
 pub mod dataframe;
 pub mod error;
 pub mod kv;
-pub mod network;
 pub mod liquid;
+pub mod network;

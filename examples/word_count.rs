@@ -1,7 +1,7 @@
 use clap::Clap;
-use liquid_ml::liquid::Application;
 use liquid_ml::dataframe::*;
 use liquid_ml::error::LiquidError;
+use liquid_ml::liquid::Application;
 use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
@@ -65,7 +65,7 @@ fn reader() -> Vec<Column> {
     // open the file
     let file = File::open("examples/100k.txt").unwrap();
     let reader = BufReader::new(file);
-// seek to where we should start reading for this nodes' chunk
+    // seek to where we should start reading for this nodes' chunk
     let mut words = Vec::new();
     for line in reader.lines() {
         for word in line.unwrap().split_whitespace() {
@@ -79,7 +79,8 @@ fn reader() -> Vec<Column> {
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Debug).unwrap();
-    let mut app = Application::new(&opts.my_address, &opts.server_address, 3).await?;
+    let mut app =
+        Application::new(&opts.my_address, &opts.server_address, 3).await?;
 
     app.df_from_fun("words", reader).await?;
 
@@ -90,7 +91,8 @@ async fn main() -> Result<(), LiquidError> {
     let result = app.pmap("words", rower).await?;
     match result {
         Some(joined_rower) => {
-            let mut as_vec : Vec<(&String, &usize)> = joined_rower.map.iter().collect();
+            let mut as_vec: Vec<(&String, &usize)> =
+                joined_rower.map.iter().collect();
             as_vec.sort_by(|(a, _), (b, _)| a.cmp(b));
             as_vec.iter().for_each(|(x, y)| println!("{}: {}", x, y));
         }

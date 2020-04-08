@@ -248,7 +248,8 @@ impl<
         loop {
             let msg = receiver.recv().await.unwrap();
             let kv_ptr_clone = kv.clone();
-            let mut sender_clone = { kv_ptr_clone.lock().await.blob_sender.clone() };
+            let mut sender_clone =
+                { kv_ptr_clone.lock().await.blob_sender.clone() };
             tokio::spawn(async move {
                 info!("Processing a message with id: {:#?}", msg.msg_id);
                 match msg.msg {
@@ -278,9 +279,9 @@ impl<
                     KVMessage::Put(k, v) => {
                         // Note is the home id actually my id should we check?
                         {
-                        let kv_ptr_clone = kv_ptr_clone.lock().await;
-                        kv_ptr_clone.data.write().await.insert(k, v);
-                        kv_ptr_clone.internal_notifier.notify();
+                            let kv_ptr_clone = kv_ptr_clone.lock().await;
+                            kv_ptr_clone.data.write().await.insert(k, v);
+                            kv_ptr_clone.internal_notifier.notify();
                         }
                     }
                     KVMessage::Blob(v) => {
