@@ -90,7 +90,7 @@ async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Error).unwrap();
     let mut app =
-        Application::new(&opts.my_address, &opts.server_address, 6).await?;
+        Application::new(&opts.my_address, &opts.server_address, 8).await?;
     // NOTE: IS this table needed?
     //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
     app.df_from_sor("commits", "/home/tom/code/7degrees/smol_commits.ltgt")

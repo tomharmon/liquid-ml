@@ -46,12 +46,12 @@ impl DistributedDataFrame {
                   //  futs.push(unlocked.put(key.clone(), ldf));
                     { kv.lock().await.put(key.clone(), ldf).await? };
                     keys.push(key);
-                    /*
-                    if chunk_idx % num_nodes == 0 {
-                        try_join_all(futs).await?;
-                        futs = Vec::new();
+                    
+                    if chunk_idx % 100 == 0 {
+                        //try_join_all(futs).await?;
+                        //futs = Vec::new();
+                        println!("sent 100 chunks");
                     }
-                    */
 
                     chunk_idx += 1;
                 }
