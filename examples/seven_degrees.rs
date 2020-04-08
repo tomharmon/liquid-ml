@@ -28,19 +28,19 @@ struct Opts {
 /// Finds all the projects that these users have ever worked on
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct ProjectRower {
-    users: HashSet<i64>,
-    projects: HashSet<i64>,
-    new_projects: HashSet<i64>,
+    users: HashSet<u32>,
+    projects: HashSet<u32>,
+    new_projects: HashSet<u32>,
 }
 
 impl Rower for ProjectRower {
     fn visit(&mut self, r: &Row) -> bool {
         let pid = match r.get(0).unwrap() {
-            Data::Int(x) => *x,
+            Data::Int(x) => *x as u32,
             _ => panic!("Invalid DF"),
         };
         let uid = match r.get(1).unwrap() {
-            Data::Int(x) => *x,
+            Data::Int(x) => *x as u32,
             _ => panic!("Invalid DF"),
         };
         if self.users.contains(&uid) && !self.projects.contains(&pid) {
@@ -58,19 +58,19 @@ impl Rower for ProjectRower {
 /// Finds all the users that have commits on these projects
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct UserRower {
-    users: HashSet<i64>,
-    projects: HashSet<i64>,
-    new_users: HashSet<i64>,
+    users: HashSet<u32>,
+    projects: HashSet<u32>,
+    new_users: HashSet<u32>,
 }
 
 impl Rower for UserRower {
     fn visit(&mut self, r: &Row) -> bool {
         let pid = match r.get(0).unwrap() {
-            Data::Int(x) => *x,
+            Data::Int(x) => *x as u32,
             _ => panic!("Invalid DF"),
         };
         let uid = match r.get(1).unwrap() {
-            Data::Int(x) => *x,
+            Data::Int(x) => *x as u32,
             _ => panic!("Invalid DF"),
         };
         if self.projects.contains(&pid) && !self.users.contains(&uid) {
