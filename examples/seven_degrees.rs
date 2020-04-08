@@ -100,7 +100,8 @@ async fn main() -> Result<(), LiquidError> {
     let mut users = HashSet::new();
     users.insert(4967);
     let mut projects = HashSet::new();
-    for _ in 0..4 {
+    for i in 0..4 {
+        println!("degree {}", i);
         let mut pr = ProjectRower {
             users,
             projects,

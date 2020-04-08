@@ -7,6 +7,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
+const MAX_FRAME_SIZE: usize = 1_073_741_824; // 1 GB
+
 impl<T> Message<T> {
     /// Creates a new `Message`.
     pub fn new(
@@ -27,9 +29,12 @@ impl<T> Message<T> {
 impl<T> MessageCodec<T> {
     /// Creates a new `MessageCodec`
     pub(crate) fn new() -> Self {
+        let codec = LengthDelimitedCodec::builder()
+            .max_frame_length(MAX_FRAME_SIZE)
+            .new_codec();
         MessageCodec {
             phantom: std::marker::PhantomData,
-            codec: LengthDelimitedCodec::new(),
+            codec,
         }
     }
 }

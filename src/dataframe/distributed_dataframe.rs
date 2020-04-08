@@ -6,7 +6,7 @@ use crate::error::LiquidError;
 use crate::kv::{KVStore, Key};
 use bincode::{deserialize, serialize};
 use serde::{de::DeserializeOwned, Serialize};
-use sorer::dataframe::{from_file, Column, Data, SorTerator};
+use sorer::dataframe::{Column, Data, SorTerator};
 //use sorer::schema::{infer_schema, DataType};
 use std::sync::Arc;
 use tokio::sync::{mpsc::Receiver, Mutex};
