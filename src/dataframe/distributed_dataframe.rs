@@ -11,7 +11,7 @@ use sorer::dataframe::{Column, Data, from_file, SorTerator};
 use tokio::sync::{Mutex, mpsc::Receiver};
 use std::sync::Arc;
 
-const ROW_COUNT_PER_KEY: usize = 1000;
+const ROW_COUNT_PER_KEY: usize = 100_000;
 
 /// An interface for a `DataFrame`, inspired by those used in `pandas` and `R`.
 impl DistributedDataFrame {
@@ -192,7 +192,7 @@ impl DistributedDataFrame {
         {
             let unlocked_kv = self.kv.lock().await;
             for key in my_keys {
-                let ldf = unlocked_kv.get(key).await?;
+                let ldf = unlocked_kv.wait_and_get(key).await?;
                 rower = ldf.pmap(rower);
             }
         }

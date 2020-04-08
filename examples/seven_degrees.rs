@@ -1,0 +1,154 @@
+use clap::Clap;
+use liquid_ml::liquid::Application;
+use liquid_ml::dataframe::{Data, Row, Rower, LocalDataFrame};
+use liquid_ml::error::LiquidError;
+use log::Level;
+use serde::{Deserialize, Serialize};
+use simple_logger;
+use std::collections::HashSet;
+use bincode::{serialize, deserialize};
+/// This is a simple example showing how to load a sor file from disk and
+/// distribute it across nodes, and perform pmap
+#[derive(Clap)]
+#[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
+struct Opts {
+    /// The IP:Port at which the registration server is running
+    #[clap(
+        short = "s",
+        long = "server_addr",
+        default_value = "127.0.0.1:9000"
+    )]
+    server_address: String,
+    /// The IP:Port at which this application must run
+    #[clap(short = "m", long = "my_addr", default_value = "127.0.0.2:9002")]
+    my_address: String,
+}
+
+/// Finds all the projects that these users have ever worked on
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct ProjectRower {
+    users: HashSet<i64>,
+    projects: HashSet<i64>,
+    new_projects: HashSet<i64>
+}
+
+impl Rower for ProjectRower {
+    
+    fn visit(&mut self, r: &Row) -> bool {
+        let pid = match r.get(0).unwrap() {
+            Data::Int(x) => *x,
+            _ => panic!("Invalid DF"),
+        };
+        let uid = match r.get(1).unwrap() {
+            Data::Int(x) => *x,
+            _ => panic!("Invalid DF"),
+        };
+        if self.users.contains(&uid) && !self.projects.contains(&pid) {
+            self.new_projects.insert(pid);
+        }
+        true
+
+    }
+
+    fn join(mut self, other: Self) -> Self {
+        self.new_projects.extend(other.new_projects.into_iter());
+        self
+    }
+}
+
+/// Finds all the users that have commits on these projects
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct UserRower{
+    users: HashSet<i64>,
+    projects: HashSet<i64>,
+    new_users: HashSet<i64>
+}
+
+impl Rower for UserRower {
+    
+    fn visit(&mut self, r: &Row) -> bool {
+        let pid = match r.get(0).unwrap() {
+            Data::Int(x) => *x,
+            _ => panic!("Invalid DF"),
+        };
+        let uid = match r.get(1).unwrap() {
+            Data::Int(x) => *x,
+            _ => panic!("Invalid DF"),
+        };
+        if self.projects.contains(&pid) && !self.users.contains(&uid) {
+            self.new_users.insert(uid);
+        }
+        true
+
+    }
+
+    fn join(mut self, other: Self) -> Self {
+        self.new_users.extend(other.new_users.into_iter());
+        self
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), LiquidError> {
+    let opts: Opts = Opts::parse();
+    simple_logger::init_with_level(Level::Debug).unwrap();
+    let mut app = Application::new(
+        &opts.my_address,
+        &opts.server_address,
+        3,
+    ).await?;
+    //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
+    app.df_from_sor("commits", "/home/tom/code/7degrees/smol_commits.ltgt").await?;
+    // NOTE: IS this table needed?
+    //app.df_from_sor("projects", "~/code/7degrees/projects.ltgt").await?;
+    
+    let mut users = HashSet::new();
+    users.insert(4967);
+    let mut projects = HashSet::new();
+    for _ in 0..3 {
+       let mut pr = ProjectRower {
+            users, projects, new_projects: HashSet::new()
+       };
+       // Node 1 will get the rower back and send it to all the other nodes 
+       // other nodes will wait for node 1 to send the final combined rower to 
+       // them
+       pr = match app.pmap("commits", pr).await? {
+           None => deserialize(&app.blob_receiver.lock().await.recv().await.unwrap()[..])?,
+           Some(rower) => {
+               let serialized = serialize(&rower)?;
+               let unlocked = app.kv.lock().await;
+               // Could send concurrently does it matter?
+               for i in 2..(app.num_nodes + 1) {
+                   unlocked.send_blob(i, serialized.clone()).await?;
+               }
+               rower
+           }
+       };
+       users = pr.users;
+       projects = pr.new_projects;
+       let mut ur = UserRower {
+            users, projects, new_users: HashSet::new()
+       };
+       // Node 1 will get the rower back and send it to all the other nodes 
+       // other nodes will wait for node 1 to send the final combined rower to 
+       // them
+       ur = match app.pmap("commits", ur).await? {
+           None => deserialize(&app.blob_receiver.lock().await.recv().await.unwrap()[..])?,
+           Some(rower) => {
+               let serialized = serialize(&rower)?;
+               let unlocked = app.kv.lock().await;
+               // Could send concurrently does it matter?
+               for i in 2..(app.num_nodes + 1) {
+                   unlocked.send_blob(i, serialized.clone()).await?;
+               }
+               rower
+           }
+       };
+       users = ur.new_users;
+       projects = ur.projects;
+    }
+    println!("num users found: {}", users.len());
+    app.kill_notifier.notified().await;
+
+    Ok(())
+}

@@ -21,14 +21,14 @@ use std::collections::HashMap;
 /// Represents an application
 pub struct Application {
     /// A pointer to the KVStore that stores all the data for the application
-    pub(crate) kv: Arc<Mutex<KVStore<LocalDataFrame>>>,
+    pub kv: Arc<Mutex<KVStore<LocalDataFrame>>>,
     /// The id of this node, assigned by the registration server
     pub node_id: usize,
     /// A receiver for blob messages that can b processed by the user
-    pub(crate) blob_receiver: Arc<Mutex<Receiver<Value>>>,
+    pub blob_receiver: Arc<Mutex<Receiver<Value>>>,
     /// The number of nodes in this network
     /// NOTE: Panics if `num_nodes` is inconsistent with this network
-    num_nodes: usize,
+    pub num_nodes: usize,
     /// A notifier that gets notified when the server has sent a kill message
     pub kill_notifier: Arc<Notify>,
     pub df: HashMap<String, DistributedDataFrame>
