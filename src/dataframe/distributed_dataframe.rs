@@ -35,8 +35,7 @@ impl DistributedDataFrame {
             let sorterator =
                 SorTerator::new(file_name, schema.clone(), ROW_COUNT_PER_KEY);
             {
-                let unlocked = kv.lock().await;
-                let mut futs = Vec::new();
+                //let mut futs = Vec::new();
                 for data in sorterator {
                     let ldf = LocalDataFrame::from(data);
                     let key = Key::new(
@@ -44,12 +43,15 @@ impl DistributedDataFrame {
                         (chunk_idx % num_nodes) + 1,
                     );
 
-                    futs.push(unlocked.put(key.clone(), ldf));
+                  //  futs.push(unlocked.put(key.clone(), ldf));
+                    { kv.lock().await.put(key.clone(), ldf).await? };
                     keys.push(key);
+                    /*
                     if chunk_idx % num_nodes == 0 {
                         try_join_all(futs).await?;
                         futs = Vec::new();
                     }
+                    */
 
                     chunk_idx += 1;
                 }

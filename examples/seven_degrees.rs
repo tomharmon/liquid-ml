@@ -87,7 +87,7 @@ impl Rower for UserRower {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Error).unwrap();
+    simple_logger::init_with_level(Level::Info).unwrap();
     let mut app =
         Application::new(&opts.my_address, &opts.server_address, 4).await?;
     // NOTE: IS this table needed?
@@ -117,10 +117,12 @@ async fn main() -> Result<(), LiquidError> {
             Some(rower) => {
                 let serialized = serialize(&rower)?;
                 let unlocked = app.kv.lock().await;
-                // Could send concurrently does it matter?
+                let mut futs = Vec::new();
                 for i in 2..(app.num_nodes + 1) {
-                    unlocked.send_blob(i, serialized.clone()).await?;
+                    futs.push(unlocked.send_blob(i, serialized.clone()));
                 }
+                try_join_all(futs).await?;
+
                 rower
             }
         };
