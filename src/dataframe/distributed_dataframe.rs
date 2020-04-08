@@ -5,6 +5,7 @@ use crate::dataframe::{
 use crate::error::LiquidError;
 use crate::kv::{KVStore, Key};
 use bincode::{deserialize, serialize};
+use futures::future::try_join_all;
 use serde::{de::DeserializeOwned, Serialize};
 use sorer::dataframe::{Column, Data, SorTerator};
 //use sorer::schema::{infer_schema, DataType};
@@ -33,17 +34,25 @@ impl DistributedDataFrame {
             // Bug: Panics if file doesnt exist
             let sorterator =
                 SorTerator::new(file_name, schema.clone(), ROW_COUNT_PER_KEY);
-            for data in sorterator {
-                let ldf = LocalDataFrame::from(data);
-                let key = Key::new(
-                    &format!("{}_{}", name, chunk_idx),
-                    (chunk_idx % num_nodes) + 1,
-                );
-                {
-                    kv.lock().await.put(&key, ldf).await?;
+            {
+                let unlocked = kv.lock().await;
+                let mut futs = Vec::new();
+                for data in sorterator {
+                    let ldf = LocalDataFrame::from(data);
+                    let key = Key::new(
+                        &format!("{}_{}", name, chunk_idx),
+                        (chunk_idx % num_nodes) + 1,
+                    );
+
+                    futs.push(unlocked.put(key.clone(), ldf));
+                    keys.push(key);
+                    if chunk_idx % num_nodes == 0 {
+                        try_join_all(futs).await?;
+                        futs = Vec::new();
+                    }
+
+                    chunk_idx += 1;
                 }
-                keys.push(key);
-                chunk_idx += 1;
             }
 
             let schema = Schema::from(schema);
@@ -113,8 +122,9 @@ impl DistributedDataFrame {
                     (chunk_idx % num_nodes) + 1,
                 );
                 schema = ldf.get_schema().clone();
+                // todo multiplex?
                 {
-                    kv.lock().await.put(&key, ldf).await?;
+                    kv.lock().await.put(key.clone(), ldf).await?;
                 }
                 keys.push(key);
                 chunk_idx += 1;

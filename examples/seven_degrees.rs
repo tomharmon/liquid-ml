@@ -94,7 +94,7 @@ async fn main() -> Result<(), LiquidError> {
         Application::new(&opts.my_address, &opts.server_address, 6).await?;
     // NOTE: IS this table needed?
     //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
-    app.df_from_sor("commits", "/home/tom/code/7degrees/commits.ltgt")
+    app.df_from_sor("commits", "/home/tom/code/7degrees/smol_commits.ltgt")
         .await?;
     println!("Finished distributing chunks");
     // NOTE: IS this table needed?

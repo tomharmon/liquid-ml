@@ -189,18 +189,18 @@ impl<
     /// `Ok(None)` is returned after the `value` was successfully sent
     pub async fn put(
         &self,
-        key: &Key,
+        key: Key,
         value: T,
     ) -> Result<Option<Value>, LiquidError> {
         let serial = serialize(&value)?;
         if key.home == self.id {
-            let opt_old_data =
-                { self.data.write().await.insert(key.clone(), serial) };
+            let opt_old_data = { self.data.write().await.insert(key, serial) };
             self.internal_notifier.notify();
             Ok(opt_old_data)
         } else {
-            let msg = KVMessage::Put(key.clone(), serial);
-            self.network.write().await.send_msg(key.home, msg).await?;
+            let target_id = key.home;
+            let msg = KVMessage::Put(key, serial);
+            self.network.write().await.send_msg(target_id, msg).await?;
             Ok(None)
         }
     }
