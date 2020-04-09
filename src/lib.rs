@@ -403,9 +403,8 @@
 //!    project.
 //! 4. Implement random forest.
 
-pub mod application;
 pub mod dataframe;
 pub mod error;
 pub mod kv;
-pub mod liquid;
+pub mod liquid_ml;
 pub mod network;

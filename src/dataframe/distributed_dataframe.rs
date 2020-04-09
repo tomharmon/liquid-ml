@@ -10,7 +10,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use sorer::dataframe::{Column, Data, SorTerator};
 //use sorer::schema::{infer_schema, DataType};
 use std::sync::Arc;
-use tokio::sync::{mpsc::Receiver, Mutex};
+use tokio::sync::{mpsc::Receiver, Mutex, RwLock};
 
 const ROW_COUNT_PER_KEY: usize = 100_000;
 
@@ -19,12 +19,12 @@ impl DistributedDataFrame {
     /// Creates a new `DataFrame` from the given file
     pub async fn from_sor(
         file_name: &str,
-        kv: Arc<Mutex<KVStore<LocalDataFrame>>>,
+        kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
         name: String,
         num_nodes: usize,
         receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Self, LiquidError> {
-        let node_id = { kv.lock().await.id };
+        let node_id = { kv.read().await.id };
         if node_id == 1 {
             // Reads the SOR File in 1 GB chunks
             // Buffered reading of the sor file
@@ -43,10 +43,12 @@ impl DistributedDataFrame {
                         (chunk_idx % num_nodes) + 1,
                     );
 
-                  //  futs.push(unlocked.put(key.clone(), ldf));
-                    { kv.lock().await.put(key.clone(), ldf).await? };
+                    //  futs.push(unlocked.put(key.clone(), ldf));
+                    {
+                        kv.read().await.put(key.clone(), ldf).await?
+                    };
                     keys.push(key);
-                    
+
                     if chunk_idx % 100 == 0 {
                         //try_join_all(futs).await?;
                         //futs = Vec::new();
@@ -60,7 +62,7 @@ impl DistributedDataFrame {
             let schema = Schema::from(schema);
             let build = serialize(&(keys.clone(), schema.clone()))?;
             for i in 2..(num_nodes + 1) {
-                kv.lock().await.send_blob(i, build.clone()).await?;
+                kv.read().await.send_blob(i, build.clone()).await?;
             }
 
             Ok(DistributedDataFrame {
@@ -87,12 +89,12 @@ impl DistributedDataFrame {
 
     pub async fn new(
         data: Option<Vec<Column>>,
-        kv: Arc<Mutex<KVStore<LocalDataFrame>>>,
+        kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
         name: String,
         num_nodes: usize,
         receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Self, LiquidError> {
-        let node_id = { kv.lock().await.id };
+        let node_id = { kv.read().await.id };
         if node_id == 1 {
             let mut data = data.unwrap();
             let mut to_process = get_len(&data);
@@ -126,7 +128,7 @@ impl DistributedDataFrame {
                 schema = ldf.get_schema().clone();
                 // todo multiplex?
                 {
-                    kv.lock().await.put(key.clone(), ldf).await?;
+                    kv.read().await.put(key.clone(), ldf).await?;
                 }
                 keys.push(key);
                 chunk_idx += 1;
@@ -135,7 +137,7 @@ impl DistributedDataFrame {
 
             let build = serialize(&(keys.clone(), schema.clone()))?;
             for i in 2..(num_nodes + 1) {
-                kv.lock().await.send_blob(i, build.clone()).await?;
+                kv.read().await.send_blob(i, build.clone()).await?;
             }
 
             Ok(DistributedDataFrame {
@@ -174,7 +176,7 @@ impl DistributedDataFrame {
             None => return Err(LiquidError::RowIndexOutOfBounds),
             Some(k) => k,
         };
-        let ldf = { self.kv.lock().await.wait_and_get(key).await? };
+        let ldf = { self.kv.read().await.wait_and_get(key).await? };
         let adjusted_row_idx = row_idx % ROW_COUNT_PER_KEY;
         ldf.get(col_idx, adjusted_row_idx)
     }
@@ -199,7 +201,7 @@ impl DistributedDataFrame {
             None => return Err(LiquidError::RowIndexOutOfBounds),
             Some(k) => k,
         };
-        let ldf = { self.kv.lock().await.wait_and_get(key).await? };
+        let ldf = { self.kv.read().await.wait_and_get(key).await? };
         let adjusted_row_idx = row_idx % ROW_COUNT_PER_KEY;
         ldf.fill_row(adjusted_row_idx, row)
     }
@@ -235,14 +237,14 @@ impl DistributedDataFrame {
             .filter(|k| k.home == self.node_id)
             .collect();
         {
-            let unlocked_kv = self.kv.lock().await;
+            let unlocked_kv = self.kv.read().await;
             for key in my_keys {
                 let ldf = unlocked_kv.wait_and_get(key).await?;
                 rower = ldf.pmap(rower);
             }
         }
         if self.node_id == self.num_nodes {
-            let unlocked_kv = self.kv.lock().await;
+            let unlocked_kv = self.kv.read().await;
             // we are the last node
             let blob = serialize(&rower)?;
             unlocked_kv.send_blob(self.node_id - 1, blob).await?;
@@ -251,7 +253,7 @@ impl DistributedDataFrame {
             let mut blob = self.receiver.lock().await.recv().await.unwrap();
             let external_rower: T = deserialize(&blob[..])?;
             rower = rower.join(external_rower);
-            let unlocked_kv = self.kv.lock().await;
+            let unlocked_kv = self.kv.read().await;
             if self.node_id != 1 {
                 blob = serialize(&rower)?;
                 unlocked_kv.send_blob(self.node_id - 1, blob).await?;

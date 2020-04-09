@@ -1,11 +1,11 @@
 use bincode::{deserialize, serialize};
 use clap::Clap;
+use futures::future::try_join_all;
 use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
-use liquid_ml::liquid::Application;
+use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use serde::{Deserialize, Serialize};
-use futures::future::try_join_all;
 use simple_logger;
 use std::collections::HashSet;
 /// This is a simple example showing how to load a sor file from disk and
@@ -23,6 +23,9 @@ struct Opts {
     /// The IP:Port at which this application must run
     #[clap(short = "m", long = "my_addr", default_value = "127.0.0.2:9002")]
     my_address: String,
+    /// The number of nodes for the distributed system
+    #[clap(short = "n", long = "num_nodes", default_value = "3")]
+    num_nodes: usize,
 }
 
 /// Finds all the projects that these users have ever worked on
@@ -90,7 +93,8 @@ async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Error).unwrap();
     let mut app =
-        Application::new(&opts.my_address, &opts.server_address, 8).await?;
+        LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
+            .await?;
     // NOTE: IS this table needed?
     //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
     app.df_from_sor("commits", "/home/tom/code/7degrees/smol_commits.ltgt")
@@ -117,7 +121,7 @@ async fn main() -> Result<(), LiquidError> {
             )?,
             Some(rower) => {
                 let serialized = serialize(&rower)?;
-                let unlocked = app.kv.lock().await;
+                let unlocked = app.kv.read().await;
                 let mut futs = Vec::new();
                 for i in 2..(app.num_nodes + 1) {
                     futs.push(unlocked.send_blob(i, serialized.clone()));
@@ -143,7 +147,7 @@ async fn main() -> Result<(), LiquidError> {
             )?,
             Some(rower) => {
                 let serialized = serialize(&rower)?;
-                let unlocked = app.kv.lock().await;
+                let unlocked = app.kv.read().await;
                 // Could send concurrently does it matter?
                 for i in 2..(app.num_nodes + 1) {
                     unlocked.send_blob(i, serialized.clone()).await?;

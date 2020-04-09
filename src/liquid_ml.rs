@@ -16,12 +16,12 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, mpsc::Receiver, Mutex, Notify};
+use tokio::sync::{mpsc, mpsc::Receiver, Mutex, Notify, RwLock};
 
 /// Represents an application
-pub struct Application {
+pub struct LiquidML {
     /// A pointer to the KVStore that stores all the data for the application
-    pub kv: Arc<Mutex<KVStore<LocalDataFrame>>>,
+    pub kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
     /// The id of this node, assigned by the registration server
     pub node_id: usize,
     /// A receiver for blob messages that can b processed by the user
@@ -34,7 +34,7 @@ pub struct Application {
     pub df: HashMap<String, DistributedDataFrame>,
 }
 
-impl Application {
+impl LiquidML {
     /// Create a new `liquid_ml` application that runs at `my_addr` and will
     /// wait to connect to `num_nodes` nodes after registering with the
     /// `Server` at the `server_addr` before returning.
@@ -54,8 +54,8 @@ impl Application {
             true,
         )
         .await;
-        let node_id = { kv.lock().await.id };
-        Ok(Application {
+        let node_id = { kv.read().await.id };
+        Ok(LiquidML {
             kv,
             node_id,
             blob_receiver: Arc::new(Mutex::new(blob_receiver)),
@@ -103,6 +103,44 @@ impl Application {
         self.df.insert(name.to_string(), ddf);
         Ok(())
     }
+    /*
+     *
+     *
+    /// Create a new application and split the given SoR file across all the
+    /// nodes in the network. Assigns a key with the name `df_name` to
+    /// the `DataFrame` chunk for this node.
+    ///
+    /// Note: assumes the entire SoR file is present on all nodes
+    pub async fn from_sor(
+        file_name: &str,
+        my_addr: &str,
+        server_addr: &str,
+        num_nodes: usize,
+        df_name: &str,
+    ) -> Result<Self, LiquidError> {
+        let app = Application::new(my_addr, server_addr, num_nodes).await?;
+        let file = fs::metadata(file_name).unwrap();
+        let f: File = File::open(file_name).unwrap();
+        let mut reader = BufReader::new(f);
+        let mut size = file.len() / num_nodes as u64;
+        // Note: Node ids start at 1
+        let from = size * (app.node_id - 1) as u64;
+
+        // advance the reader to this node's starting index then
+        // find the next newline character
+        let mut buffer = Vec::new();
+        reader.seek(SeekFrom::Start(from + size)).unwrap();
+        reader.read_until(b'\n', &mut buffer).unwrap();
+        size += buffer.len() as u64 + 1;
+
+        let df = DataFrame::from_sor(file_name, from as usize, size as usize);
+        let key = Key::new(df_name, app.node_id);
+        app.kv.put(&key, df).await?;
+        Ok(app)
+    }
+
+     *
+     */
 
     pub async fn pmap<
         T: Rower + Serialize + Clone + DeserializeOwned + Send,

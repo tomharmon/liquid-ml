@@ -15,7 +15,7 @@ pub use sorer::{
     schema::DataType,
 };
 use std::sync::Arc;
-use tokio::sync::{mpsc::Receiver, Mutex};
+use tokio::sync::{mpsc::Receiver, Mutex, RwLock};
 
 mod distributed_dataframe;
 mod local_dataframe;
@@ -44,7 +44,7 @@ pub struct DistributedDataFrame {
     pub schema: Schema,
     /// The `KVStore` used to cache deserialized `DataFrame` chunks to use
     /// in processing and to get chunks from other nodes.
-    kv: Arc<Mutex<KVStore<LocalDataFrame>>>,
+    kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
     /// Blob Receiver for sending sharing rowers between dataframes.
     receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     /// Keys that point to data in different nodes.

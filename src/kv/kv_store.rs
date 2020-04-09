@@ -4,17 +4,17 @@ use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
 use deepsize::DeepSizeOf;
-use log::error;
-use log::info;
+use log::{debug, error, info};
 use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use sysinfo::{RefreshKind, System, SystemExt};
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::{Mutex, Notify, RwLock};
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    Mutex, Notify, RwLock,
+};
 
 const MAX_NUM_CACHED_VALUES: usize = 10;
 const BYTES_PER_KIB: f64 = 1024.0;
@@ -60,7 +60,7 @@ impl<
         kill_notifier: Arc<Notify>,
         num_clients: usize,
         wait_for_all_clients: bool,
-    ) -> Arc<Mutex<Self>> {
+    ) -> Arc<RwLock<Self>> {
         // the Receiver acts as our queue of messages from the network, and
         // the network uses the Sender to add messages to our queue
         let (sender, receiver) = mpsc::channel(100);
@@ -84,7 +84,7 @@ impl<
             "KVStore has a max cache size of {} GB",
             max_cache_size_in_gb
         );
-        let kv = Arc::new(Mutex::new(KVStore {
+        let kv = Arc::new(RwLock::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
             network,
@@ -194,8 +194,11 @@ impl<
     ) -> Result<Option<Value>, LiquidError> {
         let serial = serialize(&value)?;
         if key.home == self.id {
-            let opt_old_data = { self.data.write().await.insert(key, serial) };
-            self.internal_notifier.notify();
+            debug!("Put key: {:#?} into KVStore", key.clone());
+            let opt_old_data =
+                { self.data.write().await.insert(key.clone(), serial) };
+            self.internal_notifier.notify(); // why do we need this here again
+            self.add_to_cache(&key, Arc::new(value)).await?;
             Ok(opt_old_data)
         } else {
             let target_id = key.home;
@@ -242,47 +245,46 @@ impl<
     ///    - `Blob` message: send the data up a higher level similar to how
     ///       the `Client` processes messages
     pub(crate) async fn process_messages(
-        kv: Arc<Mutex<KVStore<T>>>,
+        kvstore: Arc<RwLock<KVStore<T>>>,
         mut receiver: Receiver<Message<KVMessage>>,
     ) -> Result<(), LiquidError> {
         loop {
             let msg = receiver.recv().await.unwrap();
-            let kv_ptr_clone = kv.clone();
-            let mut sender_clone =
-                { kv_ptr_clone.lock().await.blob_sender.clone() };
+            let kv = kvstore.clone();
+            let mut sender_clone = { kv.read().await.blob_sender.clone() };
             tokio::spawn(async move {
-                info!("Processing a message with id: {:#?}", msg.msg_id);
+                debug!("Processing a message with id: {:#?}", msg.msg_id);
                 match msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond
-                        let kv_ptr_clone = kv_ptr_clone.lock().await;
-                        let v =
-                            kv_ptr_clone.wait_and_get_raw(&k).await.unwrap();
+                        let v = {
+                            kv.read().await.wait_and_get_raw(&k).await.unwrap()
+                        };
+                        let response = KVMessage::Data(k, v);
                         {
-                            kv_ptr_clone
+                            kv.read()
+                                .await
                                 .network
                                 .write()
                                 .await
-                                .send_msg(msg.sender_id, KVMessage::Data(k, v))
+                                .send_msg(msg.sender_id, response)
                                 .await
                                 .unwrap();
                         }
                     }
                     KVMessage::Data(k, v) => {
-                        let kv_ptr_clone = kv_ptr_clone.lock().await;
                         let v: Arc<T> = Arc::new(deserialize(&v).unwrap());
                         {
-                            kv_ptr_clone.cache.lock().await.put(k, v);
+                            let unlocked = kv.read().await;
+                            unlocked.add_to_cache(&k, v).await.unwrap();
+                            unlocked.internal_notifier.notify();
                         }
-                        kv_ptr_clone.internal_notifier.notify();
                     }
                     KVMessage::Put(k, v) => {
                         // Note is the home id actually my id should we check?
-                        {
-                            let kv_ptr_clone = kv_ptr_clone.lock().await;
-                            kv_ptr_clone.data.write().await.insert(k, v);
-                            kv_ptr_clone.internal_notifier.notify();
-                        }
+                        let unlocked = kv.read().await;
+                        unlocked.data.write().await.insert(k, v);
+                        unlocked.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
                         sender_clone.send(v).await.unwrap();
