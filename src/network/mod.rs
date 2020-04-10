@@ -151,6 +151,7 @@ pub struct Client<T> {
 }
 
 /// Represents a registration `Server` in a distributed system.
+#[derive(Debug)]
 pub struct Server {
     /// The `address` of this `Server`
     pub(crate) address: String,
@@ -202,7 +203,7 @@ pub(crate) struct MessageCodec<T> {
 
 /// Reads a message of from the given `reader` into the `buffer` and deserialize
 /// it into a type `T`
-pub(crate) async fn read_msg<T: DeserializeOwned + std::fmt::Debug>(
+pub(crate) async fn read_msg<T: DeserializeOwned>(
     reader: &mut FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>,
 ) -> Result<Message<T>, LiquidError> {
     match reader.next().await {

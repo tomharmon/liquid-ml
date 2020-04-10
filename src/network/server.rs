@@ -50,18 +50,13 @@ impl Server {
                 address.clone(),
                 target_id
             );
-            let dir_msg = Message::new(
-                self.msg_id,
-                0,
-                target_id,
-                ControlMsg::Directory {
-                    dir: self
-                        .directory
-                        .iter()
-                        .map(|(k, v)| (*k, v.address.clone()))
-                        .collect(),
-                },
-            );
+            let dir_msg = ControlMsg::Directory {
+                dir: self
+                    .directory
+                    .iter()
+                    .map(|(k, v)| (*k, v.address.clone()))
+                    .collect(),
+            };
             // Add them to our directory after making the `RegistrationMsg`
             // because we don't need to inform them of their own address
             let conn = Connection { address, sink };
@@ -76,9 +71,16 @@ impl Server {
     pub async fn send_msg(
         &mut self,
         target_id: usize,
-        message: Message<ControlMsg>,
+        message: ControlMsg,
     ) -> Result<(), LiquidError> {
-        network::send_msg(target_id, message, &mut self.directory).await?;
+        let m = Message {
+            sender_id: 0,
+            target_id,
+            msg_id: self.msg_id,
+            msg: message,
+        };
+
+        network::send_msg(target_id, m, &mut self.directory).await?;
         self.msg_id += 1;
         Ok(())
     }
@@ -90,8 +92,7 @@ impl Server {
     ) -> Result<(), LiquidError> {
         let d: Vec<usize> = self.directory.iter().map(|(k, _)| *k).collect();
         for k in d {
-            self.send_msg(k, Message::new(self.msg_id, 0, k, message.clone()))
-                .await?;
+            self.send_msg(k, message.clone()).await?;
         }
         Ok(())
     }

@@ -15,9 +15,8 @@ use tokio::sync::{mpsc::Sender, Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 // TODO: remove 'static
-impl<
-        RT: Send + Sync + DeserializeOwned + Serialize + std::fmt::Debug + 'static,
-    > Client<RT>
+impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
+    Client<RT>
 {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
@@ -263,6 +262,14 @@ impl<
         self.msg_id += 1;
         Ok(())
     }
+    /// Broadcast the given `message` to all currently connected clients
+    pub async fn broadcast(&mut self, message: RT) -> Result<(), LiquidError> {
+        let d: Vec<usize> = self.directory.iter().map(|(k, _)| *k).collect();
+        for k in d {
+            self.send_msg(k, message.clone()).await?;
+        }
+        Ok(())
+    }
 
     /// Spawns a Tokio task to read messages from the given `reader` and
     /// handle responding to them.
@@ -280,7 +287,7 @@ impl<
                     };
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 let id = msg.msg_id;
-                sender.send(msg).await.unwrap();
+                sender.send(msg).await.unwrap_or_else(|_| panic!());
                 info!(
                     "Got a msg with id: {} and added it to process queue",
                     id
