@@ -77,7 +77,7 @@ impl Key {
         let mut rng = rand::thread_rng();
         // TODO: probably a better way to do this
         Key {
-            name: format!("{}-{}-{}", name, home, rng.gen::<i8>()),
+            name: format!("{}-{}-{}", name, home, rng.gen::<i16>()),
             home,
         }
     }
@@ -100,7 +100,7 @@ pub struct KVStore<T> {
     cache: Mutex<LruCache<Key, Arc<T>>>,
     /// The `network` layer, used to send and receive messages and data with
     /// other `KVStore`s
-    network: Arc<RwLock<Client<KVMessage>>>,
+    pub(crate) network: Arc<RwLock<Client<KVMessage>>>,
     /// Used internally for processing data and messages
     internal_notifier: Notify,
     /// The `id` of the node this `KVStore` is running on

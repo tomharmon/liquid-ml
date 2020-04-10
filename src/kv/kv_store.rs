@@ -63,7 +63,7 @@ impl<
     ) -> Arc<RwLock<Self>> {
         // the Receiver acts as our queue of messages from the network, and
         // the network uses the Sender to add messages to our queue
-        let (sender, receiver) = mpsc::channel(100);
+        let (sender, receiver) = mpsc::channel(64);
         let network = Client::new(
             server_addr,
             my_addr,
@@ -116,10 +116,10 @@ impl<
         }
 
         let serialized_val = self.get_raw(key).await?;
-        let deserialized: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
-        let v = deserialized.clone();
-        self.add_to_cache(key, v).await?;
-        Ok(deserialized)
+        let value: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
+        let v = value.clone();
+        self.add_to_cache(key.clone(), v).await?;
+        Ok(value)
     }
 
     /// Get the data for the given `key`. If the key belongs on a different
@@ -151,11 +151,10 @@ impl<
                 self.internal_notifier.notified().await;
             }
             let serialized_val = self.get_raw(key).await?;
-            let deserialized: Arc<T> =
-                Arc::new(deserialize(&serialized_val[..])?);
-            let v = deserialized.clone();
-            self.add_to_cache(key, v).await?;
-            Ok(deserialized)
+            let value: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
+            let v = value.clone();
+            self.add_to_cache(key.clone(), v).await?;
+            Ok(value)
         } else {
             // The data is not supposed to be owned by this node, we must
             // request it from another `KVStore` by sending a `get` message
@@ -198,7 +197,7 @@ impl<
             let opt_old_data =
                 { self.data.write().await.insert(key.clone(), serial) };
             self.internal_notifier.notify(); // why do we need this here again
-            self.add_to_cache(&key, Arc::new(value)).await?;
+            self.add_to_cache(key, Arc::new(value)).await?;
             Ok(opt_old_data)
         } else {
             let target_id = key.home;
@@ -276,7 +275,7 @@ impl<
                         let v: Arc<T> = Arc::new(deserialize(&v).unwrap());
                         {
                             let unlocked = kv.read().await;
-                            unlocked.add_to_cache(&k, v).await.unwrap();
+                            unlocked.add_to_cache(k, v).await.unwrap();
                             unlocked.internal_notifier.notify();
                         }
                     }
@@ -318,10 +317,9 @@ impl<
 
     async fn add_to_cache(
         &self,
-        key: &Key,
+        key: Key,
         value: Arc<T>,
     ) -> Result<(), LiquidError> {
-        let k = key.clone();
         let v_size = value.deep_size_of() as u64;
         {
             let mut unlocked = self.cache.lock().await;
@@ -347,7 +345,7 @@ impl<
                 }
             }
             info!("Added value of size {} bytes to cache", v_size);
-            unlocked.put(k, value);
+            unlocked.put(key, value);
         }
         Ok(())
     }
