@@ -70,8 +70,6 @@ impl<
             let second = iter.next().unwrap();
             (first, second)
         };
-        dbg!(my_ip);
-        dbg!(my_port);
         let network = Client::new(
             server_addr,
             my_ip,

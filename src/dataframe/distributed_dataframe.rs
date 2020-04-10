@@ -8,7 +8,7 @@ use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
 use bytecount;
 use futures::future::try_join_all;
-use log::info;
+use log::{debug, info};
 use serde::{de::DeserializeOwned, Serialize};
 use sorer::dataframe::{Column, Data, SorTerator};
 //use sorer::schema;
@@ -77,11 +77,13 @@ impl DistributedDataFrame {
 
             // TODO: Panics if file doesn't exist
             let total_newlines = count_new_lines(file_name);
-            dbg!(total_newlines);
             let max_rows_per_node = total_newlines / num_nodes;
             let schema = sorer::schema::infer_schema(file_name);
-            dbg!(max_rows_per_node);
-            dbg!(schema.clone());
+            info!(
+                "Total newlines: {} max rows per node: {}",
+                total_newlines, max_rows_per_node
+            );
+            info!("Inferred schema: {:?}", schema.clone());
             // make a chunking iterator for the sor file
             let sor_terator =
                 SorTerator::new(file_name, schema.clone(), max_rows_per_node);
@@ -110,6 +112,10 @@ impl DistributedDataFrame {
                     // add the future we make to a vec for multiplexing
                     futs.push(unlocked.put(key.clone(), ldf));
 
+                    // TODO: might need to do some tuning on when to join here,
+                    // possibly even dynamically figure out some value to
+                    // smooth over the tradeoff between memory and speed
+                    // (right now it uses a lot of memory)
                     if chunk_idx % num_nodes == 0 {
                         // send all chunks concurrently once we have num_node
                         // new chunks to send
@@ -126,20 +132,23 @@ impl DistributedDataFrame {
                     // if the number of chunks is not evenly divisible by the
                     // number of nodes, we will have a few more chunks to send
                     try_join_all(futs).await?;
-                    info!(
-                        "Finished distributing {} SoR chunks",
-                        cur_num_rows / max_rows_per_node
-                    );
                 }
+                info!(
+                    "Finished distributing {} SoR chunks",
+                    cur_num_rows / max_rows_per_node
+                );
             }
             // We are done distributing chunks, now we want to make sure all
             // ddfs are connected on the network, so we wait for a `Ready`
             // message before sending out the `Initialization` message
-            let ready_msg = receiver.recv().await.unwrap();
-            match ready_msg.msg {
+            let ready_blob =
+                { kv_blob_receiver.lock().await.recv().await.unwrap() };
+            let ready_msg = deserialize(&ready_blob)?;
+            match ready_msg {
                 DistributedDFMsg::Ready => (),
                 _ => return Err(LiquidError::UnexpectedMessage),
             }
+            debug!("Node 1 got the final ready message");
 
             // Create an Initialization message that holds all the information
             // related to this DistributedDataFrame, the Schema and the map
@@ -155,6 +164,7 @@ impl DistributedDataFrame {
             {
                 network.write().await.broadcast(intro_msg).await?
             };
+            debug!("Node 1 sent the initialization message to all nodes");
 
             let row = Arc::new(RwLock::new(Row::new(&schema)));
 
@@ -197,6 +207,7 @@ impl DistributedDataFrame {
                 DistributedDFMsg::Ready => (),
                 _ => return Err(LiquidError::UnexpectedMessage),
             }
+            debug!("Received a ready message");
 
             // The node before us has joined the network, it is now time
             // to connect
@@ -238,6 +249,7 @@ impl DistributedDataFrame {
                 } => (schema, df_chunk_map),
                 _ => return Err(LiquidError::UnexpectedMessage),
             };
+            debug!("Got the Initialization message from Node 1");
 
             let row = Arc::new(RwLock::new(Row::new(&schema)));
             let num_rows = df_chunk_map
@@ -246,7 +258,9 @@ impl DistributedDataFrame {
                 .unwrap()
                 .0
                 .end;
+
             dbg!(num_rows);
+
             let ddf = Arc::new(DistributedDataFrame {
                 schema,
                 df_name: df_name.to_string(),
@@ -455,7 +469,6 @@ impl DistributedDataFrame {
             .filter(|(_, key)| key.home == self.node_id)
             .map(|(_, v)| v)
             .collect();
-        dbg!(my_keys.len());
         // map over our chunks
         {
             let unlocked_kv = self.kv.read().await;
@@ -464,21 +477,21 @@ impl DistributedDataFrame {
                 rower = ldf.pmap(rower);
             }
         }
+        dbg!("finished mapping local chunk(s)");
         if self.node_id == self.num_nodes {
-            let unlocked_kv = self.kv.read().await;
             // we are the last node
-            let blob = serialize(&rower)?;
-            unlocked_kv.send_blob(self.node_id - 1, blob).await?;
+            self.send_blob(self.node_id - 1, &rower).await?;
+            dbg!("last node sent its results");
             Ok(None)
         } else {
-            let mut blob =
+            let blob =
                 { self.blob_receiver.lock().await.recv().await.unwrap() };
             let external_rower: T = deserialize(&blob[..])?;
             rower = rower.join(external_rower);
-            let unlocked_kv = self.kv.read().await;
+            dbg!("received a result and joined it with our rower");
             if self.node_id != 1 {
-                blob = serialize(&rower)?;
-                unlocked_kv.send_blob(self.node_id - 1, blob).await?;
+                self.send_blob(self.node_id - 1, &rower).await?;
+                dbg!("sent our response");
                 Ok(None)
             } else {
                 Ok(Some(rower))

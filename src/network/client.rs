@@ -56,7 +56,6 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 listener.local_addr()?.to_string()
             }
         };
-        dbg!(my_address.clone());
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
         let (reader, writer) = io::split(server_stream);

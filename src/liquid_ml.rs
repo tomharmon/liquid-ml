@@ -67,8 +67,6 @@ impl LiquidML {
             let second = iter.next().unwrap();
             (first, second)
         };
-        dbg!(my_ip);
-        dbg!(my_addr);
 
         Ok(LiquidML {
             kv,
