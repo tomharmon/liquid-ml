@@ -298,6 +298,7 @@ impl LocalDataFrame {
                 },
             };
         }
+        row.set_idx(row_index);
         Ok(())
     }
 

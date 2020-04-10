@@ -14,8 +14,10 @@ pub use sorer::{
     dataframe::{Column, Data},
     schema::DataType,
 };
+use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
-use tokio::sync::{mpsc::Receiver, Mutex, RwLock};
+use tokio::sync::{mpsc::Receiver, Mutex, Notify, RwLock};
 
 mod distributed_dataframe;
 mod local_dataframe;
@@ -40,19 +42,47 @@ pub struct LocalDataFrame {
 /// functionality from the `DataFrame` trait as a local `DataFrame` struct.
 #[derive(Debug)]
 pub struct DistributedDataFrame {
-    /// The `Schema` of this `DataFrame`
+    /// The `Schema` of this `DistributedDataFrame`
     pub schema: Schema,
-    /// The `KVStore` used to cache deserialized `DataFrame` chunks to use
-    /// in processing and to get chunks from other nodes.
-    kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
-    /// Blob Receiver for sending sharing rowers between dataframes.
-    receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
+    /// The name of this `DistributedDataFrame`
+    pub df_name: String,
     /// Keys that point to data in different nodes.
-    pub data: Vec<Key>,
-    /// The id of this node
+    pub df_chunk_map: HashMap<Range<usize>, Key>,
+    /// cached, ddf is immutable
+    pub num_rows: usize,
+    /// The id of the node this `DistributedDataFrame` is running on
     pub node_id: usize,
     /// How many nodes are there in this DDF?
     pub num_nodes: usize,
+    /// The `KVStore`
+    kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
+    /// Used for processing messages: TODO better explanation
+    internal_notifier: Arc<Notify>,
+    /// Used for sending rows back and forth TODO: better explanation
+    row: Arc<RwLock<Row>>,
+    /// Blob Receiver for sending lower level messages to other nodes
+    blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
+}
+
+/// Represents the kinds of messages sent between `DistributedDataFrame`s
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) enum DistributedDFMsg {
+    /// A messaged used to request a `Row` with the given index from another
+    /// node in a `DistributedDataFrame`
+    GetRow(usize),
+    /// A message used to respond to `GetRow` messages with the requested row
+    Row(Row),
+    /// A message used to tell the 1st node what ranges DistributedDataFrame
+    /// nodes have after filtering
+    FilteredSize(usize),
+    /// A message used to share random blobs of data with other nodes. This
+    /// provides a lower level interface to facilitate other kinds of messages
+    Blob(Vec<u8>),
+    /// To tell other DDFs whats up TODO:
+    Initialization {
+        schema: Schema,
+        df_chunk_map: HashMap<Range<usize>, Key>,
+    },
 }
 
 /// Represents a `Schema` of a `DataFrame`

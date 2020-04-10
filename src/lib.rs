@@ -408,3 +408,7 @@ pub mod error;
 pub mod kv;
 pub mod liquid_ml;
 pub mod network;
+
+pub(crate) const MAX_NUM_CACHED_VALUES: usize = 10;
+pub(crate) const BYTES_PER_KIB: f64 = 1_024.0;
+pub(crate) const BYTES_PER_GB: f64 = 1_073_741_824.0;

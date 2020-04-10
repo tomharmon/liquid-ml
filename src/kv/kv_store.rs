@@ -2,6 +2,7 @@
 use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
+use crate::{BYTES_PER_GB, BYTES_PER_KIB, MAX_NUM_CACHED_VALUES};
 use bincode::{deserialize, serialize};
 use deepsize::DeepSizeOf;
 use log::{debug, error, info};
@@ -15,10 +16,6 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Mutex, Notify, RwLock,
 };
-
-const MAX_NUM_CACHED_VALUES: usize = 10;
-const BYTES_PER_KIB: f64 = 1024.0;
-const BYTES_PER_GB: f64 = 1_073_741_824.0;
 
 impl<
         T: Serialize

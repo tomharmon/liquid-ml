@@ -1,95 +1,152 @@
 //! Defines functionality for the `DataFrame`
 use crate::dataframe::{
-    DistributedDataFrame, LocalDataFrame, Row, Rower, Schema,
+    DistributedDFMsg, DistributedDataFrame, LocalDataFrame, Row, Rower, Schema,
 };
 use crate::error::LiquidError;
 use crate::kv::{KVStore, Key};
 use bincode::{deserialize, serialize};
+use bytecount;
 use futures::future::try_join_all;
+use log::info;
 use serde::{de::DeserializeOwned, Serialize};
 use sorer::dataframe::{Column, Data, SorTerator};
 //use sorer::schema;
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
+use std::ops::Range;
 use std::sync::Arc;
-use tokio::sync::{mpsc::Receiver, Mutex, RwLock};
-
-const ROW_COUNT_PER_KEY: usize = 100_000;
-
-const BYTES_PER_GB: f64 = 1_073_741_824.0;
+use tokio::sync::{mpsc::Receiver, Mutex, Notify, RwLock};
 
 /// An interface for a `DataFrame`, inspired by those used in `pandas` and `R`.
 impl DistributedDataFrame {
+    /// TODO: update documentation
     /// Creates a new `DataFrame` from the given file
     pub async fn from_sor(
         file_name: &str,
         kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
-        name: &str,
+        df_name: &str,
         num_nodes: usize,
-        receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
+        blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Self, LiquidError> {
         let node_id = { kv.read().await.id };
         if node_id == 1 {
-            // Reads the SOR File in 1 GB chunks
-            // Buffered reading of the sor file
-            let total_newlines = count_newlines(file_name);
+            // Bug: Panics if file doesnt exist
+            let total_newlines = count_new_lines(file_name);
             dbg!(total_newlines);
             let max_rows_per_node = total_newlines / num_nodes;
-            let mut keys = Vec::new();
             let schema = sorer::schema::infer_schema(file_name);
             dbg!(max_rows_per_node);
             dbg!(schema.clone());
-            // Bug: Panics if file doesnt exist
+            // make a chunking iterator
             let sorterator =
                 SorTerator::new(file_name, schema.clone(), max_rows_per_node);
+            let mut df_chunk_map = HashMap::new();
+            let mut cur_num_rows = 0;
             {
                 let unlocked = kv.read().await;
                 let mut futs = Vec::new();
-                let mut chunk_idx = 0;
-                for data in sorterator {
-                    let ldf = LocalDataFrame::from(data);
-                    let key = Key::generate(name, (chunk_idx % num_nodes) + 1);
+                // in each iteration, create a future sends a chunk to a node
+                for (chunk_idx, chunk) in sorterator.into_iter().enumerate() {
+                    let ldf = LocalDataFrame::from(chunk);
+                    let key =
+                        Key::generate(df_name, (chunk_idx % num_nodes) + 1);
+                    // add this chunk range and key to our <range, key> map
+                    df_chunk_map.insert(
+                        Range {
+                            start: cur_num_rows,
+                            end: cur_num_rows + ldf.n_rows(),
+                        },
+                        key.clone(),
+                    );
+                    cur_num_rows += ldf.n_rows();
 
+                    // add the future we make to a vec for multiplexing
                     futs.push(unlocked.put(key.clone(), ldf));
-                    keys.push(key);
 
                     if chunk_idx % num_nodes == 0 {
+                        // send all chunks concurrently once we have num_node
+                        // new chunks to send
                         try_join_all(futs).await?;
                         futs = Vec::new();
-                        println!("sent num node chunks");
+                        info!(
+                            "sent {} chunks successfully, total of {} chunks",
+                            num_nodes, chunk_idx
+                        );
                     }
-
-                    chunk_idx += 1;
                 }
                 if !futs.is_empty() {
+                    // maybe its not evenly divisible
                     try_join_all(futs).await?;
+                    info!(
+                        "Finished distributing {} SoR chunks",
+                        cur_num_rows / max_rows_per_node
+                    );
                 }
             }
 
             let schema = Schema::from(schema);
-            let build = serialize(&(keys.clone(), schema.clone()))?;
-            for i in 2..(num_nodes + 1) {
-                kv.read().await.send_blob(i, build.clone()).await?;
+            let intro_msg = serialize(&DistributedDFMsg::Initialization {
+                schema: schema.clone(),
+                df_chunk_map: df_chunk_map.clone(),
+            })?;
+
+            // send the other nodes this `DistributedDataFrame`
+            {
+                let unlocked = kv.read().await;
+                for i in 2..=num_nodes {
+                    unlocked.send_blob(i, intro_msg.clone()).await;
+                }
             }
+
+            let row = Arc::new(RwLock::new(Row::new(&schema)));
+            let internal_notifier = Arc::new(Notify::new());
+            Ok(DistributedDataFrame {
+                schema,
+                df_name: df_name.to_string(),
+                df_chunk_map,
+                num_rows: cur_num_rows,
+                node_id,
+                num_nodes,
+                kv,
+                internal_notifier,
+                row,
+                blob_receiver,
+            })
+        } else {
+            let blob = { blob_receiver.lock().await.recv().await.unwrap() };
+            let init_msg = deserialize(&blob)?;
+            let (schema, df_chunk_map) =
+                if let DistributedDFMsg::Initialization {
+                    schema,
+                    df_chunk_map,
+                } = init_msg
+                {
+                    (schema, df_chunk_map)
+                } else {
+                    return Err(LiquidError::UnexpectedMessage);
+                };
+            let row = Arc::new(RwLock::new(Row::new(&schema)));
+            let num_rows = df_chunk_map
+                .iter()
+                .max_by(|(k1, _), (k2, _)| k2.end.cmp(&k1.end))
+                .unwrap()
+                .0
+                .end;
+            dbg!(num_rows);
+            let internal_notifier = Arc::new(Notify::new());
 
             Ok(DistributedDataFrame {
                 schema,
-                receiver,
-                data: keys,
-                kv,
-                num_nodes,
+                df_name: df_name.to_string(),
+                df_chunk_map,
+                num_rows,
                 node_id,
-            })
-        } else {
-            let (data, schema) =
-                { deserialize(&receiver.lock().await.recv().await.unwrap())? };
-            Ok(DistributedDataFrame {
-                data,
-                schema,
-                kv,
                 num_nodes,
-                node_id,
-                receiver,
+                kv,
+                internal_notifier,
+                row,
+                blob_receiver,
             })
         }
     }
@@ -101,72 +158,86 @@ impl DistributedDataFrame {
         num_nodes: usize,
         receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Self, LiquidError> {
-        let node_id = { kv.read().await.id };
-        if node_id == 1 {
-            let mut data = data.unwrap();
-            let mut to_process = n_rows(&data);
-            let mut chunk_idx = 0;
-            let mut keys = Vec::new();
-            let mut schema = Schema::new();
-            while to_process > 0 {
-                let mut new_data = Vec::new();
-                for c in &mut data {
-                    let new_c = match c {
-                        Column::Int(i) => {
-                            Column::Int(i.drain(0..ROW_COUNT_PER_KEY).collect())
-                        }
-                        Column::Bool(i) => Column::Bool(
-                            i.drain(0..ROW_COUNT_PER_KEY).collect(),
-                        ),
-                        Column::Float(i) => Column::Float(
-                            i.drain(0..ROW_COUNT_PER_KEY).collect(),
-                        ),
-                        Column::String(i) => Column::String(
-                            i.drain(0..ROW_COUNT_PER_KEY).collect(),
-                        ),
-                    };
-                    new_data.push(new_c);
-                }
-                let ldf = LocalDataFrame::from(new_data);
-                let key = Key::new(
-                    &format!("{}_{}", name, chunk_idx),
-                    (chunk_idx % num_nodes) + 1,
-                );
-                schema = ldf.get_schema().clone();
-                // todo multiplex?
-                {
-                    kv.read().await.put(key.clone(), ldf).await?;
-                }
-                keys.push(key);
-                chunk_idx += 1;
-                to_process = n_rows(&data);
-            }
+        unimplemented!();
+        /*
+            let node_id = { kv.read().await.id };
+            if node_id == 1 {
+                let mut data = data.unwrap();
+                let mut rows_to_process = n_rows(&data);
+                let mut chunk_idx = 0;
+                let mut keys = Vec::new();
+                let mut schema = Schema::new();
+                let rows_per_node = data.len() / num_nodes;
+                let mut send_chunk_futs = Vec::new();
+                while rows_to_process > 0 {
+                    let mut chunked_data = Vec::new();
+                    for col in data {
+                        // will panic if rows_per_node is greater than i.len()
+                        let new_col = match col {
+                            Column::Int(i) => {
+                                Column::Int(i.drain(0..rows_per_node).collect())
+                            }
+                            Column::Bool(i) => {
+                                Column::Bool(i.drain(0..rows_per_node).collect())
+                            }
+                            Column::Float(i) => {
+                                Column::Float(i.drain(0..rows_per_node).collect())
+                            }
+                            Column::String(i) => {
+                                Column::String(i.drain(0..rows_per_node).collect())
+                            }
+                        };
+                        chunked_data.push(new_col);
+                    }
+                    let ldf = LocalDataFrame::from(chunked_data);
+                    let key = Key::generate(name, (chunk_idx % num_nodes) + 1);
 
-            let build = serialize(&(keys.clone(), schema.clone()))?;
-            for i in 2..(num_nodes + 1) {
-                kv.read().await.send_blob(i, build.clone()).await?;
-            }
+                    let unlocked = kv.read().await;
+                    send_chunk_futs.push(unlocked.put(key.clone(), ldf));
+                    keys.push(key);
 
-            Ok(DistributedDataFrame {
-                schema,
-                receiver,
-                data: keys,
-                kv,
-                num_nodes,
-                node_id,
-            })
-        } else {
-            let (data, schema) =
-                { deserialize(&receiver.lock().await.recv().await.unwrap())? };
-            Ok(DistributedDataFrame {
-                data,
-                schema,
-                kv,
-                num_nodes,
-                node_id,
-                receiver,
-            })
-        }
+                    if chunk_idx % num_nodes == 0 {
+                        // send all chunks concurrently
+                        try_join_all(send_chunk_futs).await?;
+                        send_chunk_futs = Vec::new();
+                        println!("sent {} chunks", chunk_idx);
+                    }
+
+                    chunk_idx += 1;
+                    rows_to_process = n_rows(&data);
+                }
+
+                if !send_chunk_futs.is_empty() {
+                    // maybe its not evenly divisible
+                    try_join_all(send_chunk_futs).await?;
+                }
+
+                let build = serialize(&(keys.clone(), schema.clone()))?;
+                for i in 2..(num_nodes + 1) {
+                    kv.read().await.send_blob(i, build.clone()).await?;
+                }
+
+                Ok(DistributedDataFrame {
+                    schema,
+                    blob_receiver,
+                    data: keys,
+                    kv,
+                    num_nodes,
+                    node_id,
+                })
+            } else {
+                let (data, schema) =
+                    { deserialize(&receiver.lock().await.recv().await.unwrap())? };
+                Ok(DistributedDataFrame {
+                    data,
+                    schema,
+                    kv,
+                    num_nodes,
+                    node_id,
+                    receiver,
+                })
+            }
+        */
     }
     /// Obtains a reference to this `DataFrame`s schema.
     pub fn get_schema(&self) -> &Schema {
@@ -179,6 +250,8 @@ impl DistributedDataFrame {
         col_idx: usize,
         row_idx: usize,
     ) -> Result<Data, LiquidError> {
+        unimplemented!()
+        /*
         let key = match self.data.get(row_idx / ROW_COUNT_PER_KEY) {
             None => return Err(LiquidError::RowIndexOutOfBounds),
             Some(k) => k,
@@ -186,6 +259,7 @@ impl DistributedDataFrame {
         let ldf = { self.kv.read().await.wait_and_get(key).await? };
         let adjusted_row_idx = row_idx % ROW_COUNT_PER_KEY;
         ldf.get(col_idx, adjusted_row_idx)
+            */
     }
 
     /// Get the index of the `Column` with the given `col_name`. Returns `Some`
@@ -204,6 +278,8 @@ impl DistributedDataFrame {
         row_idx: usize,
         row: &mut Row,
     ) -> Result<(), LiquidError> {
+        unimplemented!()
+        /*
         let key = match self.data.get(row_idx / ROW_COUNT_PER_KEY) {
             None => return Err(LiquidError::RowIndexOutOfBounds),
             Some(k) => k,
@@ -211,6 +287,7 @@ impl DistributedDataFrame {
         let ldf = { self.kv.read().await.wait_and_get(key).await? };
         let adjusted_row_idx = row_idx % ROW_COUNT_PER_KEY;
         ldf.fill_row(adjusted_row_idx, row)
+        */
     }
 
     /// Perform a distributed map operation on the `DataFrame` associated with
@@ -238,11 +315,15 @@ impl DistributedDataFrame {
         &self,
         mut rower: T,
     ) -> Result<Option<T>, LiquidError> {
+        // get the keys for our locally owned chunks
         let my_keys: Vec<&Key> = self
-            .data
+            .df_chunk_map
             .iter()
-            .filter(|k| k.home == self.node_id)
+            .filter(|(range, key)| key.home == self.node_id)
+            .map(|(_, v)| v)
             .collect();
+        dbg!(my_keys.len());
+        // map over our chunks
         {
             let unlocked_kv = self.kv.read().await;
             for key in my_keys {
@@ -257,7 +338,8 @@ impl DistributedDataFrame {
             unlocked_kv.send_blob(self.node_id - 1, blob).await?;
             Ok(None)
         } else {
-            let mut blob = self.receiver.lock().await.recv().await.unwrap();
+            let mut blob =
+                self.blob_receiver.lock().await.recv().await.unwrap();
             let external_rower: T = deserialize(&blob[..])?;
             rower = rower.join(external_rower);
             let unlocked_kv = self.kv.read().await;
@@ -269,6 +351,12 @@ impl DistributedDataFrame {
                 Ok(Some(rower))
             }
         }
+    }
+
+    /// Return the (total) number of rows across all nodes for this
+    /// `DistributedDataFrame`
+    pub fn n_rows(&self) -> usize {
+        self.num_rows
     }
 
     /// Return the number of columns in this `DataFrame`.
@@ -289,134 +377,17 @@ fn n_rows(data: &Vec<Column>) -> usize {
     }
 }
 
-#[cfg(target_pointer_width = "16")]
-const USIZE_BYTES: usize = 2;
-#[cfg(target_pointer_width = "32")]
-const USIZE_BYTES: usize = 4;
-#[cfg(target_pointer_width = "64")]
-const USIZE_BYTES: usize = 8;
-const LO: usize = ::std::usize::MAX / 255;
-const HI: usize = LO * 128;
-const REP_NEWLINE: usize = b'\n' as usize * LO;
-
-const EVERY_OTHER_BYTE_LO: usize = 0x0001000100010001;
-const EVERY_OTHER_BYTE: usize = EVERY_OTHER_BYTE_LO * 0xFF;
-
-fn count_newlines(file_name: &str) -> usize {
+fn count_new_lines(file_name: &str) -> usize {
     let mut buf_reader = BufReader::new(File::open(file_name).unwrap());
-    let mut newlines = 0;
-    let mut buffer = [0; BYTES_PER_GB as usize / 1024];
+    let mut new_lines = 0;
 
     loop {
-        let bytes_read = buf_reader.read(&mut buffer).unwrap();
-        if bytes_read == 0 {
-            return newlines;
-        } else {
-            newlines += count_newlines_hyperscreaming(&buffer[..]);
-            buf_reader.consume(buffer.len());
-        }
-    }
-}
-
-// From: https://llogiq.github.io/2016/09/24/newline.html
-fn count_newlines_hyperscreaming(text: &[u8]) -> usize {
-    unsafe {
-        let mut ptr = text.as_ptr();
-        let mut end = ptr.offset(text.len() as isize);
-
-        let mut count = 0;
-
-        // Align start
-        while (ptr as usize) & (USIZE_BYTES - 1) != 0 {
-            if ptr == end {
-                return count;
-            }
-            count += (*ptr == b'\n') as usize;
-            ptr = ptr.offset(1);
-        }
-
-        // Align end
-        while (end as usize) & (USIZE_BYTES - 1) != 0 {
-            end = end.offset(-1);
-            count += (*end == b'\n') as usize;
-        }
-        if ptr == end {
-            return count;
-        }
-
-        // Read in aligned blocks
-        let mut ptr = ptr as *const usize;
-        let end = end as *const usize;
-
-        unsafe fn next(ptr: &mut *const usize) -> usize {
-            let ret = **ptr;
-            *ptr = ptr.offset(1);
-            ret
-        }
-
-        fn mask_zero(x: usize) -> usize {
-            (((x ^ REP_NEWLINE).wrapping_sub(LO)) & !x & HI) >> 7
-        }
-
-        unsafe fn next_4(ptr: &mut *const usize) -> [usize; 4] {
-            let x = [next(ptr), next(ptr), next(ptr), next(ptr)];
-            [
-                mask_zero(x[0]),
-                mask_zero(x[1]),
-                mask_zero(x[2]),
-                mask_zero(x[3]),
-            ]
+        let bytes_read = buf_reader.fill_buf().unwrap();
+        let len = bytes_read.len();
+        if len == 0 {
+            return new_lines;
         };
-
-        fn reduce_counts(counts: usize) -> usize {
-            let pair_sum = (counts & EVERY_OTHER_BYTE)
-                + ((counts >> 8) & EVERY_OTHER_BYTE);
-            pair_sum.wrapping_mul(EVERY_OTHER_BYTE_LO)
-                >> ((USIZE_BYTES - 2) * 8)
-        }
-
-        fn arr_add(xs: [usize; 4], ys: [usize; 4]) -> [usize; 4] {
-            [xs[0] + ys[0], xs[1] + ys[1], xs[2] + ys[2], xs[3] + ys[3]]
-        }
-
-        // 8kB
-        while ptr.offset(4 * 255) <= end {
-            let mut counts = [0, 0, 0, 0];
-            for _ in 0..255 {
-                counts = arr_add(counts, next_4(&mut ptr));
-            }
-            count += reduce_counts(counts[0]);
-            count += reduce_counts(counts[1]);
-            count += reduce_counts(counts[2]);
-            count += reduce_counts(counts[3]);
-        }
-
-        // 1kB
-        while ptr.offset(4 * 32) <= end {
-            let mut counts = [0, 0, 0, 0];
-            for _ in 0..32 {
-                counts = arr_add(counts, next_4(&mut ptr));
-            }
-            count +=
-                reduce_counts(counts[0] + counts[1] + counts[2] + counts[3]);
-        }
-
-        // 64B
-        let mut counts = [0, 0, 0, 0];
-        while ptr.offset(4 * 2) <= end {
-            for _ in 0..2 {
-                counts = arr_add(counts, next_4(&mut ptr));
-            }
-        }
-        count += reduce_counts(counts[0] + counts[1] + counts[2] + counts[3]);
-
-        // 8B
-        let mut counts = 0;
-        while ptr < end {
-            counts += mask_zero(next(&mut ptr));
-        }
-        count += reduce_counts(counts);
-
-        count
+        new_lines += bytecount::count(bytes_read, b'\n');
+        buf_reader.consume(len);
     }
 }
