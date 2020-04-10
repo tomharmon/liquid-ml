@@ -91,6 +91,8 @@ impl LiquidML {
             None
         };
         let ddf = DistributedDataFrame::new(
+            &self.server_addr,
+            &self.my_ip,
             data,
             self.kv.clone(),
             name,

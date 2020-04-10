@@ -3,7 +3,7 @@
 
 use crate::dataframe::Schema;
 use crate::error::LiquidError;
-use sorer::schema::DataType;
+use sorer::{dataframe::Column, schema::DataType};
 
 /// The implementation of the Schema interface, which manages data types and
 /// row/column names of a `DataFrame`
@@ -108,12 +108,30 @@ impl From<&str> for Schema {
 }
 
 impl From<Vec<DataType>> for Schema {
-    /// Create a Schema from a `Vec<DataType`
+    /// Create a Schema from a `Vec<DataType>`
     fn from(types: Vec<DataType>) -> Self {
         let mut schema = Vec::new();
         let mut col_names = Vec::new();
         for t in types {
             schema.push(t);
+            col_names.push(None);
+        }
+        Schema { schema, col_names }
+    }
+}
+
+impl From<&Vec<Column>> for Schema {
+    /// Create a `Schema` from a `Vec<Column>`
+    fn from(columns: &Vec<Column>) -> Self {
+        let mut schema = Vec::new();
+        let mut col_names = Vec::new();
+        for c in columns {
+            match c {
+                Column::Bool(_) => schema.push(DataType::Bool),
+                Column::Int(_) => schema.push(DataType::Int),
+                Column::Float(_) => schema.push(DataType::Float),
+                Column::String(_) => schema.push(DataType::String),
+            };
             col_names.push(None);
         }
         Schema { schema, col_names }
