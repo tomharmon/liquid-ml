@@ -398,8 +398,13 @@ impl LocalDataFrame {
     /// on a chunk of this `DataFrame` and are run in parallel.
     ///
     /// `n_threads` defaults to the number of cores available on this machine.
-    pub fn pfilter<T: Rower + Clone + Send>(&self, rower: T) -> Self {
-        let rowers = vec![rower; self.n_threads];
+    pub fn pfilter<T: Rower + Clone + Send>(&self, rower: &mut T) -> Self {
+        let mut rowers = Vec::new();
+        for _ in 0..self.n_threads {
+            rowers.push(rower.clone());
+        }
+        // ok.... the below syntax doesn't work
+        //    let rowers = vec![*rower; self.n_threads];
         let mut new_dfs = Vec::new();
         let step = self.n_rows() / self.n_threads;
         let mut from = 0;

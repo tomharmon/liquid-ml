@@ -55,6 +55,10 @@ pub struct DistributedDataFrame {
     pub node_id: usize,
     /// How many nodes are there in this DDF?
     pub num_nodes: usize,
+    /// What's the address of the `Server`?
+    pub server_addr: String,
+    /// What's my IP address?
+    pub my_ip: String,
     /// Used for communication with other nodes in this DDF
     network: Arc<RwLock<Client<DistributedDFMsg>>>,
     /// The `KVStore`
@@ -68,6 +72,8 @@ pub struct DistributedDataFrame {
     kill_notifier: Arc<Notify>,
     /// Used for lower level messages TODO: better explanation
     blob_receiver: Mutex<Receiver<Vec<u8>>>,
+    /// Used for processing filter results TODO: maybe a better way to do this
+    filter_results: Mutex<Receiver<DistributedDFMsg>>,
 }
 
 /// Represents the kinds of messages sent between `DistributedDataFrame`s
@@ -80,7 +86,10 @@ pub(crate) enum DistributedDFMsg {
     Row(Row),
     /// A message used to tell the 1st node what ranges DistributedDataFrame
     /// nodes have after filtering
-    FilteredSize(usize),
+    FilterResult {
+        num_rows: usize,
+        filtered_df_key: Option<Key>,
+    },
     /// A message used to share random blobs of data with other nodes. This
     /// provides a lower level interface to facilitate other kinds of messages
     Blob(Vec<u8>),

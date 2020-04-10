@@ -91,7 +91,7 @@ impl Rower for UserRower {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Info).unwrap();
+    simple_logger::init_with_level(Level::Error).unwrap();
     let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;
@@ -115,7 +115,7 @@ async fn main() -> Result<(), LiquidError> {
         // Node 1 will get the rower back and send it to all the other nodes
         // other nodes will wait for node 1 to send the final combined rower to
         // them
-        pr = match app.pmap("commits", pr).await? {
+        pr = match app.map("commits", pr).await? {
             None => {
                 let blob =
                     { app.blob_receiver.lock().await.recv().await.unwrap() };
@@ -144,7 +144,7 @@ async fn main() -> Result<(), LiquidError> {
         // Node 1 will get the rower back and send it to all the other nodes
         // other nodes will wait for node 1 to send the final combined rower to
         // them
-        ur = match app.pmap("commits", ur).await? {
+        ur = match app.map("commits", ur).await? {
             None => {
                 let blob =
                     { app.blob_receiver.lock().await.recv().await.unwrap() };

@@ -9,6 +9,7 @@ use bincode::{deserialize, serialize};
 use bytecount;
 use futures::future::try_join_all;
 use log::{debug, info};
+use rand::{self, Rng};
 use serde::{de::DeserializeOwned, Serialize};
 use sorer::dataframe::{Column, Data, SorTerator};
 use std::cmp;
@@ -40,7 +41,7 @@ impl DistributedDataFrame {
         // id's
         let node_id = { kv.read().await.id };
         // initialize some other required fields of self so as not to duplicate
-        // code in both branches
+        // code in if branches
         let (blob_sender, blob_receiver) = mpsc::channel(2);
         // used for internal messaging processing so that the asynnchronous
         // messaging task can notify other tasks when `self.row` is ready
@@ -52,6 +53,9 @@ impl DistributedDataFrame {
         // signal
         let kill_notifier = Arc::new(Notify::new());
         let df_client_type = format!("ddf-{}", df_name);
+        // for processing results of distributed filtering
+        let (filter_results_sender, filter_results) = mpsc::channel(num_nodes);
+        let filter_results = Mutex::new(filter_results);
 
         // For this constructor, we assume the file is only on node 1
         if node_id == 1 {
@@ -176,11 +180,14 @@ impl DistributedDataFrame {
                 network,
                 node_id,
                 num_nodes,
+                server_addr: server_addr.to_string(),
+                my_ip: my_ip.to_string(),
                 kv,
                 internal_notifier,
                 row,
                 kill_notifier,
                 blob_receiver: Mutex::new(blob_receiver),
+                filter_results,
             });
 
             // spawn a tokio task to process messages
@@ -190,6 +197,7 @@ impl DistributedDataFrame {
                     ddf_clone,
                     receiver,
                     blob_sender,
+                    filter_results_sender,
                 )
                 .await
                 .unwrap();
@@ -269,11 +277,14 @@ impl DistributedDataFrame {
                 network,
                 node_id,
                 num_nodes,
+                server_addr: server_addr.to_string(),
+                my_ip: my_ip.to_string(),
                 kv,
                 internal_notifier,
                 row,
                 kill_notifier,
                 blob_receiver: Mutex::new(blob_receiver),
+                filter_results,
             });
 
             // spawn a tokio task to process messages
@@ -283,6 +294,7 @@ impl DistributedDataFrame {
                     ddf_clone,
                     receiver,
                     blob_sender,
+                    filter_results_sender,
                 )
                 .await
                 .unwrap();
@@ -320,6 +332,9 @@ impl DistributedDataFrame {
         // signal
         let kill_notifier = Arc::new(Notify::new());
         let df_client_type = format!("ddf-{}", df_name);
+        // for processing results of distributed filtering
+        let (filter_results_sender, filter_results) = mpsc::channel(num_nodes);
+        let filter_results = Mutex::new(filter_results);
 
         // `data` must be `Some` on node 1
         if node_id == 1 {
@@ -456,11 +471,14 @@ impl DistributedDataFrame {
                 network,
                 node_id,
                 num_nodes,
+                server_addr: server_addr.to_string(),
+                my_ip: my_ip.to_string(),
                 kv,
                 internal_notifier,
                 row,
                 kill_notifier,
                 blob_receiver: Mutex::new(blob_receiver),
+                filter_results,
             });
 
             // spawn a tokio task to process messages
@@ -470,6 +488,7 @@ impl DistributedDataFrame {
                     ddf_clone,
                     receiver,
                     blob_sender,
+                    filter_results_sender,
                 )
                 .await
                 .unwrap();
@@ -549,11 +568,14 @@ impl DistributedDataFrame {
                 network,
                 node_id,
                 num_nodes,
+                server_addr: server_addr.to_string(),
+                my_ip: my_ip.to_string(),
                 kv,
                 internal_notifier,
                 row,
                 kill_notifier,
                 blob_receiver: Mutex::new(blob_receiver),
+                filter_results,
             });
 
             // spawn a tokio task to process messages
@@ -563,6 +585,7 @@ impl DistributedDataFrame {
                     ddf_clone,
                     receiver,
                     blob_sender,
+                    filter_results_sender,
                 )
                 .await
                 .unwrap();
@@ -597,6 +620,7 @@ impl DistributedDataFrame {
                     let our_local_df =
                         { self.kv.read().await.get(&key).await? };
                     let mut r = Row::new(self.get_schema());
+                    // TODO: is this index for fill_row correct?
                     our_local_df.fill_row(index - range.start, &mut r)?;
                     Ok(r)
                 } else {
@@ -669,7 +693,7 @@ impl DistributedDataFrame {
                 rower = ldf.pmap(rower);
             }
         }
-        debug!("finished mapping local chunk(s)");
+        debug!("Finished mapping local chunk(s)");
         if self.node_id == self.num_nodes {
             // we are the last node
             self.send_blob(self.node_id - 1, &rower).await?;
@@ -703,6 +727,10 @@ impl DistributedDataFrame {
     /// By default, each node will use the number of threads available on that
     /// machine.
     ///
+    ///
+    /// NOTE: sadly must take the kv_blob_receiver for now in order to start
+    ///       up new nodes for the new DDF
+    ///
     /// NOTE:
     /// There is an important design decision that comes with a distinct trade
     /// off here. The trade off is:
@@ -719,36 +747,311 @@ impl DistributedDataFrame {
         T: Rower + Clone + Send + Serialize + DeserializeOwned,
     >(
         &self,
-        _rower: T,
-    ) -> Result<Self, LiquidError> {
-        let _my_key: &Key = self
+        mut rower: T,
+        kv_blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
+    ) -> Result<Arc<Self>, LiquidError> {
+        // get the keys for our locally owned chunks
+        let my_keys: Vec<&Key> = self
             .df_chunk_map
             .iter()
-            .find(|(_, v)| v.home == self.node_id)
+            .filter(|(_, key)| key.home == self.node_id)
             .map(|(_, v)| v)
-            .unwrap();
-
-        // TODO: doesn't handle cases where the new_ldf is empty
-        unimplemented!();
-        /*if self.node_id == 1 {
-            // we are the first node
-            {
-                // add our filtered local df to our kv
-                self.kv.lock().await.put(key, new_ldf).await?
-            };
-            // wait for messages from other nodes telling us what their
-            // ranges are
-            let mut num_recvd_msgs = 0;
-            while num_recvd_msgs < self.num_nodes - 1 {
-                let filter_msg = self
-                num_recvd_msgs += 1;
+            .collect();
+        // NOTE: combines all chunks into one final chunk, may want to change
+        // to stay 1-1
+        // filter over our locally owned chunks
+        let mut filtered_ldf = LocalDataFrame::new(self.get_schema());
+        {
+            let unlocked_kv = self.kv.read().await;
+            for key in &my_keys {
+                let ldf = unlocked_kv.wait_and_get(key).await?;
+                filtered_ldf = filtered_ldf.combine(ldf.pfilter(&mut rower))?;
             }
-            // respond back to all nodes with the Initialization message
-            Ok(None)
+        }
+        // initialize some other required fields of self so as not to duplicate
+        // code in if branches
+        let (blob_sender, blob_receiver) = mpsc::channel(2);
+        // used for internal messaging processing so that the asynnchronous
+        // messaging task can notify other tasks when `self.row` is ready
+        let internal_notifier = Arc::new(Notify::new());
+        // for this DDF's network client to forward messages to this DDF
+        // for processing
+        let (sender, mut receiver) = mpsc::channel(64);
+        // so that our network client can notify us when they get a Kill
+        // signal
+        let kill_notifier = Arc::new(Notify::new());
+        let mut rng = rand::thread_rng();
+        let r = rng.gen::<i16>();
+        let new_name = format!("{}-filtered-{}", &self.df_name, r);
+        let df_client_type = format!("ddf-{}", new_name);
+        // for processing results of distributed filtering
+        let (filter_results_sender, filter_results) =
+            mpsc::channel(self.num_nodes);
+        let filter_results = Mutex::new(filter_results);
+
+        let num_rows_left = filtered_ldf.n_rows();
+        info!(
+            "Finished filtering {} local chunk(s), have {} rows after filter",
+            my_keys.len(),
+            num_rows_left
+        );
+
+        // put our result in our KVStore only if its not empty
+        let mut key = None;
+        if num_rows_left > 0 {
+            let k = Key::generate(&new_name, self.node_id);
+            key = Some(k.clone());
+            self.kv.read().await.put(k, filtered_ldf).await?;
+        }
+
+        if self.node_id == 1 {
+            // 1. start the new network client
+            // connect our client right away since we want to be node 1
+            let network = Client::new(
+                &self.server_addr,
+                &self.my_ip,
+                None,
+                sender,
+                kill_notifier.clone(),
+                self.num_nodes,
+                false,
+                df_client_type.as_str(),
+            )
+            .await?;
+            assert_eq!(1, { network.read().await.id });
+            // Send a ready message to node 2 so that all the other nodes
+            // start connecting to the Server in the correct order
+            let ready_blob = serialize(&DistributedDFMsg::Ready)?;
+            {
+                self.kv
+                    .read()
+                    .await
+                    .send_blob(self.node_id + 1, ready_blob)
+                    .await?
+            };
+            // 2. collect all results from other nodes (do ours first)
+            let mut df_chunk_map = HashMap::new();
+            let mut cur_num_rows = 0;
+            match key {
+                Some(k) => {
+                    df_chunk_map.insert(
+                        Range {
+                            start: cur_num_rows,
+                            end: cur_num_rows + num_rows_left,
+                        },
+                        k,
+                    );
+                    cur_num_rows += num_rows_left;
+                }
+                None => (),
+            };
+
+            let mut results_received = 1;
+            // TODO: maybe a better way to pass around these results
+            {
+                let mut unlocked = self.filter_results.lock().await;
+                while results_received < self.num_nodes {
+                    let msg = unlocked.recv().await.unwrap();
+                    match msg {
+                        DistributedDFMsg::FilterResult {
+                            num_rows,
+                            filtered_df_key,
+                        } => {
+                            match filtered_df_key {
+                                Some(k) => {
+                                    df_chunk_map.insert(
+                                        Range {
+                                            start: cur_num_rows,
+                                            end: cur_num_rows + num_rows,
+                                        },
+                                        k,
+                                    );
+                                    cur_num_rows += num_rows;
+                                }
+                                None => {
+                                    assert_eq!(num_rows, 0);
+                                }
+                            }
+                            results_received += 1;
+                        }
+                        _ => return Err(LiquidError::UnexpectedMessage),
+                    }
+                    results_received += 1;
+                }
+                debug!("Got all filter results from other nodes");
+            }
+
+            // 3. broadcast initialization message
+
+            // Create an Initialization message that holds all the information
+            // related to this DistributedDataFrame, the Schema and the map
+            // of the range of indices that each chunk holds and the `Key`
+            // associated with that chunk
+            let intro_msg = DistributedDFMsg::Initialization {
+                schema: self.get_schema().clone(),
+                df_chunk_map: df_chunk_map.clone(),
+            };
+
+            // Broadcast the initialization message to all nodes
+            {
+                network.write().await.broadcast(intro_msg).await?
+            };
+            debug!("Node 1 sent the initialization message to all nodes");
+
+            // 4. initialize self
+            let row = Arc::new(RwLock::new(Row::new(self.get_schema())));
+            let num_rows = df_chunk_map.iter().fold(0, |mut acc, (k, _)| {
+                if acc > k.end {
+                    acc
+                } else {
+                    acc = k.end;
+                    acc
+                }
+            });
+
+            let ddf = Arc::new(DistributedDataFrame {
+                schema: self.get_schema().clone(),
+                df_name: new_name,
+                df_chunk_map,
+                num_rows,
+                network,
+                node_id: self.node_id,
+                num_nodes: self.num_nodes,
+                server_addr: self.server_addr.clone(),
+                my_ip: self.my_ip.clone(),
+                kv: self.kv.clone(),
+                internal_notifier,
+                row,
+                kill_notifier,
+                blob_receiver: Mutex::new(blob_receiver),
+                filter_results,
+            });
+
+            // spawn a tokio task to process messages
+            let ddf_clone = ddf.clone();
+            tokio::spawn(async move {
+                DistributedDataFrame::process_messages(
+                    ddf_clone,
+                    receiver,
+                    blob_sender,
+                    filter_results_sender,
+                )
+                .await
+                .unwrap();
+            });
+
+            Ok(ddf)
         } else {
-            // we are not the first node and we should send our range
-            // then wait for the initialization response
-        }*/
+            // we are not the first node
+            // 1. connect to the network in the correct order by waiting
+            //    for the node before us to send a 'ready' message to our
+            //    kv's blob_receiver
+            let ready_blob =
+                { kv_blob_receiver.lock().await.recv().await.unwrap() };
+            let ready_msg = deserialize(&ready_blob)?;
+            match ready_msg {
+                DistributedDFMsg::Ready => (),
+                _ => return Err(LiquidError::UnexpectedMessage),
+            }
+            debug!("Received a ready message");
+            // 2. The node before us has joined the network, it is now time
+            //    to connect
+            let network = Client::new(
+                &self.server_addr,
+                &self.my_ip,
+                None,
+                sender,
+                kill_notifier.clone(),
+                self.num_nodes,
+                false,
+                df_client_type.as_str(),
+            )
+            .await?;
+            // assert that we joined in the right order (kv node id must
+            // match client node id)
+            assert_eq!(self.node_id, { network.read().await.id });
+
+            // 2. send a ready message to the next node so they can connect, if
+            //    we are not the last node
+            if self.node_id < self.num_nodes {
+                // All nodes except the last node must send a ready message
+                // to the node that comes after them to let the next node know
+                // they may join the network
+                self.kv
+                    .read()
+                    .await
+                    .send_blob(self.node_id + 1, ready_blob)
+                    .await?;
+            }
+
+            // 3. send our filterresults to node 1
+            let results = DistributedDFMsg::FilterResult {
+                num_rows: num_rows_left,
+                filtered_df_key: key,
+            };
+            {
+                network.write().await.send_msg(1, results).await?
+            };
+
+            // 4. wait for node 1 to respond with the initialization message
+            // Node 1 will send the initialization message to our network
+            // directly, not using the KV. The Client will forward the message
+            // to us via the mpsc receiver
+            let init_msg = receiver.recv().await.unwrap();
+            // We got a message, check it was the initialization message
+            let (schema, df_chunk_map) = match init_msg.msg {
+                DistributedDFMsg::Initialization {
+                    schema,
+                    df_chunk_map,
+                } => (schema, df_chunk_map),
+                _ => return Err(LiquidError::UnexpectedMessage),
+            };
+            debug!("Got the Initialization message from Node 1");
+
+            // 4. initialize self
+            let row = Arc::new(RwLock::new(Row::new(&schema)));
+            let num_rows = df_chunk_map.iter().fold(0, |mut acc, (k, _)| {
+                if acc > k.end {
+                    acc
+                } else {
+                    acc = k.end;
+                    acc
+                }
+            });
+
+            let ddf = Arc::new(DistributedDataFrame {
+                schema,
+                df_name: new_name,
+                df_chunk_map,
+                num_rows,
+                network,
+                node_id: self.node_id,
+                num_nodes: self.num_nodes,
+                server_addr: self.server_addr.clone(),
+                my_ip: self.my_ip.clone(),
+                kv: self.kv.clone(),
+                internal_notifier,
+                row,
+                kill_notifier,
+                blob_receiver: Mutex::new(blob_receiver),
+                filter_results,
+            });
+
+            // spawn a tokio task to process messages
+            let ddf_clone = ddf.clone();
+            tokio::spawn(async move {
+                DistributedDataFrame::process_messages(
+                    ddf_clone,
+                    receiver,
+                    blob_sender,
+                    filter_results_sender,
+                )
+                .await
+                .unwrap();
+            });
+
+            Ok(ddf)
+        }
     }
 
     /// Return the (total) number of rows across all nodes for this
@@ -786,13 +1089,15 @@ impl DistributedDataFrame {
         ddf: Arc<DistributedDataFrame>,
         mut receiver: Receiver<Message<DistributedDFMsg>>,
         blob_sender: Sender<Vec<u8>>,
+        filter_results_sender: Sender<DistributedDFMsg>,
     ) -> Result<(), LiquidError> {
         let ddf2 = ddf.clone();
         tokio::spawn(async move {
             loop {
                 let msg = receiver.recv().await.unwrap();
-                let mut blob_sender_clone = blob_sender.clone();
                 let ddf3 = ddf2.clone();
+                let mut blob_sender_clone = blob_sender.clone();
+                let mut filter_res_sender = filter_results_sender.clone();
                 tokio::spawn(async move {
                     debug!(
                         "DDF processing a message with id: {:#?}",
@@ -822,7 +1127,9 @@ impl DistributedDataFrame {
                         DistributedDFMsg::Blob(blob) => {
                             blob_sender_clone.send(blob).await.unwrap();
                         },
-                        DistributedDFMsg::FilteredSize(_size) => unimplemented!(),
+                        DistributedDFMsg::FilterResult { num_rows, filtered_df_key } => {
+                            filter_res_sender.send(DistributedDFMsg:: FilterResult { num_rows, filtered_df_key }).await.unwrap();
+                        }
                         _ => panic!("Should always happen before message process loop is started"),
                     }
                 });

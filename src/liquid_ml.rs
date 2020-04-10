@@ -80,9 +80,9 @@ impl LiquidML {
         })
     }
 
-    pub async fn df_from_fun(
+    pub async fn df_from_fn(
         &mut self,
-        name: &str,
+        df_name: &str,
         data_generator: fn() -> Vec<Column>,
     ) -> Result<(), LiquidError> {
         let data = if self.node_id == 1 {
@@ -95,18 +95,18 @@ impl LiquidML {
             &self.my_ip,
             data,
             self.kv.clone(),
-            name,
+            df_name,
             self.num_nodes,
             self.blob_receiver.clone(),
         )
         .await?;
-        self.df.insert(name.to_string(), ddf);
+        self.df.insert(df_name.to_string(), ddf);
         Ok(())
     }
 
     pub async fn df_from_sor(
         &mut self,
-        name: &str,
+        df_name: &str,
         file_name: &str,
     ) -> Result<(), LiquidError> {
         let ddf = DistributedDataFrame::from_sor(
@@ -114,15 +114,17 @@ impl LiquidML {
             &self.my_ip,
             file_name,
             self.kv.clone(),
-            name,
+            df_name,
             self.num_nodes,
             self.blob_receiver.clone(),
         )
         .await?;
-        self.df.insert(name.to_string(), ddf);
+        self.df.insert(df_name.to_string(), ddf);
         Ok(())
     }
-    /*
+
+    /* Just leaving this here in case we want to add back this function
+     * for convenience/faster testing?
      *
      *
     /// Create a new application and split the given SoR file across all the
@@ -161,17 +163,32 @@ impl LiquidML {
      *
      */
 
-    pub async fn pmap<
-        T: Rower + Serialize + Clone + DeserializeOwned + Send,
-    >(
+    pub async fn map<T: Rower + Serialize + Clone + DeserializeOwned + Send>(
         &self,
-        name: &str,
+        df_name: &str,
         rower: T,
     ) -> Result<Option<T>, LiquidError> {
-        let df = match self.df.get(name) {
+        let df = match self.df.get(df_name) {
             Some(x) => x,
             None => return Err(LiquidError::NotPresent),
         };
         df.map(rower).await
+    }
+
+    pub async fn filter<
+        T: Rower + Serialize + Clone + DeserializeOwned + Send,
+    >(
+        &mut self,
+        df_name: &str,
+        rower: T,
+    ) -> Result<(), LiquidError> {
+        let df = match self.df.get(df_name) {
+            Some(x) => x,
+            None => return Err(LiquidError::NotPresent),
+        };
+        let filtered_df = df.filter(rower, self.blob_receiver.clone()).await?;
+        self.df.insert(filtered_df.df_name.clone(), filtered_df);
+
+        Ok(())
     }
 }
