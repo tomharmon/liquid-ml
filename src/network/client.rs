@@ -4,7 +4,7 @@ use crate::error::LiquidError;
 use crate::network;
 use crate::network::*;
 use futures::SinkExt;
-use log::info;
+use log::{debug, info};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -79,6 +79,13 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         } else {
             return Err(LiquidError::UnexpectedMessage);
         };
+
+        info!(
+            "Client of type {} got id {} running at address {}",
+            client_type,
+            dir_msg.target_id,
+            my_address.clone()
+        );
 
         let mut c = Client {
             id: dir_msg.target_id,
@@ -286,7 +293,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             msg: message,
         };
         network::send_msg(target_id, m, &mut self.directory).await?;
-        info!("sent a message with id, {}", self.msg_id);
+        debug!("sent a message with id, {}", self.msg_id);
         self.msg_id += 1;
         Ok(())
     }
@@ -317,7 +324,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 let id = msg.msg_id;
                 sender.send(msg).await.unwrap_or_else(|_| panic!());
-                info!(
+                debug!(
                     "Got a msg with id: {} and added it to process queue",
                     id
                 );

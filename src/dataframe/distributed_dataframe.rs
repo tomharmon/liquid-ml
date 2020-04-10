@@ -11,7 +11,6 @@ use futures::future::try_join_all;
 use log::{debug, info};
 use serde::{de::DeserializeOwned, Serialize};
 use sorer::dataframe::{Column, Data, SorTerator};
-//use sorer::schema;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -112,10 +111,10 @@ impl DistributedDataFrame {
                     // add the future we make to a vec for multiplexing
                     futs.push(unlocked.put(key.clone(), ldf));
 
-                    // TODO: might need to do some tuning on when to join here,
-                    // possibly even dynamically figure out some value to
-                    // smooth over the tradeoff between memory and speed
-                    // (right now it uses a lot of memory)
+                    // TODO: might need to do some tuning on when to join the
+                    // futures here, possibly even dynamically figure out some
+                    // value to smooth over the tradeoff between memory and
+                    // speed (right now i assume it uses a lot of memory)
                     if chunk_idx % num_nodes == 0 {
                         // send all chunks concurrently once we have num_node
                         // new chunks to send
@@ -634,18 +633,6 @@ impl DistributedDataFrame {
             }
         });
         Ok(())
-    }
-}
-
-fn n_rows(data: &Vec<Column>) -> usize {
-    match data.get(0) {
-        None => 0,
-        Some(x) => match x {
-            Column::Int(c) => c.len(),
-            Column::Float(c) => c.len(),
-            Column::Bool(c) => c.len(),
-            Column::String(c) => c.len(),
-        },
     }
 }
 

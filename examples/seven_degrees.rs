@@ -1,10 +1,10 @@
 use bincode::{deserialize, serialize};
 use clap::Clap;
 use futures::future::try_join_all;
-use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
+use liquid_ml::dataframe::{Data, Row, Rower};
 use liquid_ml::error::LiquidError;
 use liquid_ml::liquid_ml::LiquidML;
-use log::{error, Level};
+use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::collections::HashSet;
@@ -91,7 +91,7 @@ impl Rower for UserRower {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Error).unwrap();
+    simple_logger::init_with_level(Level::Info).unwrap();
     let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;

@@ -292,6 +292,7 @@ impl<
                         // NOTE: should we just change the signature of
                         //       the `put` method and call that here?
                         // NOTE: is the home id actually my id should we check?
+                        debug!("Put key: {:#?} into KVStore", k.clone());
                         let unlocked = kv.read().await;
                         unlocked.data.write().await.insert(k, v);
                         unlocked.internal_notifier.notify();
@@ -343,7 +344,7 @@ impl<
                 match opt_kv {
                     Some((_, temp)) => {
                         let temp_size = temp.deep_size_of();
-                        info!(
+                        debug!(
                             "Popped cached value of size {} bytes",
                             temp_size
                         );
@@ -355,7 +356,7 @@ impl<
                     }
                 }
             }
-            info!("Added value of size {} bytes to cache", v_size);
+            debug!("Added value of size {} bytes to cache", v_size);
             unlocked.put(key, value);
         }
         Ok(())
