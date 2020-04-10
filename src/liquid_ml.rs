@@ -78,7 +78,7 @@ impl LiquidML {
         let ddf = DistributedDataFrame::new(
             data,
             self.kv.clone(),
-            name.to_string(),
+            name,
             self.num_nodes,
             self.blob_receiver.clone(),
         )
@@ -95,7 +95,7 @@ impl LiquidML {
         let ddf = DistributedDataFrame::from_sor(
             file_name,
             self.kv.clone(),
-            name.to_string(),
+            name,
             self.num_nodes,
             self.blob_receiver.clone(),
         )

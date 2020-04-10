@@ -4,7 +4,7 @@ use futures::future::try_join_all;
 use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
 use liquid_ml::liquid_ml::LiquidML;
-use log::Level;
+use log::{error, Level};
 use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::collections::HashSet;
@@ -116,9 +116,11 @@ async fn main() -> Result<(), LiquidError> {
         // other nodes will wait for node 1 to send the final combined rower to
         // them
         pr = match app.pmap("commits", pr).await? {
-            None => deserialize(
-                &app.blob_receiver.lock().await.recv().await.unwrap()[..],
-            )?,
+            None => {
+                let blob =
+                    { app.blob_receiver.lock().await.recv().await.unwrap() };
+                deserialize(&blob[..])?
+            }
             Some(rower) => {
                 let serialized = serialize(&rower)?;
                 let unlocked = app.kv.read().await;
@@ -131,6 +133,7 @@ async fn main() -> Result<(), LiquidError> {
                 rower
             }
         };
+        dbg!("finished projects rower");
         users = pr.users;
         projects = pr.new_projects;
         let mut ur = UserRower {
@@ -142,9 +145,11 @@ async fn main() -> Result<(), LiquidError> {
         // other nodes will wait for node 1 to send the final combined rower to
         // them
         ur = match app.pmap("commits", ur).await? {
-            None => deserialize(
-                &app.blob_receiver.lock().await.recv().await.unwrap()[..],
-            )?,
+            None => {
+                let blob =
+                    { app.blob_receiver.lock().await.recv().await.unwrap() };
+                deserialize(&blob[..])?
+            }
             Some(rower) => {
                 let serialized = serialize(&rower)?;
                 let unlocked = app.kv.read().await;
@@ -155,6 +160,7 @@ async fn main() -> Result<(), LiquidError> {
                 rower
             }
         };
+        dbg!("finished users rower");
         users = ur.new_users;
         projects = ur.projects;
     }

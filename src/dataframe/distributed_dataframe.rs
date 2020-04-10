@@ -8,11 +8,15 @@ use bincode::{deserialize, serialize};
 use futures::future::try_join_all;
 use serde::{de::DeserializeOwned, Serialize};
 use sorer::dataframe::{Column, Data, SorTerator};
-//use sorer::schema::{infer_schema, DataType};
+//use sorer::schema;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
 use std::sync::Arc;
 use tokio::sync::{mpsc::Receiver, Mutex, RwLock};
 
 const ROW_COUNT_PER_KEY: usize = 100_000;
+
+const BYTES_PER_GB: f64 = 1_073_741_824.0;
 
 /// An interface for a `DataFrame`, inspired by those used in `pandas` and `R`.
 impl DistributedDataFrame {
@@ -20,7 +24,7 @@ impl DistributedDataFrame {
     pub async fn from_sor(
         file_name: &str,
         kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
-        name: String,
+        name: &str,
         num_nodes: usize,
         receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Self, LiquidError> {
@@ -28,34 +32,37 @@ impl DistributedDataFrame {
         if node_id == 1 {
             // Reads the SOR File in 1 GB chunks
             // Buffered reading of the sor file
-            let mut chunk_idx = 0;
+            let total_newlines = count_newlines(file_name);
+            dbg!(total_newlines);
+            let max_rows_per_node = total_newlines / num_nodes;
             let mut keys = Vec::new();
             let schema = sorer::schema::infer_schema(file_name);
+            dbg!(max_rows_per_node);
+            dbg!(schema.clone());
             // Bug: Panics if file doesnt exist
             let sorterator =
-                SorTerator::new(file_name, schema.clone(), ROW_COUNT_PER_KEY);
+                SorTerator::new(file_name, schema.clone(), max_rows_per_node);
             {
-                //let mut futs = Vec::new();
+                let unlocked = kv.read().await;
+                let mut futs = Vec::new();
+                let mut chunk_idx = 0;
                 for data in sorterator {
                     let ldf = LocalDataFrame::from(data);
-                    let key = Key::new(
-                        &format!("{}_{}", name, chunk_idx),
-                        (chunk_idx % num_nodes) + 1,
-                    );
+                    let key = Key::generate(name, (chunk_idx % num_nodes) + 1);
 
-                    //  futs.push(unlocked.put(key.clone(), ldf));
-                    {
-                        kv.read().await.put(key.clone(), ldf).await?
-                    };
+                    futs.push(unlocked.put(key.clone(), ldf));
                     keys.push(key);
 
-                    if chunk_idx % 100 == 0 {
-                        //try_join_all(futs).await?;
-                        //futs = Vec::new();
-                        println!("sent 100 chunks");
+                    if chunk_idx % num_nodes == 0 {
+                        try_join_all(futs).await?;
+                        futs = Vec::new();
+                        println!("sent num node chunks");
                     }
 
                     chunk_idx += 1;
+                }
+                if !futs.is_empty() {
+                    try_join_all(futs).await?;
                 }
             }
 
@@ -90,14 +97,14 @@ impl DistributedDataFrame {
     pub async fn new(
         data: Option<Vec<Column>>,
         kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
-        name: String,
+        name: &str,
         num_nodes: usize,
         receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Self, LiquidError> {
         let node_id = { kv.read().await.id };
         if node_id == 1 {
             let mut data = data.unwrap();
-            let mut to_process = get_len(&data);
+            let mut to_process = n_rows(&data);
             let mut chunk_idx = 0;
             let mut keys = Vec::new();
             let mut schema = Schema::new();
@@ -132,7 +139,7 @@ impl DistributedDataFrame {
                 }
                 keys.push(key);
                 chunk_idx += 1;
-                to_process = get_len(&data);
+                to_process = n_rows(&data);
             }
 
             let build = serialize(&(keys.clone(), schema.clone()))?;
@@ -270,7 +277,7 @@ impl DistributedDataFrame {
     }
 }
 
-fn get_len(data: &Vec<Column>) -> usize {
+fn n_rows(data: &Vec<Column>) -> usize {
     match data.get(0) {
         None => 0,
         Some(x) => match x {
@@ -279,5 +286,137 @@ fn get_len(data: &Vec<Column>) -> usize {
             Column::Bool(c) => c.len(),
             Column::String(c) => c.len(),
         },
+    }
+}
+
+#[cfg(target_pointer_width = "16")]
+const USIZE_BYTES: usize = 2;
+#[cfg(target_pointer_width = "32")]
+const USIZE_BYTES: usize = 4;
+#[cfg(target_pointer_width = "64")]
+const USIZE_BYTES: usize = 8;
+const LO: usize = ::std::usize::MAX / 255;
+const HI: usize = LO * 128;
+const REP_NEWLINE: usize = b'\n' as usize * LO;
+
+const EVERY_OTHER_BYTE_LO: usize = 0x0001000100010001;
+const EVERY_OTHER_BYTE: usize = EVERY_OTHER_BYTE_LO * 0xFF;
+
+fn count_newlines(file_name: &str) -> usize {
+    let mut buf_reader = BufReader::new(File::open(file_name).unwrap());
+    let mut newlines = 0;
+    let mut buffer = [0; BYTES_PER_GB as usize / 1024];
+
+    loop {
+        let bytes_read = buf_reader.read(&mut buffer).unwrap();
+        if bytes_read == 0 {
+            return newlines;
+        } else {
+            newlines += count_newlines_hyperscreaming(&buffer[..]);
+            buf_reader.consume(buffer.len());
+        }
+    }
+}
+
+// From: https://llogiq.github.io/2016/09/24/newline.html
+fn count_newlines_hyperscreaming(text: &[u8]) -> usize {
+    unsafe {
+        let mut ptr = text.as_ptr();
+        let mut end = ptr.offset(text.len() as isize);
+
+        let mut count = 0;
+
+        // Align start
+        while (ptr as usize) & (USIZE_BYTES - 1) != 0 {
+            if ptr == end {
+                return count;
+            }
+            count += (*ptr == b'\n') as usize;
+            ptr = ptr.offset(1);
+        }
+
+        // Align end
+        while (end as usize) & (USIZE_BYTES - 1) != 0 {
+            end = end.offset(-1);
+            count += (*end == b'\n') as usize;
+        }
+        if ptr == end {
+            return count;
+        }
+
+        // Read in aligned blocks
+        let mut ptr = ptr as *const usize;
+        let end = end as *const usize;
+
+        unsafe fn next(ptr: &mut *const usize) -> usize {
+            let ret = **ptr;
+            *ptr = ptr.offset(1);
+            ret
+        }
+
+        fn mask_zero(x: usize) -> usize {
+            (((x ^ REP_NEWLINE).wrapping_sub(LO)) & !x & HI) >> 7
+        }
+
+        unsafe fn next_4(ptr: &mut *const usize) -> [usize; 4] {
+            let x = [next(ptr), next(ptr), next(ptr), next(ptr)];
+            [
+                mask_zero(x[0]),
+                mask_zero(x[1]),
+                mask_zero(x[2]),
+                mask_zero(x[3]),
+            ]
+        };
+
+        fn reduce_counts(counts: usize) -> usize {
+            let pair_sum = (counts & EVERY_OTHER_BYTE)
+                + ((counts >> 8) & EVERY_OTHER_BYTE);
+            pair_sum.wrapping_mul(EVERY_OTHER_BYTE_LO)
+                >> ((USIZE_BYTES - 2) * 8)
+        }
+
+        fn arr_add(xs: [usize; 4], ys: [usize; 4]) -> [usize; 4] {
+            [xs[0] + ys[0], xs[1] + ys[1], xs[2] + ys[2], xs[3] + ys[3]]
+        }
+
+        // 8kB
+        while ptr.offset(4 * 255) <= end {
+            let mut counts = [0, 0, 0, 0];
+            for _ in 0..255 {
+                counts = arr_add(counts, next_4(&mut ptr));
+            }
+            count += reduce_counts(counts[0]);
+            count += reduce_counts(counts[1]);
+            count += reduce_counts(counts[2]);
+            count += reduce_counts(counts[3]);
+        }
+
+        // 1kB
+        while ptr.offset(4 * 32) <= end {
+            let mut counts = [0, 0, 0, 0];
+            for _ in 0..32 {
+                counts = arr_add(counts, next_4(&mut ptr));
+            }
+            count +=
+                reduce_counts(counts[0] + counts[1] + counts[2] + counts[3]);
+        }
+
+        // 64B
+        let mut counts = [0, 0, 0, 0];
+        while ptr.offset(4 * 2) <= end {
+            for _ in 0..2 {
+                counts = arr_add(counts, next_4(&mut ptr));
+            }
+        }
+        count += reduce_counts(counts[0] + counts[1] + counts[2] + counts[3]);
+
+        // 8B
+        let mut counts = 0;
+        while ptr < end {
+            counts += mask_zero(next(&mut ptr));
+        }
+        count += reduce_counts(counts);
+
+        count
     }
 }

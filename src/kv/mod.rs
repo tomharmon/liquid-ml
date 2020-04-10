@@ -38,6 +38,7 @@
 //!       the `Client` processes messages
 use crate::network::Client;
 use lru::LruCache;
+use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -68,6 +69,15 @@ impl Key {
     pub fn new(name: &str, home: usize) -> Self {
         Key {
             name: String::from(name),
+            home,
+        }
+    }
+    /// Make a key with an automatically generated name
+    pub(crate) fn generate(name: &str, home: usize) -> Self {
+        let mut rng = rand::thread_rng();
+        // TODO: probably a better way to do this
+        Key {
+            name: format!("{}-{}-{}", name, home, rng.gen::<i8>()),
             home,
         }
     }
