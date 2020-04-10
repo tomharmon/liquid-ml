@@ -1,5 +1,4 @@
 - Random Forest LUL
-- seven degrees of Linus
 - application + dataframe layer documentation/update memo
 - add back function that builds from sor and assumes file is on every node
 - Testing (esp would be good around chunking to ensure no off by one errors)

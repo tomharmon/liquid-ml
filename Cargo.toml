@@ -27,3 +27,7 @@ deepsize = "0.1.2"
 rand = "0.7.3"
 bytecount = "0.6.0"
 
+[profile.release]
+codegen-units = 1
+panic = 'abort'
+lto = true
