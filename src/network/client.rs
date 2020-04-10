@@ -34,12 +34,29 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// the layer above the `Client` can use it concurrently.
     pub async fn new(
         server_addr: &str,
-        my_addr: &str,
+        my_ip: &str,
+        my_port: Option<&str>,
         sender: Sender<Message<RT>>,
         kill_notifier: Arc<Notify>,
         num_clients: usize,
         wait_for_all_clients: bool,
+        client_type: &str,
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
+        // Setup a TCPListener
+        let listener;
+        let my_address = match my_port {
+            Some(port) => {
+                let addr = format!("{}:{}", my_ip, port);
+                listener = TcpListener::bind(&addr).await?;
+                addr
+            }
+            None => {
+                let addr = format!("{}:0", my_ip);
+                listener = TcpListener::bind(&addr).await?;
+                listener.local_addr()?.to_string()
+            }
+        };
+        dbg!(my_address.clone());
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
         let (reader, writer) = io::split(server_stream);
@@ -51,7 +68,8 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             0,
             0,
             ControlMsg::Introduction {
-                address: my_addr.to_string(),
+                address: my_address.clone(),
+                client_type: client_type.to_string(),
             },
         ))
         .await?;
@@ -65,11 +83,12 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
 
         let mut c = Client {
             id: dir_msg.target_id,
-            address: my_addr.to_string(),
+            address: my_address.clone(),
             msg_id: dir_msg.msg_id + 1,
             directory: HashMap::new(),
             _server: sink,
             sender,
+            client_type: client_type.to_string(),
         };
 
         // Connect to all the clients
@@ -86,6 +105,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         if wait_for_all_clients {
             Client::accept_new_connections(
                 concurrent_client_cloned,
+                listener,
                 num_clients,
                 wait_for_all_clients,
             )
@@ -94,6 +114,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             tokio::spawn(async move {
                 Client::accept_new_connections(
                     concurrent_client_cloned,
+                    listener,
                     num_clients,
                     wait_for_all_clients,
                 )
@@ -111,11 +132,11 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// and call `Client::recv_msg`
     async fn accept_new_connections(
         client: Arc<RwLock<Client<RT>>>,
+        mut listener: TcpListener,
         num_clients: usize,
         wait_for_all_clients: bool,
     ) -> Result<(), LiquidError> {
-        let listen_address = { client.read().await.address.clone() };
-        let mut listener = TcpListener::bind(listen_address).await?;
+        let accepted_type = { client.read().await.client_type.clone() };
         // Me + All the nodes i'm connected to
         let mut curr_clients = 1 + { client.read().await.directory.len() };
         loop {
@@ -129,12 +150,19 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
             let sink = FramedWrite::new(writer, MessageCodec::<RT>::new());
             let intro = network::read_msg(&mut stream).await?;
-            let address =
-                if let ControlMsg::Introduction { address } = intro.msg {
-                    address
-                } else {
-                    return Err(LiquidError::UnexpectedMessage);
-                };
+            let (address, client_type) = if let ControlMsg::Introduction {
+                address,
+                client_type,
+            } = intro.msg
+            {
+                (address, client_type)
+            } else {
+                return Err(LiquidError::UnexpectedMessage);
+            };
+
+            if accepted_type != client_type {
+                return Err(LiquidError::UnexpectedMessage);
+            }
 
             // increment the message id and check if there was an existing
             // connection
@@ -211,6 +239,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 0,
                 ControlMsg::Introduction {
                     address: self.address.clone(),
+                    client_type: self.client_type.clone(),
                 },
             ))
             .await?;
@@ -262,6 +291,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         self.msg_id += 1;
         Ok(())
     }
+
     /// Broadcast the given `message` to all currently connected clients
     pub async fn broadcast(&mut self, message: RT) -> Result<(), LiquidError> {
         let d: Vec<usize> = self.directory.iter().map(|(k, _)| *k).collect();

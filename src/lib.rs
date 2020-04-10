@@ -412,3 +412,5 @@ pub mod network;
 pub(crate) const MAX_NUM_CACHED_VALUES: usize = 10;
 pub(crate) const BYTES_PER_KIB: f64 = 1_024.0;
 pub(crate) const BYTES_PER_GB: f64 = 1_073_741_824.0;
+pub(crate) const KV_STORE_CACHE_SIZE_FRACTION: f64 = 0.33;
+pub(crate) const MAX_FRAME_LEN_FRACTION: f64 = 0.8;

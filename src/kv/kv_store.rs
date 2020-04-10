@@ -2,7 +2,10 @@
 use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
-use crate::{BYTES_PER_GB, BYTES_PER_KIB, MAX_NUM_CACHED_VALUES};
+use crate::{
+    BYTES_PER_GB, BYTES_PER_KIB, KV_STORE_CACHE_SIZE_FRACTION,
+    MAX_NUM_CACHED_VALUES,
+};
 use bincode::{deserialize, serialize};
 use deepsize::DeepSizeOf;
 use log::{debug, error, info};
@@ -61,13 +64,23 @@ impl<
         // the Receiver acts as our queue of messages from the network, and
         // the network uses the Sender to add messages to our queue
         let (sender, receiver) = mpsc::channel(64);
+        let (my_ip, my_port) = {
+            let mut iter = my_addr.split(':');
+            let first = iter.next().unwrap();
+            let second = iter.next().unwrap();
+            (first, second)
+        };
+        dbg!(my_ip);
+        dbg!(my_port);
         let network = Client::new(
             server_addr,
-            my_addr,
+            my_ip,
+            Some(my_port),
             sender,
             kill_notifier,
             num_clients,
             wait_for_all_clients,
+            "kvstore",
         )
         .await
         .unwrap();
@@ -75,7 +88,8 @@ impl<
         let memo_info_kind = RefreshKind::new().with_memory();
         let sys = System::new_with_specifics(memo_info_kind);
         let total_memory = sys.get_total_memory() as f64;
-        let max_cache_size = total_memory * BYTES_PER_KIB * 0.33;
+        let max_cache_size =
+            total_memory * BYTES_PER_KIB * KV_STORE_CACHE_SIZE_FRACTION;
         let max_cache_size_in_gb = max_cache_size / BYTES_PER_GB;
         info!(
             "KVStore has a max cache size of {} GB",
@@ -277,7 +291,9 @@ impl<
                         }
                     }
                     KVMessage::Put(k, v) => {
-                        // Note is the home id actually my id should we check?
+                        // NOTE: should we just change the signature of
+                        //       the `put` method and call that here?
+                        // NOTE: is the home id actually my id should we check?
                         let unlocked = kv.read().await;
                         unlocked.data.write().await.insert(k, v);
                         unlocked.internal_notifier.notify();

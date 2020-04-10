@@ -148,6 +148,8 @@ pub struct Client<T> {
     /// above layer will receive the messages on the other half of this `mpsc`
     /// channel.
     sender: Sender<Message<T>>,
+    /// the type of this client
+    client_type: String,
 }
 
 /// Represents a registration `Server` in a distributed system.
@@ -158,7 +160,8 @@ pub struct Server {
     /// The id of the current message
     pub(crate) msg_id: usize,
     /// A directory which is a map of client id to a [`Connection`](Connection)
-    pub(crate) directory: HashMap<usize, Connection<ControlMsg>>,
+    pub(crate) directory:
+        HashMap<String, HashMap<usize, Connection<ControlMsg>>>,
 }
 
 /// A message that can sent between nodes for communication. The message
@@ -185,7 +188,10 @@ pub enum ControlMsg {
     Directory { dir: Vec<(usize, String)> },
     /// An introduction that a new `Client` sends to all other existing
     /// `Client`s and the server
-    Introduction { address: String },
+    Introduction {
+        address: String,
+        client_type: String,
+    },
     /// A message the `Server` sends to `Client`s to inform them to shut down
     Kill,
 }

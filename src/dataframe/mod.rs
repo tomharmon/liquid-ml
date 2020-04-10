@@ -8,6 +8,7 @@
 //! manner by implementing the `Rower` trait to perform `map` or `filter`
 //! operations on a `DataFrame`.
 use crate::kv::{KVStore, Key};
+use crate::network::Client;
 use deepsize::DeepSizeOf;
 use serde::{Deserialize, Serialize};
 pub use sorer::{
@@ -54,14 +55,19 @@ pub struct DistributedDataFrame {
     pub node_id: usize,
     /// How many nodes are there in this DDF?
     pub num_nodes: usize,
+    /// Used for communication with other nodes in this DDF
+    network: Arc<RwLock<Client<DistributedDFMsg>>>,
     /// The `KVStore`
     kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
     /// Used for processing messages: TODO better explanation
     internal_notifier: Arc<Notify>,
     /// Used for sending rows back and forth TODO: better explanation
     row: Arc<RwLock<Row>>,
-    /// Blob Receiver for sending lower level messages to other nodes
-    blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
+    /// A notifier that gets notified when the `Server` has sent a `Kill`
+    /// message to this `DistributedDataFrame`'s network `Client`
+    kill_notifier: Arc<Notify>,
+    /// Used for lower level messages TODO: better explanation
+    blob_receiver: Mutex<Receiver<Vec<u8>>>,
 }
 
 /// Represents the kinds of messages sent between `DistributedDataFrame`s
@@ -83,6 +89,9 @@ pub(crate) enum DistributedDFMsg {
         schema: Schema,
         df_chunk_map: HashMap<Range<usize>, Key>,
     },
+    /// Used by the last node to tell the first node that they are ready for
+    /// the `Initialization` message
+    Ready,
 }
 
 /// Represents a `Schema` of a `DataFrame`
@@ -134,7 +143,10 @@ pub trait Fielder {
 /// `DataFrame`. In `DataFrame::pmap`, `Rower`s are cloned for parallel
 /// execution.
 pub trait Rower {
-    /// This function is called once per row.  The return value is used in
+    /// This function is called once per row. When used in conjunction with
+    /// `pmap`, the row index of `r` is correctly set, meaning that the rower
+    /// may make a copy of the DF it's mapping and mutate that copy, since
+    /// the DF is not easily mutable. The return value is used in
     /// `DataFrame::filter` to indicate whether a row should be kept.
     fn visit(&mut self, r: &Row) -> bool;
 

@@ -36,33 +36,51 @@ impl Server {
             let sink = FramedWrite::new(writer, MessageCodec::new());
             // Receive the listening IP:Port address of the new client
             let address = network::read_msg(&mut stream).await?;
-            let address =
-                if let ControlMsg::Introduction { address: a } = address.msg {
-                    a
-                } else {
-                    return Err(LiquidError::UnexpectedMessage);
-                };
-            // Make the `RegistrationMsg` to send to the new Client to inform
-            // them of already existing nodes.
-            let target_id = self.directory.len() + 1;
+            let (address, client_type) = if let ControlMsg::Introduction {
+                address,
+                client_type,
+            } = address.msg
+            {
+                (address, client_type)
+            } else {
+                return Err(LiquidError::UnexpectedMessage);
+            };
+            let conn = Connection {
+                address: address.clone(),
+                sink,
+            };
+
+            let target_id;
+            let dir;
+            match self.directory.get_mut(&client_type) {
+                Some(d) => {
+                    // there are some existing clients of this type
+                    target_id = d.len() + 1; // node id's start at 1
+                    dir = d
+                        .iter()
+                        .map(|(k, v)| (*k, v.address.clone()))
+                        .collect();
+                    d.insert(target_id, conn);
+                }
+                None => {
+                    target_id = 1;
+                    dir = Vec::new();
+                    let mut d = HashMap::new();
+                    d.insert(target_id, conn);
+                    self.directory.insert(client_type.clone(), d);
+                }
+            };
+
             info!(
-                "Connected to address: {:#?}, assigning id: {:#?}",
+                "Connected to address: {:#?}, with type {:#?}, assigning id: {:#?}",
                 address.clone(),
+                client_type.clone(),
                 target_id
             );
-            let dir_msg = ControlMsg::Directory {
-                dir: self
-                    .directory
-                    .iter()
-                    .map(|(k, v)| (*k, v.address.clone()))
-                    .collect(),
-            };
-            // Add them to our directory after making the `RegistrationMsg`
-            // because we don't need to inform them of their own address
-            let conn = Connection { address, sink };
-            self.directory.insert(target_id, conn);
+
             // Send the new client the list of existing nodes.
-            self.send_msg(target_id, dir_msg).await?;
+            let dir_msg = ControlMsg::Directory { dir };
+            self.send_msg(target_id, &client_type, dir_msg).await?;
         }
     }
 
@@ -71,6 +89,7 @@ impl Server {
     pub async fn send_msg(
         &mut self,
         target_id: usize,
+        client_type: &str,
         message: ControlMsg,
     ) -> Result<(), LiquidError> {
         let m = Message {
@@ -79,8 +98,12 @@ impl Server {
             msg_id: self.msg_id,
             msg: message,
         };
-
-        network::send_msg(target_id, m, &mut self.directory).await?;
+        network::send_msg(
+            target_id,
+            m,
+            self.directory.get_mut(client_type).unwrap(),
+        )
+        .await?;
         self.msg_id += 1;
         Ok(())
     }
@@ -89,10 +112,19 @@ impl Server {
     pub async fn broadcast(
         &mut self,
         message: ControlMsg,
+        types: &str,
     ) -> Result<(), LiquidError> {
-        let d: Vec<usize> = self.directory.iter().map(|(k, _)| *k).collect();
+        let d: Vec<usize> = self
+            .directory
+            .iter()
+            .find(|(k, _)| **k == types)
+            .unwrap()
+            .1
+            .iter()
+            .map(|(k, _)| *k)
+            .collect();
         for k in d {
-            self.send_msg(k, message.clone()).await?;
+            self.send_msg(k, types, message.clone()).await?;
         }
         Ok(())
     }

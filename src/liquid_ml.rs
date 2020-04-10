@@ -11,7 +11,7 @@
 
 use crate::dataframe::{Column, DistributedDataFrame, LocalDataFrame, Rower};
 use crate::error::LiquidError;
-use crate::kv::{KVStore, Value};
+use crate::kv::KVStore;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -24,14 +24,20 @@ pub struct LiquidML {
     pub kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
     /// The id of this node, assigned by the registration server
     pub node_id: usize,
-    /// A receiver for blob messages that can b processed by the user
-    pub blob_receiver: Arc<Mutex<Receiver<Value>>>,
+    /// A receiver for blob messages (received by the KV) that can be
+    /// processed by the user for lower level access to the network
+    pub blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     /// The number of nodes in this network
     /// NOTE: Panics if `num_nodes` is inconsistent with this network
     pub num_nodes: usize,
     /// A notifier that gets notified when the server has sent a kill message
     pub kill_notifier: Arc<Notify>,
-    pub df: HashMap<String, DistributedDataFrame>,
+    /// A map of a DataFrame's name to a DistributedDataFrame
+    pub df: HashMap<String, Arc<DistributedDataFrame>>,
+    /// The `IP:Port` address of the `Server`
+    pub server_addr: String,
+    /// The `IP` of this node
+    pub my_ip: String,
 }
 
 impl LiquidML {
@@ -55,6 +61,15 @@ impl LiquidML {
         )
         .await;
         let node_id = { kv.read().await.id };
+        let (my_ip, _my_port) = {
+            let mut iter = my_addr.split(':');
+            let first = iter.next().unwrap();
+            let second = iter.next().unwrap();
+            (first, second)
+        };
+        dbg!(my_ip);
+        dbg!(my_addr);
+
         Ok(LiquidML {
             kv,
             node_id,
@@ -62,6 +77,8 @@ impl LiquidML {
             num_nodes,
             kill_notifier,
             df: HashMap::new(),
+            server_addr: server_addr.to_string(),
+            my_ip: my_ip.to_string(),
         })
     }
 
@@ -93,6 +110,8 @@ impl LiquidML {
         file_name: &str,
     ) -> Result<(), LiquidError> {
         let ddf = DistributedDataFrame::from_sor(
+            &self.server_addr,
+            &self.my_ip,
             file_name,
             self.kv.clone(),
             name,
