@@ -252,14 +252,14 @@ impl DistributedDataFrame {
             debug!("Got the Initialization message from Node 1");
 
             let row = Arc::new(RwLock::new(Row::new(&schema)));
-            let num_rows = df_chunk_map
-                .iter()
-                .max_by(|(k1, _), (k2, _)| k2.end.cmp(&k1.end))
-                .unwrap()
-                .0
-                .end;
-
-            dbg!(num_rows);
+            let num_rows = df_chunk_map.iter().fold(0, |mut acc, (k, _)| {
+                if acc > k.end {
+                    acc
+                } else {
+                    acc = k.end;
+                    acc
+                }
+            });
 
             let ddf = Arc::new(DistributedDataFrame {
                 schema,
@@ -477,23 +477,24 @@ impl DistributedDataFrame {
                 rower = ldf.pmap(rower);
             }
         }
-        dbg!("finished mapping local chunk(s)");
+        debug!("finished mapping local chunk(s)");
         if self.node_id == self.num_nodes {
             // we are the last node
             self.send_blob(self.node_id - 1, &rower).await?;
-            dbg!("last node sent its results");
+            debug!("Last node sent its results");
             Ok(None)
         } else {
             let blob =
                 { self.blob_receiver.lock().await.recv().await.unwrap() };
             let external_rower: T = deserialize(&blob[..])?;
             rower = rower.join(external_rower);
-            dbg!("received a result and joined it with our rower");
+            debug!("Received a resulting rower and joined it with local rower");
             if self.node_id != 1 {
                 self.send_blob(self.node_id - 1, &rower).await?;
-                dbg!("sent our response");
+                debug!("Forwarded the combined rower");
                 Ok(None)
             } else {
+                debug!("Final node completed map");
                 Ok(Some(rower))
             }
         }
