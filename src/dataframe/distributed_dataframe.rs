@@ -25,6 +25,9 @@ use tokio::sync::{
 
 /// An interface for a `DataFrame`, inspired by those used in `pandas` and `R`.
 impl DistributedDataFrame {
+    // TODO: we should await some of the futures for sending chunks every so
+    // often so that we don't end up parsing the whole file into memory
+    // since parsing is faster than sending over the network
     /// TODO: update documentation
     /// Creates a new `DataFrame` from the given file
     pub async fn from_sor(
