@@ -96,8 +96,7 @@ impl DistributedDataFrame {
             let mut df_chunk_map = HashMap::new();
             let mut cur_num_rows = 0;
             {
-                let unlocked = kv.read().await;
-                let mut futs = Vec::new();
+                //let mut futs = Vec::new();
                 // in each iteration, create a future sends a chunk to a node
                 for (chunk_idx, chunk) in sor_terator.into_iter().enumerate() {
                     let ldf = LocalDataFrame::from(chunk);
@@ -114,7 +113,12 @@ impl DistributedDataFrame {
                     cur_num_rows += ldf.n_rows();
 
                     // add the future we make to a vec for multiplexing
-                    futs.push(unlocked.put(key.clone(), ldf));
+                    let cloned = kv.clone();
+                    tokio::spawn(async move {
+                        let unlocked = cloned.read().await;
+                        unlocked.put(key.clone(), ldf).await.unwrap();
+                    });
+                    //futs.push(unlocked.put(key.clone(), ldf));
 
                     // TODO: might need to do some tuning on when to join the
                     // futures here, possibly even dynamically figure out some
@@ -123,8 +127,8 @@ impl DistributedDataFrame {
                     if chunk_idx % num_nodes == 0 {
                         // send all chunks concurrently once we have num_node
                         // new chunks to send
-                        try_join_all(futs).await?;
-                        futs = Vec::new();
+                        //try_join_all(futs).await?;
+                        //futs = Vec::new();
                         info!(
                             "sent {} chunks successfully, total of {} chunks",
                             num_nodes, chunk_idx
@@ -132,11 +136,13 @@ impl DistributedDataFrame {
                     }
                 }
                 // we are almost done distributing chunks
+                /*
                 if !futs.is_empty() {
                     // if the number of chunks is not evenly divisible by the
                     // number of nodes, we will have a few more chunks to send
                     try_join_all(futs).await?;
                 }
+                */
                 info!(
                     "Finished distributing {} SoR chunks",
                     cur_num_rows / max_rows_per_node
