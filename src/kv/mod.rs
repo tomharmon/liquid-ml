@@ -38,6 +38,7 @@
 //!       the `Client` processes messages
 use crate::network::Client;
 use lru::LruCache;
+use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -71,6 +72,15 @@ impl Key {
             home,
         }
     }
+    /// Make a key with an automatically generated name
+    pub(crate) fn generate(name: &str, home: usize) -> Self {
+        let mut rng = rand::thread_rng();
+        // TODO: probably a better way to do this
+        Key {
+            name: format!("{}-{}-{}", name, home, rng.gen::<i16>()),
+            home,
+        }
+    }
 }
 
 /// A distributed `Key`, `Value` store which is generic for type `T`. Since
@@ -80,6 +90,7 @@ impl Key {
 /// Internally `KVStore`s store their data in memory as serialized blobs
 /// (`Vec<u8>`). The `KVStore` caches deserialized `Value`s into their type
 /// `T` on a least-recently used basis.
+#[derive(Debug)]
 pub struct KVStore<T> {
     /// The data owned by this `KVStore`
     data: RwLock<HashMap<Key, Value>>,
@@ -89,7 +100,7 @@ pub struct KVStore<T> {
     cache: Mutex<LruCache<Key, Arc<T>>>,
     /// The `network` layer, used to send and receive messages and data with
     /// other `KVStore`s
-    network: Arc<RwLock<Client<KVMessage>>>,
+    pub(crate) network: Arc<RwLock<Client<KVMessage>>>,
     /// Used internally for processing data and messages
     internal_notifier: Notify,
     /// The `id` of the node this `KVStore` is running on

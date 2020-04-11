@@ -9,34 +9,39 @@
 //! Detailed examples that use the application can be found in the examples directory of this
 //! crate.
 
-use crate::dataframe::{DataFrame, Rower};
+use crate::dataframe::{Column, DistributedDataFrame, LocalDataFrame, Rower};
 use crate::error::LiquidError;
-use crate::kv::{KVStore, Key, Value};
-use bincode::{deserialize, serialize};
+use crate::kv::KVStore;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::fs::{self, File};
+use std::collections::HashMap;
 use std::future::Future;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::sync::Arc;
-use tokio::sync::{mpsc, mpsc::Receiver, Notify};
+use tokio::sync::{mpsc, mpsc::Receiver, Mutex, Notify};
 
 /// Represents an application
-pub struct Application {
+pub struct LiquidML {
     /// A pointer to the KVStore that stores all the data for the application
-    pub kv: Arc<KVStore<DataFrame>>,
+    pub kv: Arc<KVStore<LocalDataFrame>>,
     /// The id of this node, assigned by the registration server
     pub node_id: usize,
-    /// A receiver for blob messages that can b processed by the user
-    pub blob_receiver: Receiver<Value>,
+    /// A receiver for blob messages (received by the KV) that can be
+    /// processed by the user for lower level access to the network
+    pub blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     /// The number of nodes in this network
     /// NOTE: Panics if `num_nodes` is inconsistent with this network
-    num_nodes: usize,
+    pub num_nodes: usize,
     /// A notifier that gets notified when the server has sent a kill message
     pub kill_notifier: Arc<Notify>,
+    /// A map of a DataFrame's name to a DistributedDataFrame
+    pub data_frames: HashMap<String, Arc<DistributedDataFrame>>,
+    /// The `IP:Port` address of the `Server`
+    pub server_addr: String,
+    /// The `IP` of this node
+    pub my_ip: String,
 }
 
-impl Application {
+impl LiquidML {
     /// Create a new `liquid_ml` application that runs at `my_addr` and will
     /// wait to connect to `num_nodes` nodes after registering with the
     /// `Server` at the `server_addr` before returning.
@@ -45,7 +50,7 @@ impl Application {
         server_addr: &str,
         num_nodes: usize,
     ) -> Result<Self, LiquidError> {
-        let (blob_sender, blob_receiver) = mpsc::channel(2);
+        let (blob_sender, blob_receiver) = mpsc::channel(20);
         let kill_notifier = Arc::new(Notify::new());
         let kv = KVStore::new(
             server_addr,
@@ -57,15 +62,72 @@ impl Application {
         )
         .await;
         let node_id = kv.id;
-        Ok(Application {
+        let (my_ip, _my_port) = {
+            let mut iter = my_addr.split(':');
+            let first = iter.next().unwrap();
+            let second = iter.next().unwrap();
+            (first, second)
+        };
+
+        Ok(LiquidML {
             kv,
             node_id,
-            blob_receiver,
+            blob_receiver: Arc::new(Mutex::new(blob_receiver)),
             num_nodes,
             kill_notifier,
+            data_frames: HashMap::new(),
+            server_addr: server_addr.to_string(),
+            my_ip: my_ip.to_string(),
         })
     }
 
+    pub async fn df_from_fn(
+        &mut self,
+        df_name: &str,
+        data_generator: fn() -> Vec<Column>,
+    ) -> Result<(), LiquidError> {
+        let data = if self.node_id == 1 {
+            Some(data_generator())
+        } else {
+            None
+        };
+        let ddf = DistributedDataFrame::new(
+            &self.server_addr,
+            &self.my_ip,
+            data,
+            self.kv.clone(),
+            df_name,
+            self.num_nodes,
+            self.blob_receiver.clone(),
+        )
+        .await?;
+        self.data_frames.insert(df_name.to_string(), ddf);
+        Ok(())
+    }
+
+    pub async fn df_from_sor(
+        &mut self,
+        df_name: &str,
+        file_name: &str,
+    ) -> Result<(), LiquidError> {
+        let ddf = DistributedDataFrame::from_sor(
+            &self.server_addr,
+            &self.my_ip,
+            file_name,
+            self.kv.clone(),
+            df_name,
+            self.num_nodes,
+            self.blob_receiver.clone(),
+        )
+        .await?;
+        self.data_frames.insert(df_name.to_string(), ddf);
+        Ok(())
+    }
+
+    /* Just leaving this here in case we want to add back this function
+     * for convenience/faster testing?
+     *
+     *
     /// Create a new application and split the given SoR file across all the
     /// nodes in the network. Assigns a key with the name `df_name` to
     /// the `DataFrame` chunk for this node.
@@ -99,59 +161,8 @@ impl Application {
         Ok(app)
     }
 
-    /// Perform a distributed map operation on the `DataFrame` associated with
-    /// the `df_name` with the given `rower`. Returns `Some(rower)` (of the
-    /// joined results) if the `node_id` of this `Application` is `1`, and
-    /// `None` otherwise.
-    ///
-    /// A local `pmap` is used on each node to map over that nodes' chunk.
-    /// By default, each node will use the number of threads available on that
-    /// machine.
-    ///
-    /// NOTE:
-    /// There is an important design decision that comes with a distinct trade
-    /// off here. The trade off is:
-    /// 1. Join the last node with the next one until you get to the end. This
-    ///    has reduced memory requirements but a performance impact because
-    ///    of the synchronous network calls
-    /// 2. Join all nodes with one node by sending network messages
-    ///    concurrently to the final node. This has increased memory
-    ///    requirements and greater complexity but greater performance because
-    ///    all nodes can asynchronously send to one node at the same time.
-    ///
-    /// This implementation went with option 1 for simplicity reasons
-    pub async fn pmap<R>(
-        &mut self,
-        df_name: &str,
-        rower: R,
-    ) -> Result<Option<R>, LiquidError>
-    where
-        R: Rower + Serialize + DeserializeOwned + Send + Clone,
-    {
-        match self.kv.get(&Key::new(df_name, self.node_id)).await {
-            Ok(df) => {
-                let mut res = df.pmap(rower);
-                if self.node_id == self.num_nodes {
-                    // we are the last node
-                    let blob = serialize(&res)?;
-                    self.kv.send_blob(self.node_id - 1, blob).await?;
-                    Ok(None)
-                } else {
-                    let mut blob = self.blob_receiver.recv().await.unwrap();
-                    let external_rower: R = deserialize(&blob[..])?;
-                    res = res.join(external_rower);
-                    if self.node_id != 1 {
-                        blob = serialize(&res)?;
-                        self.kv.send_blob(self.node_id - 1, blob).await?;
-                        Ok(None)
-                    } else {
-                        Ok(Some(res))
-                    }
-                }
-            }
-            Err(e) => Err(e),
-        }
-    }
+     *
+     */
 
     /// Given a function run it on this application. This function only terminates when a kill
     /// signal from the server has been sent. `examples/demo_client.rs` is a good starting point to
@@ -159,9 +170,39 @@ impl Application {
     pub async fn run<F, Fut>(self, f: F)
     where
         Fut: Future<Output = ()>,
-        F: FnOnce(Arc<KVStore<DataFrame>>) -> Fut,
+        F: FnOnce(Arc<KVStore<LocalDataFrame>>) -> Fut,
     {
         f(self.kv.clone()).await;
         self.kill_notifier.notified().await;
+    }
+
+    pub async fn map<T: Rower + Serialize + Clone + DeserializeOwned + Send>(
+        &self,
+        df_name: &str,
+        rower: T,
+    ) -> Result<Option<T>, LiquidError> {
+        let df = match self.data_frames.get(df_name) {
+            Some(x) => x,
+            None => return Err(LiquidError::NotPresent),
+        };
+        df.map(rower).await
+    }
+
+    pub async fn filter<
+        T: Rower + Serialize + Clone + DeserializeOwned + Send,
+    >(
+        &mut self,
+        df_name: &str,
+        rower: T,
+    ) -> Result<(), LiquidError> {
+        let df = match self.data_frames.get(df_name) {
+            Some(x) => x,
+            None => return Err(LiquidError::NotPresent),
+        };
+        let filtered_df = df.filter(rower, self.blob_receiver.clone()).await?;
+        self.data_frames
+            .insert(filtered_df.df_name.clone(), filtered_df);
+
+        Ok(())
     }
 }

@@ -7,30 +7,100 @@
 //! `DataFrame` across many distributed machines in a horizontally scalable
 //! manner by implementing the `Rower` trait to perform `map` or `filter`
 //! operations on a `DataFrame`.
-
+use crate::kv::{KVStore, Key};
+use crate::network::Client;
 use deepsize::DeepSizeOf;
 use serde::{Deserialize, Serialize};
 pub use sorer::{
     dataframe::{Column, Data},
     schema::DataType,
 };
+use std::collections::HashMap;
+use std::ops::Range;
+use std::sync::Arc;
+use tokio::sync::{mpsc::Receiver, Mutex, Notify, RwLock};
 
-// hey, inception was a great movie, come on now
-#[allow(clippy::module_inception)]
-mod dataframe;
+mod distributed_dataframe;
+mod local_dataframe;
 mod row;
 mod schema;
 
 /// Represents a local `DataFrame` which contains `Data` stored in a columnar
 /// format and a well-defined `Schema`
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug, DeepSizeOf)]
-pub struct DataFrame {
+pub struct LocalDataFrame {
     /// The `Schema` of this `DataFrame`
     pub schema: Schema,
     /// The data of this DataFrame, in columnar format
     pub data: Vec<Column>,
     /// Number of threads for this computer
     pub n_threads: usize,
+}
+
+/// Represents a distributed `DataFrame` which uses a local `KVStore` and a
+/// `Vec<Key>` of all `Key`s referring to `DataFrame`s which live on other
+/// nodes in order to abstract over the networking and provide the same
+/// functionality from the `DataFrame` trait as a local `DataFrame` struct.
+#[derive(Debug)]
+pub struct DistributedDataFrame {
+    /// The `Schema` of this `DistributedDataFrame`
+    pub schema: Schema,
+    /// The name of this `DistributedDataFrame`
+    pub df_name: String,
+    /// Keys that point to data in different nodes.
+    pub df_chunk_map: HashMap<Range<usize>, Key>,
+    /// cached, ddf is immutable
+    pub num_rows: usize,
+    /// The id of the node this `DistributedDataFrame` is running on
+    pub node_id: usize,
+    /// How many nodes are there in this DDF?
+    pub num_nodes: usize,
+    /// What's the address of the `Server`?
+    pub server_addr: String,
+    /// What's my IP address?
+    pub my_ip: String,
+    /// Used for communication with other nodes in this DDF
+    network: Arc<RwLock<Client<DistributedDFMsg>>>,
+    /// The `KVStore`
+    kv: Arc<KVStore<LocalDataFrame>>,
+    /// Used for processing messages: TODO better explanation
+    internal_notifier: Arc<Notify>,
+    /// Used for sending rows back and forth TODO: better explanation
+    row: Arc<RwLock<Row>>,
+    /// A notifier that gets notified when the `Server` has sent a `Kill`
+    /// message to this `DistributedDataFrame`'s network `Client`
+    kill_notifier: Arc<Notify>,
+    /// Used for lower level messages TODO: better explanation
+    blob_receiver: Mutex<Receiver<Vec<u8>>>,
+    /// Used for processing filter results TODO: maybe a better way to do this
+    filter_results: Mutex<Receiver<DistributedDFMsg>>,
+}
+
+/// Represents the kinds of messages sent between `DistributedDataFrame`s
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) enum DistributedDFMsg {
+    /// A messaged used to request a `Row` with the given index from another
+    /// node in a `DistributedDataFrame`
+    GetRow(usize),
+    /// A message used to respond to `GetRow` messages with the requested row
+    Row(Row),
+    /// A message used to tell the 1st node what ranges DistributedDataFrame
+    /// nodes have after filtering
+    FilterResult {
+        num_rows: usize,
+        filtered_df_key: Option<Key>,
+    },
+    /// A message used to share random blobs of data with other nodes. This
+    /// provides a lower level interface to facilitate other kinds of messages
+    Blob(Vec<u8>),
+    /// To tell other DDFs whats up TODO:
+    Initialization {
+        schema: Schema,
+        df_chunk_map: HashMap<Range<usize>, Key>,
+    },
+    /// Used by the last node to tell the first node that they are ready for
+    /// the `Initialization` message
+    Ready,
 }
 
 /// Represents a `Schema` of a `DataFrame`
@@ -82,7 +152,10 @@ pub trait Fielder {
 /// `DataFrame`. In `DataFrame::pmap`, `Rower`s are cloned for parallel
 /// execution.
 pub trait Rower {
-    /// This function is called once per row.  The return value is used in
+    /// This function is called once per row. When used in conjunction with
+    /// `pmap`, the row index of `r` is correctly set, meaning that the rower
+    /// may make a copy of the DF it's mapping and mutate that copy, since
+    /// the DF is not easily mutable. The return value is used in
     /// `DataFrame::filter` to indicate whether a row should be kept.
     fn visit(&mut self, r: &Row) -> bool;
 

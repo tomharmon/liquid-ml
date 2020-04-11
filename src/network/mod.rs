@@ -69,10 +69,13 @@
 //!     // can perform orderly shutdown
 //!     let kill_notifier = Arc::new(Notify::new());
 //!     let client = Client::<String>::new("68.2.3.4:9000",
-//!                                        "69.0.4.20:9000",
+//!                                        "69.0.4.20",
+//!                                        Some("9000"),
 //!                                        sender,
 //!                                        kill_notifier,
-//!                                        2, true).await.unwrap();
+//!                                        2,
+//!                                        true,
+//!                                        "my-client").await.unwrap();
 //!     // `Client::new` returns a `Arc<RwLock<Client>>` so that it may
 //!     // be used concurrently
 //!     let id = { client.read().await.id };
@@ -96,10 +99,13 @@
 //!     let (sender, mut receiver) = mpsc::channel(100);
 //!     let kill_notifier = Arc::new(Notify::new());
 //!     let client = Client::<String>::new("68.2.3.4:9000",
-//!                                        "69.80.08.5:9000",
+//!                                        "64.4.4.20",
+//!                                        Some("9000"),
 //!                                        sender,
 //!                                        kill_notifier,
-//!                                        2, true).await.unwrap();
+//!                                        2,
+//!                                        true,
+//!                                        "my-client").await.unwrap();
 //!     let msg = receiver.recv().await.unwrap();
 //!     println!("{}", msg.msg);
 //!     Ok(())
@@ -118,6 +124,7 @@ use tokio::sync::mpsc::Sender;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
 /// A connection to another `Client`, used for sending directed communication
+#[derive(Debug)]
 pub(crate) struct Connection<T> {
     /// The `IP:Port` of another `Client` that we're connected to
     pub(crate) address: String,
@@ -130,6 +137,7 @@ type FramedSink<T> = FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>;
 
 /// Represents a `Client` node in a distributed system that is generic for type
 /// `T`, where `T` is the types of messages that can be sent between `Client`s
+#[derive(Debug)]
 pub struct Client<T> {
     /// The `id` of this `Client`, assigned by the `Server` on startup
     pub id: usize,
@@ -146,16 +154,20 @@ pub struct Client<T> {
     /// above layer will receive the messages on the other half of this `mpsc`
     /// channel.
     sender: Sender<Message<T>>,
+    /// the type of this client
+    client_type: String,
 }
 
 /// Represents a registration `Server` in a distributed system.
+#[derive(Debug)]
 pub struct Server {
     /// The `address` of this `Server`
     pub(crate) address: String,
     /// The id of the current message
     pub(crate) msg_id: usize,
     /// A directory which is a map of client id to a [`Connection`](Connection)
-    pub(crate) directory: HashMap<usize, Connection<ControlMsg>>,
+    pub(crate) directory:
+        HashMap<String, HashMap<usize, Connection<ControlMsg>>>,
 }
 
 /// A message that can sent between nodes for communication. The message
@@ -182,7 +194,10 @@ pub enum ControlMsg {
     Directory { dir: Vec<(usize, String)> },
     /// An introduction that a new `Client` sends to all other existing
     /// `Client`s and the server
-    Introduction { address: String },
+    Introduction {
+        address: String,
+        client_type: String,
+    },
     /// A message the `Server` sends to `Client`s to inform them to shut down
     Kill,
 }
@@ -200,7 +215,7 @@ pub(crate) struct MessageCodec<T> {
 
 /// Reads a message of from the given `reader` into the `buffer` and deserialize
 /// it into a type `T`
-pub(crate) async fn read_msg<T: DeserializeOwned + std::fmt::Debug>(
+pub(crate) async fn read_msg<T: DeserializeOwned>(
     reader: &mut FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>,
 ) -> Result<Message<T>, LiquidError> {
     match reader.next().await {

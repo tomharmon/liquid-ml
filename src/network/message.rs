@@ -1,10 +1,12 @@
 //! Defines messages used to communicate with the network of nodes over TCP.
 use crate::error::LiquidError;
 use crate::network::{Message, MessageCodec};
+use crate::{BYTES_PER_KIB, MAX_FRAME_LEN_FRACTION};
 use bincode::{deserialize, serialize};
 use bytes::{Bytes, BytesMut};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use sysinfo::{RefreshKind, System, SystemExt};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 impl<T> Message<T> {
@@ -27,9 +29,17 @@ impl<T> Message<T> {
 impl<T> MessageCodec<T> {
     /// Creates a new `MessageCodec`
     pub(crate) fn new() -> Self {
+        let memo_info_kind = RefreshKind::new().with_memory();
+        let sys = System::new_with_specifics(memo_info_kind);
+        let total_memory = sys.get_total_memory() as f64;
+        let max_frame_len =
+            (total_memory * BYTES_PER_KIB * MAX_FRAME_LEN_FRACTION) as usize;
+        let codec = LengthDelimitedCodec::builder()
+            .max_frame_length(max_frame_len)
+            .new_codec();
         MessageCodec {
             phantom: std::marker::PhantomData,
-            codec: LengthDelimitedCodec::new(),
+            codec,
         }
     }
 }

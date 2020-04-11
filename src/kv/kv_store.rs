@@ -2,23 +2,23 @@
 use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
+use crate::{
+    BYTES_PER_GB, BYTES_PER_KIB, KV_STORE_CACHE_SIZE_FRACTION,
+    MAX_NUM_CACHED_VALUES,
+};
 use bincode::{deserialize, serialize};
 use deepsize::DeepSizeOf;
-use log::error;
-use log::info;
+use log::{debug, error, info};
 use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use sysinfo::{RefreshKind, System, SystemExt};
-use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::{Mutex, Notify, RwLock};
-
-const MAX_NUM_CACHED_VALUES: usize = 10;
-const BYTES_PER_KIB: f64 = 1024.0;
-const BYTES_PER_GB: f64 = 1_073_741_824.0;
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    Mutex, Notify, RwLock,
+};
 
 impl<
         T: Serialize
@@ -63,14 +63,22 @@ impl<
     ) -> Arc<Self> {
         // the Receiver acts as our queue of messages from the network, and
         // the network uses the Sender to add messages to our queue
-        let (sender, receiver) = mpsc::channel(100);
+        let (sender, receiver) = mpsc::channel(64);
+        let (my_ip, my_port) = {
+            let mut iter = my_addr.split(':');
+            let first = iter.next().unwrap();
+            let second = iter.next().unwrap();
+            (first, second)
+        };
         let network = Client::new(
             server_addr,
-            my_addr,
+            my_ip,
+            Some(my_port),
             sender,
             kill_notifier,
             num_clients,
             wait_for_all_clients,
+            "kvstore",
         )
         .await
         .unwrap();
@@ -78,7 +86,8 @@ impl<
         let memo_info_kind = RefreshKind::new().with_memory();
         let sys = System::new_with_specifics(memo_info_kind);
         let total_memory = sys.get_total_memory() as f64;
-        let max_cache_size = total_memory * BYTES_PER_KIB * 0.33;
+        let max_cache_size =
+            total_memory * BYTES_PER_KIB * KV_STORE_CACHE_SIZE_FRACTION;
         let max_cache_size_in_gb = max_cache_size / BYTES_PER_GB;
         info!(
             "KVStore has a max cache size of {} GB",
@@ -116,10 +125,10 @@ impl<
         }
 
         let serialized_val = self.get_raw(key).await?;
-        let deserialized: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
-        let v = deserialized.clone();
-        self.add_to_cache(key, v).await?;
-        Ok(deserialized)
+        let value: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
+        let v = value.clone();
+        self.add_to_cache(key.clone(), v).await?;
+        Ok(value)
     }
 
     /// Get the data for the given `key`. If the key belongs on a different
@@ -151,11 +160,10 @@ impl<
                 self.internal_notifier.notified().await;
             }
             let serialized_val = self.get_raw(key).await?;
-            let deserialized: Arc<T> =
-                Arc::new(deserialize(&serialized_val[..])?);
-            let v = deserialized.clone();
-            self.add_to_cache(key, v).await?;
-            Ok(deserialized)
+            let value: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
+            let v = value.clone();
+            self.add_to_cache(key.clone(), v).await?;
+            Ok(value)
         } else {
             // The data is not supposed to be owned by this node, we must
             // request it from another `KVStore` by sending a `get` message
@@ -189,18 +197,21 @@ impl<
     /// `Ok(None)` is returned after the `value` was successfully sent
     pub async fn put(
         &self,
-        key: &Key,
+        key: Key,
         value: T,
     ) -> Result<Option<Value>, LiquidError> {
         let serial = serialize(&value)?;
         if key.home == self.id {
+            debug!("Put key: {:#?} into KVStore", key.clone());
             let opt_old_data =
                 { self.data.write().await.insert(key.clone(), serial) };
-            self.internal_notifier.notify();
+            self.internal_notifier.notify(); // why do we need this here again
+            self.add_to_cache(key, Arc::new(value)).await?;
             Ok(opt_old_data)
         } else {
-            let msg = KVMessage::Put(key.clone(), serial);
-            self.network.write().await.send_msg(key.home, msg).await?;
+            let target_id = key.home;
+            let msg = KVMessage::Put(key, serial);
+            self.network.write().await.send_msg(target_id, msg).await?;
             Ok(None)
         }
     }
@@ -242,43 +253,41 @@ impl<
     ///    - `Blob` message: send the data up a higher level similar to how
     ///       the `Client` processes messages
     pub(crate) async fn process_messages(
-        kv: Arc<KVStore<T>>,
+        self: Arc<Self>,
         mut receiver: Receiver<Message<KVMessage>>,
     ) -> Result<(), LiquidError> {
         loop {
             let msg = receiver.recv().await.unwrap();
-            let kv_ptr_clone = kv.clone();
-            let mut sender_clone = kv_ptr_clone.blob_sender.clone();
+            let mut sender_clone = self.blob_sender.clone();
+            let kv = self.clone();
             tokio::spawn(async move {
-                info!("Processing a message with id: {:#?}", msg.msg_id);
+                debug!("Processing a message with id: {:#?}", msg.msg_id);
                 match msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond
-                        let v =
-                            kv_ptr_clone.wait_and_get_raw(&k).await.unwrap();
-                        {
-                            kv_ptr_clone
-                                .network
-                                .write()
-                                .await
-                                .send_msg(msg.sender_id, KVMessage::Data(k, v))
-                                .await
-                                .unwrap();
-                        }
+                        let v = kv.wait_and_get_raw(&k).await.unwrap();
+                        let response = KVMessage::Data(k, v);
+                        kv.network
+                            .write()
+                            .await
+                            .send_msg(msg.sender_id, response)
+                            .await
+                            .unwrap();
                     }
                     KVMessage::Data(k, v) => {
                         let v: Arc<T> = Arc::new(deserialize(&v).unwrap());
-                        {
-                            kv_ptr_clone.cache.lock().await.put(k, v);
-                        }
-                        kv_ptr_clone.internal_notifier.notify();
+                        kv.add_to_cache(k, v).await.unwrap();
+                        kv.internal_notifier.notify();
                     }
                     KVMessage::Put(k, v) => {
-                        // Note is the home id actually my id should we check?
+                        // NOTE: should we just change the signature of
+                        //       the `put` method and call that here?
+                        // NOTE: is the home id actually my id should we check?
+                        debug!("Put key: {:#?} into KVStore", k.clone());
                         {
-                            kv_ptr_clone.data.write().await.insert(k, v);
-                        }
-                        kv_ptr_clone.internal_notifier.notify();
+                            kv.data.write().await.insert(k, v)
+                        };
+                        kv.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
                         sender_clone.send(v).await.unwrap();
@@ -312,10 +321,9 @@ impl<
 
     async fn add_to_cache(
         &self,
-        key: &Key,
+        key: Key,
         value: Arc<T>,
     ) -> Result<(), LiquidError> {
-        let k = key.clone();
         let v_size = value.deep_size_of() as u64;
         {
             let mut unlocked = self.cache.lock().await;
@@ -328,7 +336,7 @@ impl<
                 match opt_kv {
                     Some((_, temp)) => {
                         let temp_size = temp.deep_size_of();
-                        info!(
+                        debug!(
                             "Popped cached value of size {} bytes",
                             temp_size
                         );
@@ -340,8 +348,8 @@ impl<
                     }
                 }
             }
-            info!("Added value of size {} bytes to cache", v_size);
-            unlocked.put(k, value);
+            debug!("Added value of size {} bytes to cache", v_size);
+            unlocked.put(key, value);
         }
         Ok(())
     }

@@ -1,12 +1,13 @@
 use clap::Clap;
-use liquid_ml::application::Application;
-use liquid_ml::dataframe::DataFrame;
+use liquid_ml::dataframe::LocalDataFrame;
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::{KVStore, Key};
+use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use simple_logger;
 use sorer::dataframe::{Column, Data};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// This is a simple demo client running the Milestone 1 example code.
 #[derive(Clap)]
@@ -24,21 +25,25 @@ struct Opts {
     my_address: String,
 }
 
-async fn producer(kv: Arc<KVStore<DataFrame>>) {
+async fn producer(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
     let main = Key::new("main", 1);
     let ck = Key::new("ck", 1);
     let vals: Vec<Option<i64>> = (0..100_000).map(|x| Some(x)).collect();
     let sum = vals.iter().fold(0, |x, y| x + y.unwrap());
-    let df1 = DataFrame::from(Column::Int(vals));
-    let df2 = DataFrame::from(Data::Int(sum));
-    kv.put(&main, df1).await.unwrap();
-    kv.put(&ck, df2).await.unwrap();
+    let df1 = LocalDataFrame::from(Column::Int(vals));
+    let df2 = LocalDataFrame::from(Data::Int(sum));
+    {
+        kv.read().await.put(main, df1).await.unwrap()
+    };
+    {
+        kv.read().await.put(ck, df2).await.unwrap()
+    };
 }
 
-async fn summer(kv: Arc<KVStore<DataFrame>>) {
+async fn summer(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
     let verif = Key::new("verif", 1);
     let main = Key::new("main", 1);
-    let df = kv.wait_and_get(&main).await.unwrap();
+    let df = { kv.read().await.wait_and_get(&main).await.unwrap() };
     let mut sum = 0;
     for i in 0..100_000 {
         if let Data::Int(x) = df.get(0, i).unwrap() {
@@ -47,15 +52,17 @@ async fn summer(kv: Arc<KVStore<DataFrame>>) {
             unreachable!()
         }
     }
-    let new_df = DataFrame::from(Data::Int(sum));
-    kv.put(&verif, new_df).await.unwrap();
+    let new_df = LocalDataFrame::from(Data::Int(sum));
+    {
+        kv.read().await.put(verif, new_df).await.unwrap()
+    };
 }
 
-async fn verifier(kv: Arc<KVStore<DataFrame>>) {
+async fn verifier(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
     let ck = Key::new("ck", 1);
     let verif = Key::new("verif", 1);
-    let df2 = kv.wait_and_get(&ck).await.unwrap();
-    let df1 = kv.wait_and_get(&verif).await.unwrap();
+    let df2 = { kv.read().await.wait_and_get(&ck).await.unwrap() };
+    let df1 = { kv.read().await.wait_and_get(&verif).await.unwrap() };
     match (df1.get(0, 0).unwrap(), df2.get(0, 0).unwrap()) {
         (Data::Int(x), Data::Int(y)) => {
             if x == y {
@@ -72,8 +79,7 @@ async fn verifier(kv: Arc<KVStore<DataFrame>>) {
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Debug).unwrap();
-    let app =
-        Application::new(&opts.my_address, &opts.server_address, 3).await?;
+    let app = LiquidML::new(&opts.my_address, &opts.server_address, 3).await?;
 
     if app.node_id == 1 {
         app.run(producer).await;

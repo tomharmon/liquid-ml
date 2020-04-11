@@ -24,5 +24,13 @@ log = "0.4.8"
 simple_logger = "1.6.0"
 sysinfo = "0.12.0"
 deepsize = "0.1.2"
+rand = "0.7.3"
+bytecount = "0.6.0"
 
+[profile.release]
+codegen-units = 1
+panic = 'abort'
+lto = true
 
+[dev-dependencies]
+bitvec = { version = "0.17.4", features = ["serde"] }

@@ -1,14 +1,13 @@
 use clap::Clap;
-use liquid_ml::application::Application;
 use liquid_ml::dataframe::*;
 use liquid_ml::error::LiquidError;
-use liquid_ml::kv::Key;
+use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::collections::HashMap;
-use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap
@@ -62,71 +61,40 @@ impl Rower for WordCounter {
     }
 }
 
-fn reader(file_name: &str, from: u64, to: u64) -> DataFrame {
-    // create a DF with an empty schema since adding the column later
-    // will add to the df schema
-    let schema = Schema::from(vec![]);
-    let mut df = DataFrame::new(&schema);
+fn reader() -> Vec<Column> {
     // open the file
-    let file = File::open(file_name).unwrap();
-    let mut reader = BufReader::new(file);
+    let file = File::open("examples/100k.txt").unwrap();
+    let reader = BufReader::new(file);
     // seek to where we should start reading for this nodes' chunk
-    reader.seek(SeekFrom::Start(from as u64)).unwrap();
-    // take 'to - from' bytes (this nodes' chunk)
-    let reader = reader.take(to - from);
-
     let mut words = Vec::new();
     for line in reader.lines() {
         for word in line.unwrap().split_whitespace() {
             words.push(Some(word.to_string()));
         }
     }
-
-    df.add_column(Column::String(words), None).unwrap();
-
-    df
+    vec![Column::String(words)]
 }
 
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Debug).unwrap();
-    let num_nodes = 3;
+    simple_logger::init_with_level(Level::Error).unwrap();
     let mut app =
-        Application::new(&opts.my_address, &opts.server_address, num_nodes)
-            .await?;
-    let file_name = "examples/100k.txt";
+        LiquidML::new(&opts.my_address, &opts.server_address, 3).await?;
 
-    let file = fs::metadata(&file_name).unwrap();
-    let f: File = File::open(&file_name).unwrap();
-    let mut buf_reader = BufReader::new(f);
-    let mut size = file.len() / num_nodes as u64;
-    // Note: Node ids start at 1
-    let from = size * (app.node_id - 1) as u64;
-
-    // advance the reader to this threads starting index then
-    // find the next space
-    let mut buffer = Vec::new();
-    buf_reader.seek(SeekFrom::Start(from + size)).unwrap();
-    buf_reader.read_until(b' ', &mut buffer).unwrap();
-    size += buffer.len() as u64;
-
-    let df = reader(&file_name, from, from + size);
-
-    let home_key = Key::new("words", app.node_id);
-    app.kv.put(&home_key, df).await?;
+    app.df_from_fn("words", reader).await?;
 
     let rower = WordCounter {
         map: HashMap::new(),
     };
-    let result = app.pmap("words", rower).await?;
+
+    let result = app.map("words", rower).await?;
     match result {
         Some(joined_rower) => {
-            let mut sorted: Vec<_> =
-                joined_rower.map.into_iter().map(|(k, v)| (k, v)).collect();
-            sorted.sort_by(|(_, v1), (_, v2)| v1.cmp(v2));
-            println!("{:#?}", sorted);
-            println!("Number of different words: {}", sorted.len());
+            let mut as_vec: Vec<(&String, &usize)> =
+                joined_rower.map.iter().collect();
+            as_vec.sort_by(|(a, _), (b, _)| a.cmp(b));
+            as_vec.iter().for_each(|(x, y)| println!("{}: {}", x, y));
         }
         None => println!("done"),
     }

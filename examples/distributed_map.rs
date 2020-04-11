@@ -1,7 +1,7 @@
 use clap::Clap;
-use liquid_ml::application::Application;
-use liquid_ml::dataframe::{Data, DataFrame, Row, Rower};
+use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
+use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
@@ -49,22 +49,21 @@ impl Rower for IntSummer {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Debug).unwrap();
-    let mut app = Application::from_sor(
-        "tests/distributed.sor",
-        &opts.my_address,
-        &opts.server_address,
-        3,
-        "420",
-    )
-    .await?;
-    let r = app.pmap("420", IntSummer { sum: 0 }).await?;
+    simple_logger::init_with_level(Level::Info).unwrap();
+    let mut app =
+        LiquidML::new(&opts.my_address, &opts.server_address, 3).await?;
+    app.df_from_sor("dist", "tests/distributed.sor").await?;
+    println!(
+        "Got the Distributed DataFrame struct: \n\n{:?}",
+        app.data_frames.get("dist").unwrap()
+    );
+    let r = app.map("dist", IntSummer { sum: 0 }).await?;
     match r {
         None => println!("Done"),
         Some(x) => println!("the sum is : {}", x.sum),
     }
 
-    let df = DataFrame::from_sor("tests/distributed.sor", 0, 1000000);
+    let df = LocalDataFrame::from_sor("tests/distributed.sor", 0, 1000000);
     let r2 = df.pmap(IntSummer { sum: 0 });
     println!("summing locally yields: {}", r2.sum);
     let r3 = df.map(IntSummer { sum: 0 });

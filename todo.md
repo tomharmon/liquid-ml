@@ -1,14 +1,9 @@
 - Random Forest LUL
-- seven degrees of Linus
+ - script to add features, convert csv to sor, label the data
+ - write the algorithm
+- clean up
 - application + dataframe layer documentation/update memo
-- better distributed dataframe functionality? (possibly make a `DataFrame`
-  trait and a `DistributedDataFrame` struct that implements that trait. 
-  `DistributedDataFrame` would have a `KVStore` and a list of `Key`s associated
-  with all the chunks of the `DistributedDataFrame`. Most of the `Application`
-  code for `pmap`/`pfilter` could then be moved to the `DistributedDataFrame`)
-- Application level `pfilter`
-- Every node has the entire SOR file, possibly add support for distributing
-  chunks automatically?
+- add back function that builds from sor and assumes file is on every node
 - Testing (esp would be good around chunking to ensure no off by one errors)
 - investigate if we should use `tokio::spawn_blocking` anywhere
-- on master branch, change get_col to get_col_idx and add real get_col function
+

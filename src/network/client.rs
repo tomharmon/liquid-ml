@@ -4,7 +4,7 @@ use crate::error::LiquidError;
 use crate::network;
 use crate::network::*;
 use futures::SinkExt;
-use log::info;
+use log::{debug, info};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -15,9 +15,8 @@ use tokio::sync::{mpsc::Sender, Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 // TODO: remove 'static
-impl<
-        RT: Send + Sync + DeserializeOwned + Serialize + std::fmt::Debug + 'static,
-    > Client<RT>
+impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
+    Client<RT>
 {
     /// Create a new `Client` running on the given `my_addr` IP:Port address,
     /// which connects to a server running on the given `server_addr` IP:Port.
@@ -35,12 +34,28 @@ impl<
     /// the layer above the `Client` can use it concurrently.
     pub async fn new(
         server_addr: &str,
-        my_addr: &str,
+        my_ip: &str,
+        my_port: Option<&str>,
         sender: Sender<Message<RT>>,
         kill_notifier: Arc<Notify>,
         num_clients: usize,
         wait_for_all_clients: bool,
+        client_type: &str,
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
+        // Setup a TCPListener
+        let listener;
+        let my_address = match my_port {
+            Some(port) => {
+                let addr = format!("{}:{}", my_ip, port);
+                listener = TcpListener::bind(&addr).await?;
+                addr
+            }
+            None => {
+                let addr = format!("{}:0", my_ip);
+                listener = TcpListener::bind(&addr).await?;
+                listener.local_addr()?.to_string()
+            }
+        };
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
         let (reader, writer) = io::split(server_stream);
@@ -52,7 +67,8 @@ impl<
             0,
             0,
             ControlMsg::Introduction {
-                address: my_addr.to_string(),
+                address: my_address.clone(),
+                client_type: client_type.to_string(),
             },
         ))
         .await?;
@@ -64,13 +80,21 @@ impl<
             return Err(LiquidError::UnexpectedMessage);
         };
 
+        info!(
+            "Client of type {} got id {} running at address {}",
+            client_type,
+            dir_msg.target_id,
+            my_address.clone()
+        );
+
         let mut c = Client {
             id: dir_msg.target_id,
-            address: my_addr.to_string(),
+            address: my_address.clone(),
             msg_id: dir_msg.msg_id + 1,
             directory: HashMap::new(),
             _server: sink,
             sender,
+            client_type: client_type.to_string(),
         };
 
         // Connect to all the clients
@@ -87,6 +111,7 @@ impl<
         if wait_for_all_clients {
             Client::accept_new_connections(
                 concurrent_client_cloned,
+                listener,
                 num_clients,
                 wait_for_all_clients,
             )
@@ -95,6 +120,7 @@ impl<
             tokio::spawn(async move {
                 Client::accept_new_connections(
                     concurrent_client_cloned,
+                    listener,
                     num_clients,
                     wait_for_all_clients,
                 )
@@ -112,11 +138,11 @@ impl<
     /// and call `Client::recv_msg`
     async fn accept_new_connections(
         client: Arc<RwLock<Client<RT>>>,
+        mut listener: TcpListener,
         num_clients: usize,
         wait_for_all_clients: bool,
     ) -> Result<(), LiquidError> {
-        let listen_address = { client.read().await.address.clone() };
-        let mut listener = TcpListener::bind(listen_address).await?;
+        let accepted_type = { client.read().await.client_type.clone() };
         // Me + All the nodes i'm connected to
         let mut curr_clients = 1 + { client.read().await.directory.len() };
         loop {
@@ -130,12 +156,19 @@ impl<
                 FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
             let sink = FramedWrite::new(writer, MessageCodec::<RT>::new());
             let intro = network::read_msg(&mut stream).await?;
-            let address =
-                if let ControlMsg::Introduction { address } = intro.msg {
-                    address
-                } else {
-                    return Err(LiquidError::UnexpectedMessage);
-                };
+            let (address, client_type) = if let ControlMsg::Introduction {
+                address,
+                client_type,
+            } = intro.msg
+            {
+                (address, client_type)
+            } else {
+                return Err(LiquidError::UnexpectedMessage);
+            };
+
+            if accepted_type != client_type {
+                return Err(LiquidError::UnexpectedMessage);
+            }
 
             // increment the message id and check if there was an existing
             // connection
@@ -212,6 +245,7 @@ impl<
                 0,
                 ControlMsg::Introduction {
                     address: self.address.clone(),
+                    client_type: self.client_type.clone(),
                 },
             ))
             .await?;
@@ -259,8 +293,17 @@ impl<
             msg: message,
         };
         network::send_msg(target_id, m, &mut self.directory).await?;
-        info!("sent a message with id, {}", self.msg_id);
+        debug!("sent a message with id, {}", self.msg_id);
         self.msg_id += 1;
+        Ok(())
+    }
+
+    /// Broadcast the given `message` to all currently connected clients
+    pub async fn broadcast(&mut self, message: RT) -> Result<(), LiquidError> {
+        let d: Vec<usize> = self.directory.iter().map(|(k, _)| *k).collect();
+        for k in d {
+            self.send_msg(k, message.clone()).await?;
+        }
         Ok(())
     }
 
@@ -280,8 +323,8 @@ impl<
                     };
                 //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
                 let id = msg.msg_id;
-                sender.send(msg).await.unwrap();
-                info!(
+                sender.send(msg).await.unwrap_or_else(|_| panic!());
+                debug!(
                     "Got a msg with id: {} and added it to process queue",
                     id
                 );
