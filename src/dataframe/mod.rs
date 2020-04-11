@@ -62,7 +62,7 @@ pub struct DistributedDataFrame {
     /// Used for communication with other nodes in this DDF
     network: Arc<RwLock<Client<DistributedDFMsg>>>,
     /// The `KVStore`
-    kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
+    kv: Arc<KVStore<LocalDataFrame>>,
     /// Used for processing messages: TODO better explanation
     internal_notifier: Arc<Notify>,
     /// Used for sending rows back and forth TODO: better explanation

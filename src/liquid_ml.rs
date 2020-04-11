@@ -17,12 +17,12 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::{mpsc, mpsc::Receiver, Mutex, Notify, RwLock};
+use tokio::sync::{mpsc, mpsc::Receiver, Mutex, Notify};
 
 /// Represents an application
 pub struct LiquidML {
     /// A pointer to the KVStore that stores all the data for the application
-    pub kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
+    pub kv: Arc<KVStore<LocalDataFrame>>,
     /// The id of this node, assigned by the registration server
     pub node_id: usize,
     /// A receiver for blob messages (received by the KV) that can be
@@ -61,7 +61,7 @@ impl LiquidML {
             true,
         )
         .await;
-        let node_id = { kv.read().await.id };
+        let node_id = kv.id;
         let (my_ip, _my_port) = {
             let mut iter = my_addr.split(':');
             let first = iter.next().unwrap();
@@ -170,7 +170,7 @@ impl LiquidML {
     pub async fn run<F, Fut>(self, f: F)
     where
         Fut: Future<Output = ()>,
-        F: FnOnce(Arc<RwLock<KVStore<LocalDataFrame>>>) -> Fut,
+        F: FnOnce(Arc<KVStore<LocalDataFrame>>) -> Fut,
     {
         f(self.kv.clone()).await;
         self.kill_notifier.notified().await;

@@ -7,7 +7,7 @@ use crate::kv::{KVStore, Key};
 use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
 use bytecount;
-use futures::future::try_join_all;
+//use futures::future::try_join_all;
 use log::{debug, info};
 use rand::{self, Rng};
 use serde::{de::DeserializeOwned, Serialize};
@@ -31,7 +31,7 @@ impl DistributedDataFrame {
         server_addr: &str,
         my_ip: &str,
         file_name: &str,
-        kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
+        kv: Arc<KVStore<LocalDataFrame>>,
         df_name: &str,
         num_nodes: usize,
         kv_blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
@@ -39,7 +39,7 @@ impl DistributedDataFrame {
         // Figure out what node we are supposed to be. We must synchronize
         // the creation of this DDF on this node based on the already assigned
         // id's
-        let node_id = { kv.read().await.id };
+        let node_id = kv.id;
         // initialize some other required fields of self so as not to duplicate
         // code in if branches
         let (blob_sender, blob_receiver) = mpsc::channel(2);
@@ -75,9 +75,7 @@ impl DistributedDataFrame {
             // Send a ready message to node 2 so that all the other nodes
             // start connecting to the Server in the correct order
             let ready_blob = serialize(&DistributedDFMsg::Ready)?;
-            {
-                kv.read().await.send_blob(node_id + 1, ready_blob).await?
-            };
+            kv.send_blob(node_id + 1, ready_blob).await?;
 
             // TODO: Panics if file doesn't exist
             let total_newlines = count_new_lines(file_name);
@@ -96,7 +94,6 @@ impl DistributedDataFrame {
             let mut df_chunk_map = HashMap::new();
             let mut cur_num_rows = 0;
             {
-                //let mut futs = Vec::new();
                 // in each iteration, create a future sends a chunk to a node
                 for (chunk_idx, chunk) in sor_terator.into_iter().enumerate() {
                     let ldf = LocalDataFrame::from(chunk);
@@ -112,37 +109,17 @@ impl DistributedDataFrame {
                     );
                     cur_num_rows += ldf.n_rows();
 
-                    // add the future we make to a vec for multiplexing
-                    let cloned = kv.clone();
-                    tokio::spawn(async move {
-                        let unlocked = cloned.read().await;
-                        unlocked.put(key.clone(), ldf).await.unwrap();
-                    });
-                    //futs.push(unlocked.put(key.clone(), ldf));
-
                     // TODO: might need to do some tuning on when to join the
                     // futures here, possibly even dynamically figure out some
                     // value to smooth over the tradeoff between memory and
                     // speed (right now i assume it uses a lot of memory)
-                    if chunk_idx % num_nodes == 0 {
-                        // send all chunks concurrently once we have num_node
-                        // new chunks to send
-                        //try_join_all(futs).await?;
-                        //futs = Vec::new();
-                        info!(
-                            "sent {} chunks successfully, total of {} chunks",
-                            num_nodes, chunk_idx
-                        );
-                    }
+                    // add the future we make to a vec for multiplexing
+                    let cloned = kv.clone();
+                    tokio::spawn(async move {
+                        cloned.put(key.clone(), ldf).await.unwrap();
+                    });
                 }
                 // we are almost done distributing chunks
-                /*
-                if !futs.is_empty() {
-                    // if the number of chunks is not evenly divisible by the
-                    // number of nodes, we will have a few more chunks to send
-                    try_join_all(futs).await?;
-                }
-                */
                 info!(
                     "Finished distributing {} SoR chunks",
                     cur_num_rows / max_rows_per_node
@@ -244,11 +221,11 @@ impl DistributedDataFrame {
                 // All nodes except the last node must send a ready message
                 // to the node that comes after them to let the next node know
                 // they may join the network
-                kv.read().await.send_blob(node_id + 1, ready_blob).await?;
+                kv.send_blob(node_id + 1, ready_blob).await?;
             } else {
                 // if we are the last node we must tell the first node that
                 // all the other nodes are ready
-                kv.read().await.send_blob(1, ready_blob).await?;
+                kv.send_blob(1, ready_blob).await?;
             }
 
             // Node 1 will send the initialization message to our network
@@ -311,12 +288,13 @@ impl DistributedDataFrame {
     }
 
     // TODO: add some verification that the `data` is not jagged (all cols equal len)
+    // TODO: change multiplexing of sending chunks to send chunks more often
 
     pub async fn new(
         server_addr: &str,
         my_ip: &str,
         data: Option<Vec<Column>>,
-        kv: Arc<RwLock<KVStore<LocalDataFrame>>>,
+        kv: Arc<KVStore<LocalDataFrame>>,
         df_name: &str,
         num_nodes: usize,
         kv_blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
@@ -324,7 +302,7 @@ impl DistributedDataFrame {
         // Figure out what node we are supposed to be. We must synchronize
         // the creation of this DDF on this node based on the already assigned
         // id's
-        let node_id = { kv.read().await.id };
+        let node_id = kv.id;
         // initialize some other required fields of self so as not to duplicate
         // code in both branches
         let (blob_sender, blob_receiver) = mpsc::channel(2);
@@ -360,9 +338,7 @@ impl DistributedDataFrame {
             // Send a ready message to node 2 so that all the other nodes
             // start connecting to the Server in the correct order
             let ready_blob = serialize(&DistributedDFMsg::Ready)?;
-            {
-                kv.read().await.send_blob(node_id + 1, ready_blob).await?
-            };
+            kv.send_blob(node_id + 1, ready_blob).await?;
 
             let mut data = data.unwrap();
             let num_rows = n_rows(&data);
@@ -379,66 +355,49 @@ impl DistributedDataFrame {
 
             // Distribute the chunked data round-robin style
             let mut chunk_idx = 0;
-            {
-                let unlocked = kv.read().await;
-                let mut send_chunk_futs = Vec::new();
-                while rows_processed < num_rows {
-                    let mut chunked_data = Vec::new();
-                    let cur_chunk_size =
-                        cmp::min(rows_per_chunk, rows_to_process);
-                    for col in &mut data {
-                        // will panic if rows_per_node is greater than i.len()
-                        let new_col = match col {
-                            Column::Int(i) => Column::Int(
-                                i.drain(0..cur_chunk_size).collect(),
-                            ),
-                            Column::Bool(i) => Column::Bool(
-                                i.drain(0..cur_chunk_size).collect(),
-                            ),
-                            Column::Float(i) => Column::Float(
-                                i.drain(0..cur_chunk_size).collect(),
-                            ),
-                            Column::String(i) => Column::String(
-                                i.drain(0..cur_chunk_size).collect(),
-                            ),
-                        };
-                        chunked_data.push(new_col);
-                    }
-                    let ldf = LocalDataFrame::from(chunked_data);
-                    let key =
-                        Key::generate(df_name, (chunk_idx % num_nodes) + 1);
-                    // add this chunk range and key to our <range, key> map
-                    df_chunk_map.insert(
-                        Range {
-                            start: rows_processed,
-                            end: rows_processed + ldf.n_rows(),
-                        },
-                        key.clone(),
-                    );
-
-                    chunk_idx += 1;
-                    rows_processed += ldf.n_rows();
-                    rows_to_process -= ldf.n_rows();
-
-                    // add the fututre to a vec for later multiplexing
-                    send_chunk_futs.push(unlocked.put(key.clone(), ldf));
-
-                    if chunk_idx % num_nodes == 0 {
-                        // send all chunks concurrently
-                        try_join_all(send_chunk_futs).await?;
-                        send_chunk_futs = Vec::new();
-                        println!(
-                            "sent {} chunks successfully, total of {} chunks",
-                            num_nodes, chunk_idx
-                        );
-                    }
+            while rows_processed < num_rows {
+                let mut chunked_data = Vec::with_capacity(rows_per_chunk);
+                let cur_chunk_size = cmp::min(rows_per_chunk, rows_to_process);
+                for col in &mut data {
+                    // will panic if rows_per_node is greater than i.len()
+                    let new_col = match col {
+                        Column::Int(i) => {
+                            Column::Int(i.drain(0..cur_chunk_size).collect())
+                        }
+                        Column::Bool(i) => {
+                            Column::Bool(i.drain(0..cur_chunk_size).collect())
+                        }
+                        Column::Float(i) => {
+                            Column::Float(i.drain(0..cur_chunk_size).collect())
+                        }
+                        Column::String(i) => {
+                            Column::String(i.drain(0..cur_chunk_size).collect())
+                        }
+                    };
+                    chunked_data.push(new_col);
                 }
-                if !send_chunk_futs.is_empty() {
-                    // maybe its not evenly divisible
-                    try_join_all(send_chunk_futs).await?;
-                }
-                info!("Finished distributing {} SoR chunks", chunk_idx);
+                let ldf = LocalDataFrame::from(chunked_data);
+                let key = Key::generate(df_name, (chunk_idx % num_nodes) + 1);
+                // add this chunk range and key to our <range, key> map
+                df_chunk_map.insert(
+                    Range {
+                        start: rows_processed,
+                        end: rows_processed + ldf.n_rows(),
+                    },
+                    key.clone(),
+                );
+
+                chunk_idx += 1;
+                rows_processed += ldf.n_rows();
+                rows_to_process -= ldf.n_rows();
+
+                // add the fututre to a vec for later multiplexing
+                let cloned = kv.clone();
+                tokio::spawn(async move {
+                    cloned.put(key.clone(), ldf).await.unwrap();
+                });
             }
+            info!("Finished distributing {} SoR chunks", chunk_idx);
 
             // We are done distributing chunks, now we want to make sure all
             // ddfs are connected on the network, so we wait for a `Ready`
@@ -535,11 +494,11 @@ impl DistributedDataFrame {
                 // All nodes except the last node must send a ready message
                 // to the node that comes after them to let the next node know
                 // they may join the network
-                kv.read().await.send_blob(node_id + 1, ready_blob).await?;
+                kv.send_blob(node_id + 1, ready_blob).await?;
             } else {
                 // if we are the last node we must tell the first node that
                 // all the other nodes are ready
-                kv.read().await.send_blob(1, ready_blob).await?;
+                kv.send_blob(1, ready_blob).await?;
             }
 
             // Node 1 will send the initialization message to our network
@@ -623,8 +582,7 @@ impl DistributedDataFrame {
                 // key is either owned by us or another node
                 if key.home == self.node_id {
                     // we own it
-                    let our_local_df =
-                        { self.kv.read().await.get(&key).await? };
+                    let our_local_df = self.kv.get(&key).await?;
                     let mut r = Row::new(self.get_schema());
                     // TODO: is this index for fill_row correct?
                     our_local_df.fill_row(index - range.start, &mut r)?;
@@ -692,12 +650,10 @@ impl DistributedDataFrame {
             .map(|(_, v)| v)
             .collect();
         // map over our chunks
-        {
-            let unlocked_kv = self.kv.read().await;
-            for key in my_keys {
-                let ldf = unlocked_kv.wait_and_get(key).await?;
-                rower = ldf.pmap(rower);
-            }
+        for key in my_keys {
+            // TODO: should not really need wait_and_get here since we own that chunk?
+            let ldf = self.kv.wait_and_get(key).await?;
+            rower = ldf.pmap(rower);
         }
         debug!("Finished mapping local chunk(s)");
         if self.node_id == self.num_nodes {
@@ -767,12 +723,10 @@ impl DistributedDataFrame {
         // to stay 1-1
         // filter over our locally owned chunks
         let mut filtered_ldf = LocalDataFrame::new(self.get_schema());
-        {
-            let unlocked_kv = self.kv.read().await;
-            for key in &my_keys {
-                let ldf = unlocked_kv.wait_and_get(key).await?;
-                filtered_ldf = filtered_ldf.combine(ldf.pfilter(&mut rower))?;
-            }
+        for key in &my_keys {
+            // TODO: should not really need wait_and_get here since we own that chunk?
+            let ldf = self.kv.wait_and_get(key).await?;
+            filtered_ldf = filtered_ldf.combine(ldf.pfilter(&mut rower))?;
         }
         // initialize some other required fields of self so as not to duplicate
         // code in if branches
@@ -807,7 +761,7 @@ impl DistributedDataFrame {
         if num_rows_left > 0 {
             let k = Key::generate(&new_name, self.node_id);
             key = Some(k.clone());
-            self.kv.read().await.put(k, filtered_ldf).await?;
+            self.kv.put(k, filtered_ldf).await?;
         }
 
         if self.node_id == 1 {
@@ -828,13 +782,7 @@ impl DistributedDataFrame {
             // Send a ready message to node 2 so that all the other nodes
             // start connecting to the Server in the correct order
             let ready_blob = serialize(&DistributedDFMsg::Ready)?;
-            {
-                self.kv
-                    .read()
-                    .await
-                    .send_blob(self.node_id + 1, ready_blob)
-                    .await?
-            };
+            self.kv.send_blob(self.node_id + 1, ready_blob).await?;
             // 2. collect all results from other nodes (do ours first)
             let mut df_chunk_map = HashMap::new();
             let mut cur_num_rows = 0;
@@ -983,11 +931,7 @@ impl DistributedDataFrame {
                 // All nodes except the last node must send a ready message
                 // to the node that comes after them to let the next node know
                 // they may join the network
-                self.kv
-                    .read()
-                    .await
-                    .send_blob(self.node_id + 1, ready_blob)
-                    .await?;
+                self.kv.send_blob(self.node_id + 1, ready_blob).await?;
             }
 
             // 3. send our filterresults to node 1

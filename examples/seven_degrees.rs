@@ -194,10 +194,9 @@ async fn main() -> Result<(), LiquidError> {
             }
             Some(rower) => {
                 let serialized = serialize(&rower)?;
-                let unlocked = app.kv.read().await;
                 let mut futs = Vec::new();
                 for i in 2..(app.num_nodes + 1) {
-                    futs.push(unlocked.send_blob(i, serialized.clone()));
+                    futs.push(app.kv.send_blob(i, serialized.clone()));
                 }
                 try_join_all(futs).await?;
 
@@ -219,11 +218,13 @@ async fn main() -> Result<(), LiquidError> {
             }
             Some(rower) => {
                 let serialized = serialize(&rower)?;
-                let unlocked = app.kv.read().await;
+                let mut futs = Vec::new();
                 // Could send concurrently does it matter?
                 for i in 2..(app.num_nodes + 1) {
-                    unlocked.send_blob(i, serialized.clone()).await?;
+                    futs.push(app.kv.send_blob(i, serialized.clone()));
                 }
+                try_join_all(futs).await?;
+
                 rower
             }
         };

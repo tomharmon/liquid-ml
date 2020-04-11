@@ -60,7 +60,7 @@ impl<
         kill_notifier: Arc<Notify>,
         num_clients: usize,
         wait_for_all_clients: bool,
-    ) -> Arc<RwLock<Self>> {
+    ) -> Arc<Self> {
         // the Receiver acts as our queue of messages from the network, and
         // the network uses the Sender to add messages to our queue
         let (sender, receiver) = mpsc::channel(64);
@@ -93,7 +93,7 @@ impl<
             "KVStore has a max cache size of {} GB",
             max_cache_size_in_gb
         );
-        let kv = Arc::new(RwLock::new(KVStore {
+        let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
             network,
@@ -101,7 +101,7 @@ impl<
             id,
             blob_sender,
             max_cache_size: max_cache_size as u64,
-        }));
+        });
         let kv_clone = kv.clone();
         tokio::spawn(async move {
             KVStore::process_messages(kv_clone, receiver).await.unwrap();
@@ -253,49 +253,41 @@ impl<
     ///    - `Blob` message: send the data up a higher level similar to how
     ///       the `Client` processes messages
     pub(crate) async fn process_messages(
-        kvstore: Arc<RwLock<KVStore<T>>>,
+        self: Arc<Self>,
         mut receiver: Receiver<Message<KVMessage>>,
     ) -> Result<(), LiquidError> {
         loop {
             let msg = receiver.recv().await.unwrap();
-            let kv = kvstore.clone();
-            let mut sender_clone = { kv.read().await.blob_sender.clone() };
+            let mut sender_clone = self.blob_sender.clone();
+            let kv = self.clone();
             tokio::spawn(async move {
                 debug!("Processing a message with id: {:#?}", msg.msg_id);
                 match msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond
-                        let v = {
-                            kv.read().await.wait_and_get_raw(&k).await.unwrap()
-                        };
+                        let v = kv.wait_and_get_raw(&k).await.unwrap();
                         let response = KVMessage::Data(k, v);
-                        {
-                            kv.read()
-                                .await
-                                .network
-                                .write()
-                                .await
-                                .send_msg(msg.sender_id, response)
-                                .await
-                                .unwrap();
-                        }
+                        kv.network
+                            .write()
+                            .await
+                            .send_msg(msg.sender_id, response)
+                            .await
+                            .unwrap();
                     }
                     KVMessage::Data(k, v) => {
                         let v: Arc<T> = Arc::new(deserialize(&v).unwrap());
-                        {
-                            let unlocked = kv.read().await;
-                            unlocked.add_to_cache(k, v).await.unwrap();
-                            unlocked.internal_notifier.notify();
-                        }
+                        kv.add_to_cache(k, v).await.unwrap();
+                        kv.internal_notifier.notify();
                     }
                     KVMessage::Put(k, v) => {
                         // NOTE: should we just change the signature of
                         //       the `put` method and call that here?
                         // NOTE: is the home id actually my id should we check?
                         debug!("Put key: {:#?} into KVStore", k.clone());
-                        let unlocked = kv.read().await;
-                        unlocked.data.write().await.insert(k, v);
-                        unlocked.internal_notifier.notify();
+                        {
+                            kv.data.write().await.insert(k, v)
+                        };
+                        kv.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
                         sender_clone.send(v).await.unwrap();
