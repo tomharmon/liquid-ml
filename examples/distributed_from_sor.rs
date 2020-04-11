@@ -1,7 +1,7 @@
 use clap::Clap;
-use liquid_ml::application::Application;
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::Key;
+use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use simple_logger;
 
@@ -26,17 +26,13 @@ struct Opts {
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Debug).unwrap();
-    let app = Application::from_sor(
-        "tests/distributed.sor",
-        &opts.my_address,
-        &opts.server_address,
-        3,
-        "420",
-    )
-    .await?;
+    let mut app =
+        LiquidML::new(&opts.my_address, &opts.server_address, 3).await?;
+    app.df_from_sor("tests/distributed.sor", "my-distributed-df")
+        .await?;
 
-    let k = Key::new("420", app.node_id);
-    let df = app.kv.get(&k).await?;
+    let k = Key::new("my-distributed-df", app.node_id);
+    let df = { app.kv.read().await.get(&k).await? };
     println!("{:?}", df.n_rows());
     println!("{}", df);
     app.kill_notifier.notified().await;

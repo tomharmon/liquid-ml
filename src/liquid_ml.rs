@@ -15,6 +15,7 @@ use crate::kv::KVStore;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{mpsc, mpsc::Receiver, Mutex, Notify, RwLock};
 
@@ -33,7 +34,7 @@ pub struct LiquidML {
     /// A notifier that gets notified when the server has sent a kill message
     pub kill_notifier: Arc<Notify>,
     /// A map of a DataFrame's name to a DistributedDataFrame
-    pub df: HashMap<String, Arc<DistributedDataFrame>>,
+    pub data_frames: HashMap<String, Arc<DistributedDataFrame>>,
     /// The `IP:Port` address of the `Server`
     pub server_addr: String,
     /// The `IP` of this node
@@ -74,7 +75,7 @@ impl LiquidML {
             blob_receiver: Arc::new(Mutex::new(blob_receiver)),
             num_nodes,
             kill_notifier,
-            df: HashMap::new(),
+            data_frames: HashMap::new(),
             server_addr: server_addr.to_string(),
             my_ip: my_ip.to_string(),
         })
@@ -100,7 +101,7 @@ impl LiquidML {
             self.blob_receiver.clone(),
         )
         .await?;
-        self.df.insert(df_name.to_string(), ddf);
+        self.data_frames.insert(df_name.to_string(), ddf);
         Ok(())
     }
 
@@ -119,7 +120,7 @@ impl LiquidML {
             self.blob_receiver.clone(),
         )
         .await?;
-        self.df.insert(df_name.to_string(), ddf);
+        self.data_frames.insert(df_name.to_string(), ddf);
         Ok(())
     }
 
@@ -163,12 +164,24 @@ impl LiquidML {
      *
      */
 
+    /// Given a function run it on this application. This function only terminates when a kill
+    /// signal from the server has been sent. `examples/demo_client.rs` is a good starting point to
+    /// see this in action
+    pub async fn run<F, Fut>(self, f: F)
+    where
+        Fut: Future<Output = ()>,
+        F: FnOnce(Arc<RwLock<KVStore<LocalDataFrame>>>) -> Fut,
+    {
+        f(self.kv.clone()).await;
+        self.kill_notifier.notified().await;
+    }
+
     pub async fn map<T: Rower + Serialize + Clone + DeserializeOwned + Send>(
         &self,
         df_name: &str,
         rower: T,
     ) -> Result<Option<T>, LiquidError> {
-        let df = match self.df.get(df_name) {
+        let df = match self.data_frames.get(df_name) {
             Some(x) => x,
             None => return Err(LiquidError::NotPresent),
         };
@@ -182,12 +195,13 @@ impl LiquidML {
         df_name: &str,
         rower: T,
     ) -> Result<(), LiquidError> {
-        let df = match self.df.get(df_name) {
+        let df = match self.data_frames.get(df_name) {
             Some(x) => x,
             None => return Err(LiquidError::NotPresent),
         };
         let filtered_df = df.filter(rower, self.blob_receiver.clone()).await?;
-        self.df.insert(filtered_df.df_name.clone(), filtered_df);
+        self.data_frames
+            .insert(filtered_df.df_name.clone(), filtered_df);
 
         Ok(())
     }

@@ -1,7 +1,7 @@
 use clap::Clap;
 use liquid_ml::dataframe::*;
 use liquid_ml::error::LiquidError;
-use liquid_ml::liquid::Application;
+use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
@@ -78,17 +78,17 @@ fn reader() -> Vec<Column> {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Debug).unwrap();
+    simple_logger::init_with_level(Level::Error).unwrap();
     let mut app =
-        Application::new(&opts.my_address, &opts.server_address, 3).await?;
+        LiquidML::new(&opts.my_address, &opts.server_address, 3).await?;
 
-    app.df_from_fun("words", reader).await?;
+    app.df_from_fn("words", reader).await?;
 
     let rower = WordCounter {
         map: HashMap::new(),
     };
 
-    let result = app.pmap("words", rower).await?;
+    let result = app.map("words", rower).await?;
     match result {
         Some(joined_rower) => {
             let mut as_vec: Vec<(&String, &usize)> =

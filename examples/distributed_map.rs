@@ -1,7 +1,7 @@
 use clap::Clap;
 use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
-use liquid_ml::liquid::Application;
+use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
@@ -49,12 +49,15 @@ impl Rower for IntSummer {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Debug).unwrap();
+    simple_logger::init_with_level(Level::Info).unwrap();
     let mut app =
-        Application::new(&opts.my_address, &opts.server_address, 3).await?;
+        LiquidML::new(&opts.my_address, &opts.server_address, 3).await?;
     app.df_from_sor("dist", "tests/distributed.sor").await?;
-    println!("{:?}", app.df.get("dist").unwrap().data);
-    let r = app.pmap("dist", IntSummer { sum: 0 }).await?;
+    println!(
+        "Got the Distributed DataFrame struct: \n\n{:?}",
+        app.data_frames.get("dist").unwrap()
+    );
+    let r = app.map("dist", IntSummer { sum: 0 }).await?;
     match r {
         None => println!("Done"),
         Some(x) => println!("the sum is : {}", x.sum),

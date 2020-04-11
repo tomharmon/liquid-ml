@@ -69,10 +69,13 @@
 //!     // can perform orderly shutdown
 //!     let kill_notifier = Arc::new(Notify::new());
 //!     let client = Client::<String>::new("68.2.3.4:9000",
-//!                                        "69.0.4.20:9000",
+//!                                        "69.0.4.20",
+//!                                        Some("9000"),
 //!                                        sender,
 //!                                        kill_notifier,
-//!                                        2, true).await.unwrap();
+//!                                        2,
+//!                                        true,
+//!                                        "my-client").await.unwrap();
 //!     // `Client::new` returns a `Arc<RwLock<Client>>` so that it may
 //!     // be used concurrently
 //!     let id = { client.read().await.id };
@@ -96,10 +99,13 @@
 //!     let (sender, mut receiver) = mpsc::channel(100);
 //!     let kill_notifier = Arc::new(Notify::new());
 //!     let client = Client::<String>::new("68.2.3.4:9000",
-//!                                        "69.80.08.5:9000",
+//!                                        "64.4.4.20",
+//!                                        Some("9000"),
 //!                                        sender,
 //!                                        kill_notifier,
-//!                                        2, true).await.unwrap();
+//!                                        2,
+//!                                        true,
+//!                                        "my-client").await.unwrap();
 //!     let msg = receiver.recv().await.unwrap();
 //!     println!("{}", msg.msg);
 //!     Ok(())

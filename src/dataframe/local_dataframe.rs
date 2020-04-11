@@ -707,8 +707,8 @@ mod tests {
     #[test]
     fn test_pfilter() {
         let df = init();
-        let rower = PosIntSummer { sum: 0 };
-        let df2 = df.pfilter(rower);
+        let mut rower = PosIntSummer { sum: 0 };
+        let df2 = df.pfilter(&mut rower);
         assert_eq!(df2.n_rows(), 501);
         assert_eq!(df2.n_cols(), 1);
         assert_eq!(df2.get(0, 10).unwrap(), Data::Int(19));

@@ -255,9 +255,9 @@
 //!
 //! Creating a `DataFrame` from a SoR file:
 //! ```rust
-//! use liquid_ml::dataframe::DataFrame;
+//! use liquid_ml::dataframe::LocalDataFrame;
 //!
-//! let df = DataFrame::from_sor("tests/test.sor", 0, 1000);
+//! let df = LocalDataFrame::from_sor("tests/test.sor", 0, 1000);
 //! assert_eq!(df.n_cols(), 4);
 //! assert_eq!(df.n_rows(), 2);
 //! ```
@@ -268,7 +268,7 @@
 //!
 //! ```rust,no_run
 //! use liquid_ml::dataframe::{Data, Rower, Row};
-//! use liquid_ml::application::Application;
+//! use liquid_ml::liquid_ml::LiquidML;
 //! use serde::{Serialize, Deserialize};
 //!
 //! #[derive(Serialize, Deserialize, Clone)]
@@ -309,31 +309,34 @@
 //!     // 3. Since the `Rower` trait defines how to join chunks, the Application
 //!     //    layer will handle running pmap/map/filter on a local chunk and joining
 //!     //    them globally
-//!     let mut app = Application::from_sor("foo.sor", "192.155.22.11:9000",
-//!                                     "192.168.0.0:9000", 20, "my-df")
-//!                                     .await
-//!                                     .unwrap();
+//!     let mut app = LiquidML::new("192.155.22.11:9000",
+//!                                 "192.168.0.0:9000",
+//!                                 20)
+//!                                 .await
+//!                                 .unwrap();
+//!     app.df_from_sor("foo.sor", "my-df").await.unwrap();
 //!     let r = MyRower { sum: 0 };
-//!     app.pmap("my-df", r);
+//!     app.map("my-df", r);
 //! }
 //! ```
 //!
 //! A more generic possible use case:
 //!
 //! ```rust,no_run
-//! use liquid_ml::dataframe::DataFrame;
-//! use liquid_ml::application::Application;
+//! use liquid_ml::dataframe::LocalDataFrame;
+//! use liquid_ml::liquid_ml::LiquidML;
 //! use liquid_ml::kv::KVStore;
 //! use std::sync::Arc;
+//! use tokio::sync::RwLock;
 //!
-//! async fn something_complicated(kv: Arc<KVStore<DataFrame>>) {
+//! async fn something_complicated(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
 //!     println!("Use your imagination :D");
 //! }
 //!
 //! #[tokio::main]
 //! async fn main() {
 //!     let app =
-//!         Application::new("192.15.2.1:900", "192.16.0.0:900", 20).await.unwrap();
+//!         LiquidML::new("192.15.2.1:900", "192.16.0.0:900", 20).await.unwrap();
 //!     app.run(something_complicated).await;
 //! }
 //! ```

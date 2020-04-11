@@ -1,9 +1,9 @@
-use liquid_ml::dataframe::DataFrame;
+use liquid_ml::dataframe::LocalDataFrame;
 use sorer::dataframe::Data;
 
 #[test]
 fn test_from_sor() {
-    let got = DataFrame::from_sor("tests/test.sor", 0, 10000);
+    let got = LocalDataFrame::from_sor("tests/test.sor", 0, 10000);
     assert_eq!(got.n_cols(), 4);
     assert_eq!(got.n_rows(), 2);
     assert_eq!(got.get(0, 0).unwrap(), Data::Bool(false));
