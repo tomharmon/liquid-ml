@@ -34,21 +34,21 @@ struct Opts {
     #[clap(
         short = "c",
         long = "commits",
-        default_value = "~/code/7degrees/commits.ltgt"
+        default_value = "/home/tom/code/7degrees/commits.ltgt"
     )]
     commits: String,
     /// The name of the projects file
     #[clap(
         short = "p",
         long = "projects",
-        default_value = "~/code/7degrees/projects.ltgt"
+        default_value = "/home/tom/code/7degrees/projects.ltgt"
     )]
     projects: String,
     /// The name of the users file
     #[clap(
         short = "u",
         long = "users",
-        default_value = "~/code/7degrees/users.ltgt"
+        default_value = "/home/tom/code/7degrees/users.ltgt"
     )]
     users: String,
 }
@@ -170,12 +170,13 @@ async fn main() -> Result<(), LiquidError> {
     app.df_from_sor("commits", &opts.commits).await?;
     // NOTE: IS this table needed?
     //app.df_from_sor("projects", "~/code/7degrees/projects.ltgt").await?;
-    //
 
     // assume the max of pid is <= num_lines
-    let num_projects = count_new_lines(&opts.projects);
-    let num_users = count_new_lines(&opts.users);
+    //let num_projects = count_new_lines(&opts.projects);
+    //let num_users = count_new_lines(&opts.users);
 
+    let num_projects = 125_500_000;
+    let num_users = 32_500_000;
     let mut users = BitVec::repeat(false, num_users);
     users.set(4967, true);
     let mut projects = BitVec::repeat(false, num_projects);
