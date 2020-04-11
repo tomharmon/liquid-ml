@@ -1,4 +1,6 @@
 use bincode::{deserialize, serialize};
+use bitvec::prelude::*;
+use bytecount;
 use clap::Clap;
 use futures::future::try_join_all;
 use liquid_ml::dataframe::{Data, Row, Rower};
@@ -7,7 +9,9 @@ use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
-use std::collections::HashSet;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap
 #[derive(Clap)]
@@ -26,34 +30,70 @@ struct Opts {
     /// The number of nodes for the distributed system
     #[clap(short = "n", long = "num_nodes", default_value = "3")]
     num_nodes: usize,
+    /// The name of the commits file
+    #[clap(
+        short = "c",
+        long = "commits",
+        default_value = "~/code/7degrees/commits.ltgt"
+    )]
+    commits: String,
+    /// The name of the projects file
+    #[clap(
+        short = "p",
+        long = "projects",
+        default_value = "~/code/7degrees/projects.ltgt"
+    )]
+    projects: String,
+    /// The name of the users file
+    #[clap(
+        short = "u",
+        long = "users",
+        default_value = "~/code/7degrees/users.ltgt"
+    )]
+    users: String,
 }
 
 /// Finds all the projects that these users have ever worked on
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct ProjectRower {
-    users: HashSet<u32>,
-    projects: HashSet<u32>,
-    new_projects: HashSet<u32>,
+    users: BitVec,
+    projects: BitVec,
+    new_projects: BitVec,
+}
+
+impl ProjectRower {
+    fn new(
+        num_projects: usize,
+        prev_users: BitVec,
+        prev_projects: BitVec,
+    ) -> Self {
+        let v = BitVec::repeat(false, num_projects);
+        ProjectRower {
+            users: prev_users,
+            projects: prev_projects,
+            new_projects: v,
+        }
+    }
 }
 
 impl Rower for ProjectRower {
     fn visit(&mut self, r: &Row) -> bool {
         let pid = match r.get(0).unwrap() {
-            Data::Int(x) => *x as u32,
+            Data::Int(x) => *x as usize,
             _ => panic!("Invalid DF"),
         };
         let uid = match r.get(1).unwrap() {
-            Data::Int(x) => *x as u32,
+            Data::Int(x) => *x as usize,
             _ => panic!("Invalid DF"),
         };
-        if self.users.contains(&uid) && !self.projects.contains(&pid) {
-            self.new_projects.insert(pid);
+        if *self.users.get(uid).unwrap() && !self.projects.get(pid).unwrap() {
+            self.new_projects.set(pid, true);
         }
         true
     }
 
     fn join(mut self, other: Self) -> Self {
-        self.new_projects.extend(other.new_projects.into_iter());
+        self.new_projects |= other.new_projects;
         self
     }
 }
@@ -61,30 +101,60 @@ impl Rower for ProjectRower {
 /// Finds all the users that have commits on these projects
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct UserRower {
-    users: HashSet<u32>,
-    projects: HashSet<u32>,
-    new_users: HashSet<u32>,
+    users: BitVec,
+    projects: BitVec,
+    new_users: BitVec,
+}
+
+impl UserRower {
+    fn new(
+        num_users: usize,
+        prev_users: BitVec,
+        prev_projects: BitVec,
+    ) -> Self {
+        let v = BitVec::repeat(false, num_users);
+        UserRower {
+            users: prev_users,
+            projects: prev_projects,
+            new_users: v,
+        }
+    }
 }
 
 impl Rower for UserRower {
     fn visit(&mut self, r: &Row) -> bool {
         let pid = match r.get(0).unwrap() {
-            Data::Int(x) => *x as u32,
+            Data::Int(x) => *x as usize,
             _ => panic!("Invalid DF"),
         };
         let uid = match r.get(1).unwrap() {
-            Data::Int(x) => *x as u32,
+            Data::Int(x) => *x as usize,
             _ => panic!("Invalid DF"),
         };
-        if self.projects.contains(&pid) && !self.users.contains(&uid) {
-            self.new_users.insert(uid);
+        if *self.projects.get(pid).unwrap() && !self.users.get(uid).unwrap() {
+            self.new_users.set(uid, true);
         }
         true
     }
 
     fn join(mut self, other: Self) -> Self {
-        self.new_users.extend(other.new_users.into_iter());
+        self.new_users |= other.new_users;
         self
+    }
+}
+
+fn count_new_lines(file_name: &str) -> usize {
+    let mut buf_reader = BufReader::new(File::open(file_name).unwrap());
+    let mut new_lines = 0;
+
+    loop {
+        let bytes_read = buf_reader.fill_buf().unwrap();
+        let len = bytes_read.len();
+        if len == 0 {
+            return new_lines;
+        };
+        new_lines += bytecount::count(bytes_read, b'\n');
+        buf_reader.consume(len);
     }
 }
 
@@ -97,21 +167,21 @@ async fn main() -> Result<(), LiquidError> {
             .await?;
     // NOTE: IS this table needed?
     //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
-    app.df_from_sor("commits", "/home/tom/code/7degrees/smol_commits.ltgt")
-        .await?;
+    app.df_from_sor("commits", &opts.commits).await?;
     // NOTE: IS this table needed?
     //app.df_from_sor("projects", "~/code/7degrees/projects.ltgt").await?;
+    //
 
-    let mut users = HashSet::new();
-    users.insert(4967);
-    let mut projects = HashSet::new();
+    // assume the max of pid is <= num_lines
+    let num_projects = count_new_lines(&opts.projects);
+    let num_users = count_new_lines(&opts.users);
+
+    let mut users = BitVec::repeat(false, num_users);
+    users.set(4967, true);
+    let mut projects = BitVec::repeat(false, num_projects);
     for i in 0..4 {
         println!("degree {}", i);
-        let mut pr = ProjectRower {
-            users,
-            projects,
-            new_projects: HashSet::new(),
-        };
+        let mut pr = ProjectRower::new(num_projects, users, projects);
         // Node 1 will get the rower back and send it to all the other nodes
         // other nodes will wait for node 1 to send the final combined rower to
         // them
@@ -136,11 +206,7 @@ async fn main() -> Result<(), LiquidError> {
         dbg!("finished projects rower");
         users = pr.users;
         projects = pr.new_projects;
-        let mut ur = UserRower {
-            users,
-            projects,
-            new_users: HashSet::new(),
-        };
+        let mut ur = UserRower::new(num_users, users, projects);
         // Node 1 will get the rower back and send it to all the other nodes
         // other nodes will wait for node 1 to send the final combined rower to
         // them
@@ -163,8 +229,8 @@ async fn main() -> Result<(), LiquidError> {
         dbg!("finished users rower");
         users = ur.new_users;
         projects = ur.projects;
+        println!("num users found: {}", users.count_ones());
     }
-    println!("num users found: {}", users.len());
     app.kill_notifier.notified().await;
 
     Ok(())

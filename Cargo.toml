@@ -31,3 +31,6 @@ bytecount = "0.6.0"
 codegen-units = 1
 panic = 'abort'
 lto = true
+
+[dev-dependencies]
+bitvec = { version = "0.17.4", features = ["serde"] }
