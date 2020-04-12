@@ -329,7 +329,7 @@
 //! use std::sync::Arc;
 //! use tokio::sync::RwLock;
 //!
-//! async fn something_complicated(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
+//! async fn something_complicated(kv: Arc<KVStore<LocalDataFrame>>) {
 //!     println!("Use your imagination :D");
 //! }
 //!

@@ -32,7 +32,7 @@ async fn main() -> Result<(), LiquidError> {
         .await?;
 
     let k = Key::new("my-distributed-df", app.node_id);
-    let df = { app.kv.read().await.get(&k).await? };
+    let df = app.kv.get(&k).await?;
     println!("{:?}", df.n_rows());
     println!("{}", df);
     app.kill_notifier.notified().await;
