@@ -1,4 +1,4 @@
-//! The `KVStore`
+//! The `KVStore` implementation
 use crate::error::LiquidError;
 use crate::kv::{KVMessage, KVStore, Key, Value};
 use crate::network::{Client, Message};
@@ -20,6 +20,7 @@ use tokio::sync::{
     Mutex, Notify, RwLock,
 };
 
+// TODO: remove `DeserializeOwned + 'static`
 impl<
         T: Serialize
             + DeserializeOwned
@@ -33,22 +34,19 @@ impl<
     /// Creates a new distributed `KVStore`.
     ///
     /// ## Parameters
-    /// - `server_addr`: the `IP:Port` of the registration `Server` used
+    /// - `server_addr`: the `IP:Port` of the registration `Server`, used
     ///    for orchestrating the connection of all distributed nodes in the
     ///    system.
     /// - `my_addr` is the `IP:Port` of this `KVStore`.
     /// - `blob_sender`: is the sending half of an `mpsc` channel that is
-    ///    passed in by the `Application` layer that uses this `KVStore`.
-    ///    Whenever this `KVStore` receives serialized blobs of data from
-    ///    other `KVStore`s in the distributed system, this `KVStore` will
-    ///    use the `blob_sender` to forward the blob to the `Application`.
-    ///    For `liquid_ml`, these blobs are used for joining `Rower`s
-    ///    for distributed `pmap`, though other use cases are possible.
-    /// - `kill_notifier`: is a `Notify` passed in by the `Application` layer.
-    ///    This `KVStore` then passes it down to its `Client` so that when the
-    ///    `Client` gets `Kill` messages from the `Server`, the `Client` can
-    ///    notify the `Application` it is time to shut down in an orderly
-    ///    fashion.
+    ///    passed in by components using this `KVStore` to facilitate
+    ///    lower level messages. Whenever this `KVStore` receives serialized
+    ///    blobs of data from other `KVStore`s in the distributed system, it
+    ///    will use the `blob_sender` to forward the blob to `LiquidML`.
+    /// - `kill_notifier`: is passed in by `LiquidML`, then is passed down to
+    ///    its `Client` so that when the `Client` gets `Kill` messages from
+    ///    the `Server`, the `Client` can notify `LiquidML` it is time to
+    ///    shut down in an orderly fashion.
     /// - `num_clients`: the number of nodes in the distributed system,
     ///    including this one.
     /// - `wait_for_all_clients`: whether or not to wait for all other nodes
@@ -83,6 +81,7 @@ impl<
         .await
         .unwrap();
         let id = { network.read().await.id };
+
         let memo_info_kind = RefreshKind::new().with_memory();
         let sys = System::new_with_specifics(memo_info_kind);
         let total_memory = sys.get_total_memory() as f64;
@@ -93,6 +92,7 @@ impl<
             "KVStore has a max cache size of {} GB",
             max_cache_size_in_gb
         );
+
         let kv = Arc::new(KVStore {
             data: RwLock::new(HashMap::new()),
             cache: Mutex::new(LruCache::new(MAX_NUM_CACHED_VALUES)),
@@ -102,10 +102,12 @@ impl<
             blob_sender,
             max_cache_size: max_cache_size as u64,
         });
+
         let kv_clone = kv.clone();
         tokio::spawn(async move {
             KVStore::process_messages(kv_clone, receiver).await.unwrap();
         });
+
         kv
     }
 
@@ -147,22 +149,28 @@ impl<
     ///    not be `await`ed but instead given a callback closure via
     ///    calling `and_then` on the returned future
     ///
-    /// If you do not do that, for example you `await` the second case,
-    /// then you will waste a lot of time waiting for the data to be
-    /// transferred over the network.
+    /// If you do not do that, for example in the second case you `await`
+    /// despite our warning, then you will waste a lot of time waiting for the
+    /// data to be transferred over the network.
     pub async fn wait_and_get(&self, key: &Key) -> Result<Arc<T>, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
         }
 
         if key.home == self.id {
+            // key, value belong to us
             while { self.data.read().await.get(key) } == None {
+                // while we don't have the data, wait for the message
+                // processing task to notify us the data is there
                 self.internal_notifier.notified().await;
             }
+            // get the raw serialized data, its guaranteed to be there
             let serialized_val = self.get_raw(key).await?;
             let value: Arc<T> = Arc::new(deserialize(&serialized_val[..])?);
             let v = value.clone();
+            // update our LRU cache
             self.add_to_cache(key.clone(), v).await?;
+
             Ok(value)
         } else {
             // The data is not supposed to be owned by this node, we must
@@ -175,8 +183,11 @@ impl<
                     .await?;
             }
             while { self.cache.lock().await.get(key) } == None {
+                // while the data is not yet in our cache, wait for the
+                // message processing task to notify when it is there
                 self.internal_notifier.notified().await;
             }
+            // it's guaranteed to be in the cache, we can get it
             self.get(key).await
         }
     }
@@ -224,15 +235,11 @@ impl<
         target_id: usize,
         blob: Value,
     ) -> Result<(), LiquidError> {
-        if target_id == self.id {
-            Err(LiquidError::DumbUserError)
-        } else {
-            self.network
-                .write()
-                .await
-                .send_msg(target_id, KVMessage::Blob(blob))
-                .await
-        }
+        self.network
+            .write()
+            .await
+            .send_msg(target_id, KVMessage::Blob(blob))
+            .await
     }
 
     /// Processes messages from the queue that is populated by the
@@ -280,9 +287,10 @@ impl<
                         kv.internal_notifier.notify();
                     }
                     KVMessage::Put(k, v) => {
-                        // NOTE: should we just change the signature of
-                        //       the `put` method and call that here?
-                        // NOTE: is the home id actually my id should we check?
+                        if k.home != kv.id {
+                            error!("Someone tried to `put` the key {:?} on the wrong KV", k);
+                            panic!();
+                        }
                         debug!("Put key: {:#?} into KVStore", k.clone());
                         {
                             kv.data.write().await.insert(k, v)
@@ -297,6 +305,7 @@ impl<
         }
     }
 
+    /// Gets serialized blobs out of this `KVStore`
     async fn get_raw(&self, key: &Key) -> Result<Value, LiquidError> {
         if key.home == self.id {
             match { self.data.read().await.get(key) } {
@@ -308,6 +317,8 @@ impl<
         }
     }
 
+    /// Requests a serialized blob over the network if we don't have the
+    /// data for the given `key`
     async fn wait_and_get_raw(&self, key: &Key) -> Result<Value, LiquidError> {
         if key.home == self.id {
             while { self.data.read().await.get(key) } == None {
@@ -319,12 +330,21 @@ impl<
         }
     }
 
+    /// Intelligently add to the cache by ensuring we don't go over the
+    /// pre-set limit of `self.max_cache_size`. If adding the `key` and
+    /// `value` to the cache will take us over that hard limit, then we will
+    /// pop items off the cache on a `LRU` basis until there is enough space,
+    /// or no items are left. If the size of the `value` is more than the
+    /// `max_cache_size` by itself, will panic.
     async fn add_to_cache(
         &self,
         key: Key,
         value: Arc<T>,
     ) -> Result<(), LiquidError> {
         let v_size = value.deep_size_of() as u64;
+        if v_size > self.max_cache_size {
+            panic!("Download more RAM");
+        }
         {
             let mut unlocked = self.cache.lock().await;
             let mut cache_size = unlocked

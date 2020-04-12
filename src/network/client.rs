@@ -14,24 +14,47 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc::Sender, Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-// TODO: remove 'static
+// TODO: remove `DeserializeOwned + 'static`
 impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     Client<RT>
 {
-    /// Create a new `Client` running on the given `my_addr` IP:Port address,
-    /// which connects to a server running on the given `server_addr` IP:Port.
+    /// Create a new `Client` running on the given `my_addr`, which is an
+    /// address in the format `IP:Port`
     ///
     /// Constructing the `Client` does these things:
     /// 1. Connects to the `Server`
-    /// 2. Sends the server our `IP:Port` address
-    /// 3. Server responds with a `ControlMsg::Directory` containing the
-    ///    addresses of all other currently connected `Client`s
-    /// 4. Connects to all other existing `Client`s which spawns a Tokio task
-    ///    for each connection that will read messages from the connection
-    ///    and handle it.
+    /// 2. Sends the server our IP and port
+    /// 3. The `Server` responds with a `ControlMsg::Directory`, containing the
+    ///    addresses of all other currently connected `Client`s with a type
+    ///    that matches this `Client`s `client_type`
+    /// 4. Connects to all other existing `Client`s of our `client_type`,
+    ///    spawning a Tokio task for each connection. The task will read
+    ///    messages from the connection and and forward it over the sending
+    ///    half of an `mpsc` channel with the given `sender`.
     ///
     /// Creating a new `Client` returns an `Arc<RwLock<Self>>` so that
     /// the layer above the `Client` can use it concurrently.
+    ///
+    /// ## Parameters
+    /// - `server_addr`: The address of the `Server` in `IP:Port` format
+    /// - `my_ip`: The `IP` of this `Client`
+    /// - `my_port`: An optional port for this `Client` to listen for new
+    ///              connections. If its `None`, uses the OS to randomly assign
+    ///              a port.
+    /// - `sender`: The sending half of an `mpsc` channel, for forwarding
+    ///             messages to a higher level component that is using this
+    ///             `Client` so that this component may process the message
+    ///             however it wants to.
+    /// - `kill_notifier`: Created outside of this `Client` and passed in
+    ///                    during construction so that the higher level
+    ///                    component using this `Client` can be notified when
+    ///                    a `Kill` message is received from the `Server` so
+    ///                    that shut down may be performed orderly.
+    /// - `wait_for_all_clients`: Whether to wait for `num_clients` to connect
+    ///                           connect to the system before returning from
+    ///                           this function.
+    /// - `client_type`: The type of `Client`s for this `Client` to connect
+    ///                  with
     pub async fn new(
         server_addr: &str,
         my_ip: &str,
@@ -87,6 +110,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             my_address.clone()
         );
 
+        // initialize `self`
         let mut c = Client {
             id: dir_msg.target_id,
             address: my_address.clone(),
@@ -135,7 +159,8 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// A blocking function that allows a `Client` to listen for connections
     /// from newly started `Client`s. When a new `Client` connects to this
     /// `Client`, we add the connection to this `Client.directory`
-    /// and call `Client::recv_msg`
+    /// and call `Client::recv_msg` so that messages may be forwarded over
+    /// the `sender` given to us during construction.
     async fn accept_new_connections(
         client: Arc<RwLock<Client<RT>>>,
         mut listener: TcpListener,
@@ -155,6 +180,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             let mut stream =
                 FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
             let sink = FramedWrite::new(writer, MessageCodec::<RT>::new());
+            // read the introduction message from the new client
             let intro = network::read_msg(&mut stream).await?;
             let (address, client_type) = if let ControlMsg::Introduction {
                 address,
@@ -163,10 +189,13 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             {
                 (address, client_type)
             } else {
+                // we should only receive `ControlMsg::Introduction` msgs here
                 return Err(LiquidError::UnexpectedMessage);
             };
 
             if accepted_type != client_type {
+                // we only want to connect with other clients that are the same
+                // type as us
                 return Err(LiquidError::UnexpectedMessage);
             }
 
@@ -224,7 +253,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// Calling `Client::new` will connect the new `Client` with
     /// all other currently existing `Client`s automatically.
     #[allow(clippy::map_entry)] // clippy is being dumb
-    pub async fn connect(
+    pub(crate) async fn connect(
         &mut self,
         client: (usize, String),
     ) -> Result<(), LiquidError> {
@@ -311,7 +340,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// handle responding to them.
     fn recv_msg(mut sender: Sender<Message<RT>>, mut reader: FramedStream<RT>) {
         // TODO: need to properly increment message id but that means self
-        // needs to be 'static or mutex'd and that propagates a lot...
+        // needs to be 'static or mutex'd
         tokio::spawn(async move {
             loop {
                 let msg: Message<RT> =
@@ -332,6 +361,8 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         });
     }
 
+    /// Spawns a `tokio` task that will handle receiving `Kill` messages from
+    /// the `Server`
     fn recv_server_msg(
         mut reader: FramedStream<ControlMsg>,
         notifier: Arc<Notify>,

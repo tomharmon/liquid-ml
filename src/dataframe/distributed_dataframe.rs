@@ -1027,15 +1027,11 @@ impl DistributedDataFrame {
         blob: &T,
     ) -> Result<(), LiquidError> {
         let blob = serialize(blob)?;
-        if target_id == self.node_id {
-            Err(LiquidError::DumbUserError)
-        } else {
-            self.network
-                .write()
-                .await
-                .send_msg(target_id, DistributedDFMsg::Blob(blob))
-                .await
-        }
+        self.network
+            .write()
+            .await
+            .send_msg(target_id, DistributedDFMsg::Blob(blob))
+            .await
     }
 
     async fn process_messages(
