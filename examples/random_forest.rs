@@ -4,7 +4,6 @@ use bytecount;
 use clap::Clap;
 use futures::future::try_join_all;
 use liquid_ml::dataframe::{Data, Row, Rower};
-//! 
 use liquid_ml::error::LiquidError;
 use liquid_ml::liquid_ml::LiquidML;
 use log::Level;

@@ -34,3 +34,4 @@ lto = true
 
 [dev-dependencies]
 bitvec = { version = "0.17.4", features = ["serde"] }
+csv = "1.1.3"
