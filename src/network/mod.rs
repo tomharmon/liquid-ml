@@ -1,17 +1,19 @@
-//! A module with methods to communicate with relatively generic nodes in a
+//! A module with methods to create, organize, and communicate with nodes in a
 //! distributed system over TCP, as well as `Client` and `Server`
-//! implementations for `LiquidML`
+//! implementations for `LiquidML`.
 //!
 //! The `Server` struct acts as a simple registration server. Once started with
 //! a given `IP:Port` via the `Server::new` method, calling the (blocking)
 //! `Server::accept_new_connections` method will allow  `Client` nodes to also
-//! start up and connect to a distributed system.
+//! start up and connect to a distributed system. A `Server` may also order
+//! graceful shutdown of the system by broadcasting `Kill` messages to nodes.
 //!
 //! When new `Client`s connect to the `Server`, they send a
 //! `ControlMsg::Introduction` to tell the `Server` the `Client`'s address
-//! (`IP:Port`). The `Server` then responds with a `ControlMsg::Directory` of
-//! all the currently connected `Client`s so that the new `Client` may
-//! connect to them.
+//! (`IP:Port`) as well as its `client_type` (which is a `String` to allow for
+//! dynamic types). The `Server` then responds with a `ControlMsg::Directory`
+//! of all the currently connected `Client`s of that `client_type` so that the
+//! new `Client` may connect to them.
 //!
 //!
 //! ## Pre-packaged Server Binary and Server Usage
@@ -25,6 +27,7 @@
 //!
 //! If an IP:Port is not provided, the server defaults to `127.0.0.1:9000`
 //!
+//! ## `Client` Design
 //!
 //! The `Client` is designed so that it can perform various networking
 //! operations asynchronously. It can listen for messages from
@@ -33,16 +36,19 @@
 //! `Client`, while messages from other `Client`s are sent over a `mpsc` channel
 //! and notifies the receiving end when messages are sent. Because of this a
 //! `Client` and the networking layer can be used by higher level components
-//! without tight coupling.
+//! without being tightly coupled.
 //!
 //!
 //! Constructing a new `Client` does these things:
 //! 1. Connects to the `Server`
-//! 2. Sends the server our `IP:Port` address
-//! 3. Server responds with a `RegistrationMsg`
-//! 4. Connects to all other existing `Client`s which spawns a Tokio task
+//! 2. Sends the server a `ControlMsg::Introduction` containing their address
+//!    and type
+//! 3. The server responds with a `ControlMsg::Directory` of all the addresses
+//!    of the nodes of that `client_type`
+//! 4. Connects to all other existing `Client`s by spawning a Tokio task
 //!    for each connection that will read messages from the connection,
-//!    publish them to the `mpsc` channel, and notify the receiving end so that the receiving end may process them as desired
+//!    publish them to the `mpsc` channel passed in during construction of this
+//!    `Client`
 //!
 //! ## Client Usage
 //! For a more in-depth and useful example, it may be worthwhile to look at
@@ -68,14 +74,15 @@
 //!     // is received from the `Server` so that higher-level components
 //!     // can perform orderly shutdown
 //!     let kill_notifier = Arc::new(Notify::new());
-//!     let client = Client::<String>::new("68.2.3.4:9000",
-//!                                        "69.0.4.20",
-//!                                        Some("9000"),
-//!                                        sender,
-//!                                        kill_notifier,
-//!                                        2,
-//!                                        true,
-//!                                        "my-client").await.unwrap();
+//!     let client = Client::<String>::new("68.2.3.4:9000", // server address
+//!                                        "69.0.4.20", // our ip
+//!                                        Some("9000"), // our port
+//!                                        sender, // to forward messages
+//!                                        kill_notifier, // for orderly shutdown
+//!                                        2, // number of nodes in this network
+//!                                        true, // wait for all nodes
+//!                                        "demo-client" // our type
+//!                                        ).await.unwrap();
 //!     // `Client::new` returns a `Arc<RwLock<Client>>` so that it may
 //!     // be used concurrently
 //!     let id = { client.read().await.id };
@@ -141,7 +148,7 @@ type FramedSink<T> = FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>;
 pub struct Client<T> {
     /// The `id` of this `Client`, assigned by the `Server` on startup
     pub id: usize,
-    /// The `address` of this `Client`
+    /// The `address` of this `Client` in the format `IP:Port`
     pub address: String,
     /// The id of the current message
     pub(crate) msg_id: usize,
@@ -149,12 +156,12 @@ pub struct Client<T> {
     pub(crate) directory: HashMap<usize, Connection<T>>,
     /// A buffered sink to send messages to the `Server`
     _server: FramedSink<ControlMsg>,
-    /// When this `Client` gets a message, it uses this `mpsc` channel to give
-    /// messages to whatever layer is using this `Client` for networking. The
-    /// above layer will receive the messages on the other half of this `mpsc`
-    /// channel.
+    /// When this `Client` gets a message, it uses this `mpsc` channel to
+    /// forward messages to whatever layer is using this `Client` for
+    /// networking to avoid tight coupling. The above layer will receive the
+    /// messages on the other half of this `mpsc` channel.
     sender: Sender<Message<T>>,
-    /// the type of this client
+    /// the type of this `Client`
     client_type: String,
 }
 
@@ -165,7 +172,8 @@ pub struct Server {
     pub(crate) address: String,
     /// The id of the current message
     pub(crate) msg_id: usize,
-    /// A directory which is a map of client id to a [`Connection`](Connection)
+    /// A directory which is a map of client types to a
+    /// `HashMap` of `node_id` to a [`Connection`](Connection)
     pub(crate) directory:
         HashMap<String, HashMap<usize, Connection<ControlMsg>>>,
 }

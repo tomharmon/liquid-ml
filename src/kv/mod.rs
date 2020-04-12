@@ -72,10 +72,10 @@ impl Key {
             home,
         }
     }
+
     /// Make a key with an automatically generated name
     pub(crate) fn generate(name: &str, home: usize) -> Self {
         let mut rng = rand::thread_rng();
-        // TODO: probably a better way to do this
         Key {
             name: format!("{}-{}-{}", name, home, rng.gen::<i16>()),
             home,
@@ -94,9 +94,10 @@ impl Key {
 pub struct KVStore<T> {
     /// The data owned by this `KVStore`
     data: RwLock<HashMap<Key, Value>>,
-    /// An `LRU` cache of deserialized values of type `T`. Not all cached
-    /// values belong to this `KVStore`, some of it may come from other
-    /// distributed `KVStore`s not running on this machine.
+    /// An `LRU` cache of deserialized values of type `T` with a hard maximum
+    /// memory limit set on construction. Not all cached values belong to this
+    /// `KVStore`, some of it may come from other distributed `KVStore`s not
+    /// running on this machine.
     cache: Mutex<LruCache<Key, Arc<T>>>,
     /// The `network` layer, used to send and receive messages and data with
     /// other `KVStore`s

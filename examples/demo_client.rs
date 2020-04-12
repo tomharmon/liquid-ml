@@ -25,25 +25,21 @@ struct Opts {
     my_address: String,
 }
 
-async fn producer(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
+async fn producer(kv: Arc<KVStore<LocalDataFrame>>) {
     let main = Key::new("main", 1);
     let ck = Key::new("ck", 1);
     let vals: Vec<Option<i64>> = (0..100_000).map(|x| Some(x)).collect();
     let sum = vals.iter().fold(0, |x, y| x + y.unwrap());
     let df1 = LocalDataFrame::from(Column::Int(vals));
     let df2 = LocalDataFrame::from(Data::Int(sum));
-    {
-        kv.read().await.put(main, df1).await.unwrap()
-    };
-    {
-        kv.read().await.put(ck, df2).await.unwrap()
-    };
+    kv.put(main, df1).await.unwrap();
+    kv.put(ck, df2).await.unwrap();
 }
 
-async fn summer(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
+async fn summer(kv: Arc<KVStore<LocalDataFrame>>) {
     let verif = Key::new("verif", 1);
     let main = Key::new("main", 1);
-    let df = { kv.read().await.wait_and_get(&main).await.unwrap() };
+    let df = kv.wait_and_get(&main).await.unwrap();
     let mut sum = 0;
     for i in 0..100_000 {
         if let Data::Int(x) = df.get(0, i).unwrap() {
@@ -53,16 +49,14 @@ async fn summer(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
         }
     }
     let new_df = LocalDataFrame::from(Data::Int(sum));
-    {
-        kv.read().await.put(verif, new_df).await.unwrap()
-    };
+    kv.put(verif, new_df).await.unwrap();
 }
 
-async fn verifier(kv: Arc<RwLock<KVStore<LocalDataFrame>>>) {
+async fn verifier(kv: Arc<KVStore<LocalDataFrame>>) {
     let ck = Key::new("ck", 1);
     let verif = Key::new("verif", 1);
-    let df2 = { kv.read().await.wait_and_get(&ck).await.unwrap() };
-    let df1 = { kv.read().await.wait_and_get(&verif).await.unwrap() };
+    let df2 = kv.wait_and_get(&ck).await.unwrap();
+    let df1 = kv.wait_and_get(&verif).await.unwrap();
     match (df1.get(0, 0).unwrap(), df2.get(0, 0).unwrap()) {
         (Data::Int(x), Data::Int(y)) => {
             if x == y {

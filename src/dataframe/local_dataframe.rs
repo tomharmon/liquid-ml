@@ -1,18 +1,20 @@
-//! Defines functionality for the `DataFrame`
+//! Defines functionality for a `LocalDataFrame`
 use crate::dataframe::{LocalDataFrame, Row, Rower, Schema};
 use crate::error::LiquidError;
+use crossbeam_utils::thread;
 use num_cpus;
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema, DataType};
 use std::cmp::Ordering;
 use std::convert::TryInto;
 
-use crossbeam_utils::thread;
-
-/// An interface for a `DataFrame`, inspired by those used in `pandas` and `R`.
+/// An implementation for a `LocalDataFrame`, inspired by the data frames used
+/// in `pandas` and `R`.
 impl LocalDataFrame {
-    /// Creates a new `DataFrame` from the given file, only reads `len` bytes
-    /// starting at the given byte offset `from`.
+    /// Creates a new `LocalDataFrame` from the given file by reading it in
+    /// parallel using the number of cores available on this machine. Only
+    /// reads `len` bytes of the file, starting at the given byte offset
+    /// `from`.
     pub fn from_sor(file_name: &str, from: usize, len: usize) -> Self {
         let schema = Schema::from(infer_schema(file_name));
         let n_threads = num_cpus::get();
@@ -25,9 +27,9 @@ impl LocalDataFrame {
         }
     }
 
-    /// Creates an empty `DataFrame` from the given `Schema`. The `DataFrame`
-    /// is created with no rows, but the names of the columns in the given
-    /// `schema` are cloned.
+    /// Creates an empty `LocalDataFrame` from the given `Schema`. The
+    /// `LocalDataFrame` is created with no rows, but the names of the columns
+    /// in the given `schema` are cloned.
     pub fn new(schema: &Schema) -> Self {
         let mut data = Vec::new();
         for data_type in &schema.schema {
@@ -50,12 +52,12 @@ impl LocalDataFrame {
         }
     }
 
-    /// Obtains a reference to this `DataFrame`s schema.
+    /// Obtains a reference to the schema of this `LocalDataFrame`
     pub fn get_schema(&self) -> &Schema {
         &self.schema
     }
 
-    /// Adds a `Column` to this `DataFrame` with an optional `name`. Returns
+    /// Adds a `Column` to this `LocalDataFrame` with an optional name. Returns
     /// a `LiquidError::NameAlreadyExists` if the given `name` is not unique.
     pub fn add_column(
         &mut self,
@@ -342,14 +344,13 @@ impl LocalDataFrame {
 
     /// Applies the given `rower` to every row sequentially in this `DataFrame`
     /// The `rower` is cloned `n_threads` times, according to the value of
-    /// `n_threads` for this `DataFrame`. Each `rower` gets operates on a
-    /// chunk of this `DataFrame` and are run in parallel.
+    /// `n_threads` for this `LocalDataFrame`. Each `rower` gets operates on a
+    /// chunk of this `LocalDataFrame` and are run in parallel.
     ///
     /// Since `pmap` takes an immutable reference to `self`, the `rower` can
-    /// not mutate this `DataFrame`. If mutation is desired, the `rower` must
-    /// create its own `DataFrame` internally, clone each `Row` from this
-    /// `DataFrame` as it visits them, and mutate the cloned row during each
-    /// visit.
+    /// not mutate this `LocalDataFrame`. If mutation is desired, the `rower`
+    /// must create its own `LocalDataFrame` internally by building one up
+    /// as it visit rows, and mutates that.
     ///
     /// `n_threads` defaults to the number of cores available on this machine.
     pub fn pmap<T: Rower + Clone + Send>(&self, rower: T) -> T {
@@ -382,20 +383,20 @@ impl LocalDataFrame {
             .fold(acc, |prev, x| x.join(prev))
     }
 
-    /// Creates a new `DataFrame` by applying the given `rower` to every row
-    /// sequentially in this `DataFrame` and adding rows to the new `DataFrame`
-    /// for rows for which the given `rower` return true from its `accept`
-    /// method. Is run synchronously.
+    /// Creates a new `LocalDataFrame` by applying the given `rower` to every
+    /// row sequentially in this `LocalDataFrame` and cloning rows for which
+    /// the given `rower` returns true from its `accept` method. Is run
+    /// synchronously.
     pub fn filter<T: Rower>(&self, rower: &mut T) -> Self {
         filter_helper(self, rower, 0, self.n_rows())
     }
 
-    /// Creates a new `DataFrame` by applying the given `rower` to every row
-    /// sequentially in this `DataFrame` and adding rows to the new `DataFrame`
-    /// for rows for which the given `rower` return true from its `accept`
-    /// method. The `rower` is cloned `n_threads` times, according to the
-    /// value of `n_threads` for this `DaqtaFrame`. Each `rower` gets operates
-    /// on a chunk of this `DataFrame` and are run in parallel.
+    /// Creates a new `LocalDataFrame` by applying the given `rower` to every
+    /// row in this `DataFrame` sequentially, and cloning rows for which the
+    /// given `rower` returns true from its `accept` method. The `rower` is
+    /// cloned `n_threads` times, according to the value of `n_threads` for
+    /// this `LocalDataFrame`. Each `rower` gets operates on a chunk of this
+    /// `LocalDataFrame` and are run in parallel.
     ///
     /// `n_threads` defaults to the number of cores available on this machine.
     pub fn pfilter<T: Rower + Clone + Send>(&self, rower: &mut T) -> Self {
@@ -403,7 +404,7 @@ impl LocalDataFrame {
         for _ in 0..self.n_threads {
             rowers.push(rower.clone());
         }
-        // ok.... the below syntax doesn't work
+        // ok.... the below syntax doesn't work, not sure why
         //    let rowers = vec![*rower; self.n_threads];
         let mut new_dfs = Vec::new();
         let step = self.n_rows() / self.n_threads;
@@ -435,17 +436,17 @@ impl LocalDataFrame {
             .fold(acc, |prev, x| x.combine(prev).unwrap())
     }
 
-    /// Consumes this `DataFrame` and the given `other` `DataFrame`, returning
-    /// a combined `DataFrame` if successful.
+    /// Consumes this `LocalDataFrame` and the other given `LocalDataFrame`,
+    /// returning a combined `LocalDataFrame` if successful.
     ///
-    /// - The columns names and the number of threads (for `pmap`/`pfilter`)
-    ///   for the resulting `DataFrame` are from this `DataFrame` and the
-    ///   `other` column names and `n_threads` are ignored
-    /// - The data of the `other` DataFrame is appended to the data of this
-    ///   DataFrame
+    /// - The columns names and the number of threads for the resulting
+    ///   `LocalDataFrame` are from this `LocalDataFrame` and the column names
+    ///   and `n_threads` in `other` are ignored
+    /// - The data of `other` is appended to the data of this `LocalDataFrame`
     ///
     /// # Errors
-    /// If this `DataFrame` and `other`'s schema have different `DataType`s
+    /// If the schema of this `LocalDataFrame` and `other` have different
+    /// `DataType`s
     pub fn combine(mut self, other: Self) -> Result<Self, LiquidError> {
         if self.get_schema().schema != other.get_schema().schema {
             return Err(LiquidError::TypeMismatch);

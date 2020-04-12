@@ -7,9 +7,9 @@ use liquid_ml::network::Server;
 use log::Level;
 use simple_logger;
 
-/// This is a simple registration server for a liquid_ml system and comes
-/// packaged with the liquid_ml system. Refer to docs.rs/liquid_ml for further
-/// information.   
+/// This is a simple registration server for a `liquid_ml` system and comes
+/// packaged with the `liquid_ml` system. Refer to docs.rs/liquid_ml for
+/// further information.   
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {

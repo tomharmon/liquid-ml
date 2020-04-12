@@ -1,5 +1,4 @@
 //! Structs and functions for working with rows of data in a `DataFrame`.
-
 use crate::dataframe::{Fielder, Row, Schema};
 use crate::error::LiquidError;
 use sorer::dataframe::Data;

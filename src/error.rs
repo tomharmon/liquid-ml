@@ -44,7 +44,4 @@ pub enum LiquidError {
     /// is starting up and messages other than `ControlMsg`s are received
     #[error("Unexpected Message")]
     UnexpectedMessage,
-    /// Self explanatory
-    #[error("User is dumb")]
-    DumbUserError,
 }

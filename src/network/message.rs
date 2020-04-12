@@ -1,4 +1,5 @@
-//! Defines messages used to communicate with the network of nodes over TCP.
+//! Defines messages and codecs used to communicate with the network of nodes
+//! over `TCP`.
 use crate::error::LiquidError;
 use crate::network::{Message, MessageCodec};
 use crate::{BYTES_PER_KIB, MAX_FRAME_LEN_FRACTION};
@@ -27,7 +28,8 @@ impl<T> Message<T> {
 }
 
 impl<T> MessageCodec<T> {
-    /// Creates a new `MessageCodec`
+    /// Creates a new `MessageCodec` with a maximum frame length that is 80%
+    /// of the total memory on this machine.
     pub(crate) fn new() -> Self {
         let memo_info_kind = RefreshKind::new().with_memory();
         let sys = System::new_with_specifics(memo_info_kind);

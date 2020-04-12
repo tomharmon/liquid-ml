@@ -1,6 +1,5 @@
 //! Represents a server node in a distributed system, with implementations
 //! provided for `LiquidML` use cases.
-
 use crate::error::LiquidError;
 use crate::network;
 use crate::network::{Connection, ControlMsg, Message, MessageCodec, Server};

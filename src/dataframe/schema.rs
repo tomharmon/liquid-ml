@@ -5,10 +5,10 @@ use crate::dataframe::Schema;
 use crate::error::LiquidError;
 use sorer::{dataframe::Column, schema::DataType};
 
-/// The implementation of the Schema interface, which manages data types and
-/// row/column names of a `DataFrame`
+/// The implementation of the `Schema` interface, which manages data types and
+/// row/column names of local and distributed data frames.
 impl Schema {
-    /// Constructs an empty Schema.
+    /// Constructs an empty `Schema`.
     pub fn new() -> Self {
         Schema {
             ..Default::default()
@@ -16,9 +16,9 @@ impl Schema {
     }
 
     /// Add a column with the given `data_type`, with an optional column name,
-    /// to this Schema. Column names must be unique. If `col_name` is `Some`
+    /// to this `Schema`. Column names must be unique. If `col_name` is `Some`
     /// and the name already exists in this `Schema`, the column will not
-    /// be added to this Schema and a `LiquidError::NameAlreadyExists` error
+    /// be added to this `Schema` and a `LiquidError::NameAlreadyExists` error
     /// will be returned.
     pub fn add_column(
         &mut self,
@@ -86,7 +86,7 @@ impl Schema {
 }
 
 impl From<&str> for Schema {
-    /// Create a Schema from a `&str` of types. A string that contains
+    /// Create a `Schema` from a `&str` of types. A string that contains
     /// characters other that `B`, `I`, `F`, or `S` will panic. Initializes
     /// the Column names to be `None`.
     ///
@@ -108,7 +108,7 @@ impl From<&str> for Schema {
 }
 
 impl From<Vec<DataType>> for Schema {
-    /// Create a Schema from a `Vec<DataType>`
+    /// Create a `Schema` from a `Vec<DataType>`
     fn from(types: Vec<DataType>) -> Self {
         let mut schema = Vec::new();
         let mut col_names = Vec::new();
