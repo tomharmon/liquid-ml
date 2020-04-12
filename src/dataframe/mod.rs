@@ -1,12 +1,33 @@
 //! A module for creating and manipulating `DataFrame`s. A `DataFrame` can be
 //! created from a [`SoR`](https://docs.rs/sorer/0.1.0/sorer/) file,
-//! or by adding `Column`s or `Row`s manually.
+//! or by adding `Column`s or `Row`s programmatically.
 //!
 //! The `DataFrame` is lightly inspired by those found in `R` or `pandas`, and
 //! supports optionally named columns. You may analyze the data in a
 //! `DataFrame` across many distributed machines in a horizontally scalable
 //! manner by implementing the `Rower` trait to perform `map` or `filter`
-//! operations on a `DataFrame`.
+//! operations on a `DataFrame`. A DataFrame is stored in columnar format to 
+//! support high performance data  analytics fast. 
+//!
+//! The DataFrame module provides 2 implementations for a DataFrame:
+//!  - a [`Local DataFrame`](crate::dataframe::local_dataframe) which can be 
+//!  used to analyze data on a node locally and removes network latency
+//!  - a [`Distributed DataFrame`](crate::dataframe::distributed_dataframe) which
+//!  upon creation will distribute its data across multiple nodes and provides 
+//!  distributed versions of map and filter operations. 
+//!
+//! DataFrames use these supplementary data structures and can be useful in 
+//! analyzing DataFrames:
+//!  - `Row` : Which is a single row of Data from the dataframe and provides a 
+//!  useful API to help write `Rowers`
+//!  - `Schema` : This can be especially useful whena SoR File is read and 
+//!  different things need to be done based on the inferred schema
+//!
+//! The DataFrame also declares the rower and fielder visitor traits that can be 
+//! used to build visitors that iterate over the elements of a row or dataframe.
+//!
+//! NOTE: RFC to add iterators along with the current visitors, since these are 
+//! cleaner to write in rust
 use crate::kv::{KVStore, Key};
 use crate::network::Client;
 use deepsize::DeepSizeOf;
@@ -117,7 +138,10 @@ pub struct Schema {
     pub schema: Vec<DataType>,
     /// The optional names of each `Column`, which must be unique if they are
     /// `Some`
-    pub col_names: Vec<Option<String>>,
+    /// pub col_names: Vec<Option<String>>,
+    /// A reverse col_name map for all the named columns to make getting
+    /// index by column name faster
+    pub col_names : HashMap<String, usize>,
 }
 
 /// Represents a single row in a `DataFrame`. Has a clone of the `DataFrame`s

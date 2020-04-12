@@ -4,6 +4,7 @@
 use crate::dataframe::Schema;
 use crate::error::LiquidError;
 use sorer::{dataframe::Column, schema::DataType};
+use std::collections::HashMap;
 
 /// The implementation of the `Schema` interface, which manages data types and
 /// row/column names of local and distributed data frames.
@@ -25,31 +26,16 @@ impl Schema {
         data_type: DataType,
         col_name: Option<String>,
     ) -> Result<(), LiquidError> {
-        match &col_name {
-            Some(_name) => {
-                if !self.col_names.contains(&col_name) {
-                    self.schema.push(data_type);
-                    self.col_names.push(col_name);
-                    Ok(())
-                } else {
-                    Err(LiquidError::NameAlreadyExists)
-                }
-            }
-            None => {
-                self.schema.push(data_type);
-                self.col_names.push(None);
-                Ok(())
+        if col_name.is_some() {
+            let name = col_name.unwrap();
+            if !self.col_names.contains_key(&name) {
+                self.col_names.insert(name, self.schema.len());
+            } else {
+                return Err(LiquidError::NameAlreadyExists)
             }
         }
-    }
-
-    /// Gets the (optional) name of the column at the given `idx`.
-    /// Returns a result that will `Error` if the `idx` is out of bounds.
-    pub fn col_name(&self, idx: usize) -> Result<&Option<String>, LiquidError> {
-        match self.col_names.get(idx) {
-            Some(name) => Ok(name),
-            None => Err(LiquidError::ColIndexOutOfBounds),
-        }
+        self.schema.push(data_type);
+        Ok(())
     }
 
     /// Get the data type of the column at the given `idx`
@@ -63,15 +49,15 @@ impl Schema {
 
     /// Given a column name, returns its index
     pub fn col_idx(&self, col_name: &str) -> Option<usize> {
-        self.col_names.iter().position(|n| match n {
-            Some(name) => col_name == name,
-            None => false,
-        })
+        match self.col_names.get(col_name) {
+            Some(x) => Some(*x),
+            None => None
+        }
     }
 
     /// The number of columns in this Schema.
     pub fn width(&self) -> usize {
-        self.col_names.len()
+        self.schema.len()
     }
 
     fn char_to_data_type(c: char) -> DataType {
@@ -98,25 +84,17 @@ impl From<&str> for Schema {
     /// | 'S'       | String   |
     fn from(types: &str) -> Self {
         let mut schema = Vec::new();
-        let mut col_names = Vec::new();
         for c in types.chars() {
             schema.push(Schema::char_to_data_type(c));
-            col_names.push(None);
         }
-        Schema { schema, col_names }
+        Schema { schema, col_names : HashMap::new() }
     }
 }
 
 impl From<Vec<DataType>> for Schema {
     /// Create a `Schema` from a `Vec<DataType>`
     fn from(types: Vec<DataType>) -> Self {
-        let mut schema = Vec::new();
-        let mut col_names = Vec::new();
-        for t in types {
-            schema.push(t);
-            col_names.push(None);
-        }
-        Schema { schema, col_names }
+        Schema { schema : types, col_names: HashMap::new() }
     }
 }
 
@@ -124,7 +102,6 @@ impl From<&Vec<Column>> for Schema {
     /// Create a `Schema` from a `Vec<Column>`
     fn from(columns: &Vec<Column>) -> Self {
         let mut schema = Vec::new();
-        let mut col_names = Vec::new();
         for c in columns {
             match c {
                 Column::Bool(_) => schema.push(DataType::Bool),
@@ -132,9 +109,8 @@ impl From<&Vec<Column>> for Schema {
                 Column::Float(_) => schema.push(DataType::Float),
                 Column::String(_) => schema.push(DataType::String),
             };
-            col_names.push(None);
         }
-        Schema { schema, col_names }
+        Schema { schema, col_names: HashMap::new() }
     }
 }
 
@@ -193,6 +169,5 @@ mod tests {
             .unwrap();
         assert_eq!(s.width(), 2);
         assert_eq!(s.col_idx("foo"), Some(1));
-        assert_eq!(s.col_name(0).unwrap(), &None);
     }
 }

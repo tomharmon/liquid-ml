@@ -661,7 +661,7 @@ mod tests {
         assert!(res.is_ok());
         let combined = res.unwrap();
         let mut res_schema = Schema::from(vec![DataType::Int, DataType::Bool]);
-        *res_schema.col_names.get_mut(0).unwrap() = Some("col1".to_string());
+        res_schema.col_names.insert("col1".to_string(), 0);
         assert_eq!(combined.get_schema(), &res_schema);
         let r = PosIntSummer { sum: 0 };
         assert_eq!(combined.map(r).sum, 21);
