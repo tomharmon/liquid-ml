@@ -150,6 +150,43 @@ impl LiquidML {
         Ok(())
     }
 
+    /// Create a new data frame that consists of all the chunks in `iter` until
+    /// `iter` is consumed. Node 1 will call `next` on the `iter` and 
+    /// distributes these chunks to all the other nodes, sending up to 2 chunks
+    /// concurrently so as to restrict memory usage. 
+    ///
+    /// There is a possibility to increase the concurrency of sending the 
+    /// chunks, this would change the API slightly but not in a major way.
+    ///
+    /// `await`ing this function will block until the data is completely
+    /// distributed on all nodes. After the data is distributed, each node
+    /// of this distributed `liquid_ml` system will have their `LiquidML`
+    /// struct updated with the information of the new `DistributedDataFrame`
+    /// (ie, a map of `Key`s for each chunk).
+    ///
+    /// Note: if `df_name` is not unique, you will not be able to access the
+    ///       old data frame that will be replaced by the new data frame, and
+    ///       the old data frame will not be removed from all nodes. There
+    ///       is a way to fix this, and may be done at a later date.
+    pub async fn df_from_iter(
+        &mut self,
+        df_name: &str,
+        iter: impl Iterator<Item = Vec<Column>>,
+    ) -> Result<(), LiquidError> {
+        let ddf = DistributedDataFrame::from_iter(
+            &self.server_addr,
+            &self.my_ip,
+            iter,
+            self.kv.clone(),
+            df_name,
+            self.num_nodes,
+            self.blob_receiver.clone(),
+        )
+        .await?;
+        self.data_frames.insert(df_name.to_string(), ddf);
+        Ok(())
+    }
+
     /*
      * This is the old function we had for building an Application and
      * assuming the sor file was on every node. Leaving it here since I think
