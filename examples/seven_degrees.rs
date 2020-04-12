@@ -219,7 +219,6 @@ async fn main() -> Result<(), LiquidError> {
             Some(rower) => {
                 let serialized = serialize(&rower)?;
                 let mut futs = Vec::new();
-                // Could send concurrently does it matter?
                 for i in 2..(app.num_nodes + 1) {
                     futs.push(app.kv.send_blob(i, serialized.clone()));
                 }
@@ -231,8 +230,8 @@ async fn main() -> Result<(), LiquidError> {
         dbg!("finished users rower");
         users = ur.new_users;
         projects = ur.projects;
-        println!("num users found: {}", users.count_ones());
     }
+    println!("num users found: {}", users.count_ones());
     app.kill_notifier.notified().await;
 
     Ok(())
