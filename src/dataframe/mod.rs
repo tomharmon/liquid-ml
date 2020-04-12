@@ -149,7 +149,7 @@ pub struct Schema {
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub struct Row {
     /// A clone of the `Schema` of the `DataFrame` this `Row` is from.
-    pub(crate) schema: Vec<DataType>,
+    pub(crate) schema: Schema,//Vec<DataType>,
     /// The data of this `Row` as boxed values.
     pub(crate) data: Vec<Data>,
     /// The offset of this `Row` in the `DataFrame`

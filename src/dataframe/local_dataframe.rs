@@ -309,7 +309,7 @@ impl LocalDataFrame {
     /// If the `row` does not have the same schema as this `DataFrame`, a
     /// `LiquidError::TypeMismatch` error will be returned.
     pub fn add_row(&mut self, row: &Row) -> Result<(), LiquidError> {
-        if row.schema != self.schema.schema {
+        if row.schema != self.schema {
             return Err(LiquidError::TypeMismatch);
         }
 

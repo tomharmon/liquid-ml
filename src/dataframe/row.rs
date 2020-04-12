@@ -3,6 +3,7 @@ use crate::dataframe::{Fielder, Row, Schema};
 use crate::error::LiquidError;
 use sorer::dataframe::Data;
 use sorer::schema::DataType;
+use std::ops::Index;
 
 /// Functions for creating, mutating, and getting data from `Row`s.
 impl Row {
@@ -15,7 +16,7 @@ impl Row {
         }
 
         Row {
-            schema: schema.schema.clone(),
+            schema: schema.clone(),
             data,
             idx: None,
         }
@@ -29,7 +30,7 @@ impl Row {
         col_idx: usize,
         data: i64,
     ) -> Result<(), LiquidError> {
-        match self.schema.get(col_idx) {
+        match self.schema.schema.get(col_idx) {
             Some(DataType::Int) => match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::Int(_) => {
                     *self.data.get_mut(col_idx).unwrap() = Data::Int(data);
@@ -50,7 +51,7 @@ impl Row {
         col_idx: usize,
         data: f64,
     ) -> Result<(), LiquidError> {
-        match self.schema.get(col_idx) {
+        match self.schema.schema.get(col_idx) {
             Some(DataType::Float) => match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::Float(_) => {
                     *self.data.get_mut(col_idx).unwrap() = Data::Float(data);
@@ -71,7 +72,7 @@ impl Row {
         col_idx: usize,
         data: bool,
     ) -> Result<(), LiquidError> {
-        match self.schema.get(col_idx) {
+        match self.schema.schema.get(col_idx) {
             Some(DataType::Bool) => match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::Bool(_) => {
                     *self.data.get_mut(col_idx).unwrap() = Data::Bool(data);
@@ -92,7 +93,7 @@ impl Row {
         col_idx: usize,
         data: String,
     ) -> Result<(), LiquidError> {
-        match self.schema.get(col_idx) {
+        match self.schema.schema.get(col_idx) {
             Some(DataType::String) => match self.data.get(col_idx).unwrap() {
                 Data::Null | Data::String(_) => {
                     *self.data.get_mut(col_idx).unwrap() = Data::String(data);
@@ -142,7 +143,7 @@ impl Row {
 
     /// Get the `DataType` of the `Column` at the given `idx`.
     pub fn col_type(&self, idx: usize) -> Result<&DataType, LiquidError> {
-        match self.schema.get(idx) {
+        match self.schema.schema.get(idx) {
             Some(d) => Ok(d),
             None => Err(LiquidError::ColIndexOutOfBounds),
         }
@@ -163,6 +164,15 @@ impl Row {
         }
 
         Ok(())
+    }
+}
+
+impl Index<&str> for Row {
+    type Output = Data;
+
+    fn index(&self, name: &str) -> &Self::Output {
+        let idx = self.schema.col_idx(name).unwrap();
+        self.get(idx).unwrap()
     }
 }
 
