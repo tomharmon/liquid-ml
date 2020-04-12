@@ -31,16 +31,16 @@ mod schema;
 pub struct LocalDataFrame {
     /// The `Schema` of this `DataFrame`
     pub schema: Schema,
-    /// The data of this DataFrame, in columnar format
+    /// The data of this data frame, in columnar format
     pub data: Vec<Column>,
     /// Number of threads for this computer
     pub n_threads: usize,
 }
 
-/// Represents a distributed `DataFrame` which uses a local `KVStore` and a
-/// `Vec<Key>` of all `Key`s referring to `DataFrame`s which live on other
-/// nodes in order to abstract over the networking and provide the same
-/// functionality from the `DataFrame` trait as a local `DataFrame` struct.
+/// Represents a distributed data frame which uses a local `KVStore` and a
+/// collection of `Key`s for all the chunks in this data frame. Provides
+/// convenient `map` and `filter` methods that operate on the entire
+/// distributed data frame with a given `Rower`.
 #[derive(Debug)]
 pub struct DistributedDataFrame {
     /// The `Schema` of this `DistributedDataFrame`
@@ -84,22 +84,27 @@ pub(crate) enum DistributedDFMsg {
     GetRow(usize),
     /// A message used to respond to `GetRow` messages with the requested row
     Row(Row),
-    /// A message used to tell the 1st node what ranges DistributedDataFrame
-    /// nodes have after filtering
+    /// A message used to tell the 1st node the results from using the `filter`
+    /// method. If there were no rows after filtering, then `filtered_df_key`
+    /// is `None` and `num_rows` is `0`.
     FilterResult {
         num_rows: usize,
         filtered_df_key: Option<Key>,
     },
     /// A message used to share random blobs of data with other nodes. This
-    /// provides a lower level interface to facilitate other kinds of messages
+    /// provides a lower level interface to facilitate other kinds of messages,
+    /// for example sending rowers when performing `map`/`filter`.
     Blob(Vec<u8>),
-    /// To tell other DDFs whats up TODO:
+    /// Used to inform other nodes in a `DistributedDataFrame` the required
+    /// information for other nodes to construct a new `DistributedDataFrame`
+    /// struct that is consistent across all nodes.
     Initialization {
         schema: Schema,
         df_chunk_map: HashMap<Range<usize>, Key>,
     },
-    /// Used by the last node to tell the first node that they are ready for
-    /// the `Initialization` message
+    /// Used by nodes to co-ordinate connection to the `Server` so nodes
+    /// preserve the correct ids, and to notify node 1 when to send the
+    /// `Initialization` message
     Ready,
 }
 

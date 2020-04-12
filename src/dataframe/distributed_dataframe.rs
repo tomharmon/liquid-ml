@@ -25,11 +25,17 @@ use tokio::sync::{
 };
 
 impl DistributedDataFrame {
-    // TODO: we should await some of the futures for sending chunks every so
-    // often so that we don't end up parsing the whole file into memory
-    // since parsing is faster than sending over the network
-    /// TODO: update documentation
-    /// Creates a new `DataFrame` from the given file
+    /// Creates a new `DistributedDataFrame` from the given file. It is
+    /// assumed that node 1 contains the file with the given `file_name`.
+    /// Node 1 will then parse that file and distribute chunks to other nodes
+    /// over the network, so if network latency is a concern you should not
+    /// use this method.
+    ///
+    /// You may use this function directly to create a `DistributedDataFrame`
+    /// but it is recommended to use the application layer by calling
+    /// `LiquidML::df_from_sor` instead. Doing so will pass in many of the
+    /// required parameters for you, particularly the ones that are required
+    /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
     pub async fn from_sor(
         server_addr: &str,
         my_ip: &str,
@@ -63,7 +69,19 @@ impl DistributedDataFrame {
         .await
     }
 
-    /// Creates a new `DataFrame` from the given iterator
+    /// Creates a new `DataFrame` from the given iterator. The iterator is
+    /// used only on node 1, which calls `next` on it and distributes chunks
+    /// concurrently. Currently, only two chunks are sent concurrently to
+    /// restrict memory usage since experimental testing found that bigger
+    /// chunks was more performant for `map` and `filter`. There may be plans
+    /// to make the size of the chunks configurable in which case the number
+    /// of concurrent chunk sending tasks will also be tweaked.
+    ///
+    /// You may use this function directly to create a `DistributedDataFrame`
+    /// but it is recommended to use the application layer by calling
+    /// `LiquidML::df_from_iter` instead. Doing so will pass in many of the
+    /// required parameters for you, particularly the ones that are required
+    /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
     pub async fn from_iter(
         server_addr: &str,
         my_ip: &str,
@@ -167,6 +185,7 @@ impl DistributedDataFrame {
 
                 // we are almost done distributing chunks
                 if !send_chunk_futures.is_empty() {
+                    // it might not have been evenly divisible by 2
                     try_join_all(send_chunk_futures).await?;
                 }
                 info!("Finished distributing {} SoR chunks", chunk_idx);
@@ -334,9 +353,20 @@ impl DistributedDataFrame {
         }
     }
 
-    // TODO: add some verification that the `data` is not jagged (all cols equal len)
-    // TODO: change multiplexing of sending chunks to send chunks more often
+    // TODO: add some verification that the `data` is not jagged. A function
+    //       that is a no-op if its not jagged, otherwise inserts nulls to fix
+    //       it, would be nice.
 
+    /// Creates a new `DistributedDataFrame` by chunking the given `data` into
+    /// evenly sized chunks and distributing it across all nodes. Each chunk
+    /// will be size of total number of rows in `data` divided by the number of
+    /// nodes, since this was found to have the best performance for `map` and
+    /// `filter`. Node 1 is responsible for distributing the data, and thus
+    /// `data` should only be `Some` on node 1.
+    ///
+    /// NOTE: this function currently does not verify that `data` is not
+    /// jagged, which is a required invariant of the program. There is a plan
+    /// to automatically fix jagged data.
     pub async fn new(
         server_addr: &str,
         my_ip: &str,
@@ -415,17 +445,14 @@ impl DistributedDataFrame {
         self.schema.col_idx(col_name)
     }
 
-    /// Perform a distributed map operation on the `DataFrame` associated with
-    /// the `df_name` with the given `rower`. Returns `Some(rower)` (of the
-    /// joined results) if the `node_id` of this `Application` is `1`, and
-    /// `None` otherwise.
+    /// Perform a distributed map operation on this `DistributedDataFrame` with
+    /// the given `rower`. Returns `Some(rower)` (of the joined results) if the
+    /// `node_id` of this `DistributedDataFrame` is `1`, and `None` otherwise.
     ///
     /// A local `pmap` is used on each node to map over that nodes' chunk.
     /// By default, each node will use the number of threads available on that
     /// machine.
     ///
-    ///
-    /// NOTE: takes `&mut self` only because of the blob_receiver
     ///
     /// NOTE:
     /// There is an important design decision that comes with a distinct trade
@@ -452,7 +479,7 @@ impl DistributedDataFrame {
             .collect();
         // map over our chunks
         for key in my_keys {
-            // TODO: should not really need wait_and_get here since we own that chunk?
+            // TODO: shouldn't need wait_and_get here since we own that chunk..
             let ldf = self.kv.wait_and_get(key).await?;
             rower = ldf.pmap(rower);
         }
@@ -479,33 +506,29 @@ impl DistributedDataFrame {
         }
     }
 
-    /// TODO: this documentation is copy+pasted documentation from `map`, update it
+    // TODO: maybe abstract this into an iterator and use the from_iter
+    //       function since a **lot** of code here is copy pasted from that.
+    //       One issue: filter needs to generate a client-type that is unique
+    //       to the filtered dataframe, but from_iter assumes the client-type
+    //       is `ddf`. We could make a private from_iter_and_type method
+    //       that also accepts the client-type, and then from_iter passes in
+    //       "ddf" while filter passes in the generated client-type
+
+    /// Perform a distributed filter operation on this `DistributedDataFrame`.
+    /// This function does not mutate the `DistributedDataFrame` in anyway,
+    /// instead, it creates a new `DistributedDataFrame` of the results. This
+    /// `DistributedDataFrame` is returned to every node so that the results
+    /// are consistent everywhere.
     ///
-    /// Perform a distributed map operation on the `DataFrame` associated with
-    /// the `df_name` with the given `rower`. Returns `Some(rower)` (of the
-    /// joined results) if the `node_id` of this `Application` is `1`, and
-    /// `None` otherwise.
+    /// Because this creates a new `DistributedDataFrame`, the
+    /// `kv_blob_receiver` is required to be passed in. It is recommended that
+    /// you call `LiquidML::filter` instead of this method so that you don't
+    /// have to pass it in, though this method will remain public for users
+    /// who want lower-level access.
     ///
-    /// A local `pmap` is used on each node to map over that nodes' chunk.
-    /// By default, each node will use the number of threads available on that
-    /// machine.
-    ///
-    ///
-    /// NOTE: sadly must take the kv_blob_receiver for now in order to start
-    ///       up new nodes for the new DDF
-    ///
-    /// NOTE:
-    /// There is an important design decision that comes with a distinct trade
-    /// off here. The trade off is:
-    /// 1. Join the last node with the next one until you get to the end. This
-    ///    has reduced memory requirements but a performance impact because
-    ///    of the synchronous network calls
-    /// 2. Join all nodes with one node by sending network messages
-    ///    concurrently to the final node. This has increased memory
-    ///    requirements and greater complexity but greater performance because
-    ///    all nodes can asynchronously send to one node at the same time.
-    ///
-    /// This implementation went with option 1 for simplicity reasons
+    /// A local `pfilter` is used on each node to filter over that nodes'
+    /// chunks.  By default, each node will use the number of threads available
+    /// on that machine.
     pub async fn filter<
         T: Rower + Clone + Send + Serialize + DeserializeOwned,
     >(
@@ -832,6 +855,11 @@ impl DistributedDataFrame {
             .await
     }
 
+    /// Spawns a `tokio` task that processes `DistributedDFMsg` messages
+    /// When a message is received, a new `tokio` task is spawned to
+    /// handle processing of that message to reduce blocking of the message
+    /// receiving task, so that new messages can be read and processed
+    /// concurrently.
     async fn process_messages(
         ddf: Arc<DistributedDataFrame>,
         mut receiver: Receiver<Message<DistributedDFMsg>>,
