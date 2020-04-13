@@ -31,7 +31,7 @@ impl Schema {
             if !self.col_names.contains_key(&name) {
                 self.col_names.insert(name, self.schema.len());
             } else {
-                return Err(LiquidError::NameAlreadyExists)
+                return Err(LiquidError::NameAlreadyExists);
             }
         }
         self.schema.push(data_type);
@@ -51,7 +51,15 @@ impl Schema {
     pub fn col_idx(&self, col_name: &str) -> Option<usize> {
         match self.col_names.get(col_name) {
             Some(x) => Some(*x),
-            None => None
+            None => None,
+        }
+    }
+
+    /// Given a column index, returns its name, which is optional
+    pub fn col_name(&self, col_idx: usize) -> Option<&str> {
+        match self.col_names.iter().find(|(_, &v)| v == col_idx) {
+            Some((col_name, _)) => Some(col_name),
+            None => None,
         }
     }
 
@@ -87,14 +95,20 @@ impl From<&str> for Schema {
         for c in types.chars() {
             schema.push(Schema::char_to_data_type(c));
         }
-        Schema { schema, col_names : HashMap::new() }
+        Schema {
+            schema,
+            col_names: HashMap::new(),
+        }
     }
 }
 
 impl From<Vec<DataType>> for Schema {
     /// Create a `Schema` from a `Vec<DataType>`
     fn from(types: Vec<DataType>) -> Self {
-        Schema { schema : types, col_names: HashMap::new() }
+        Schema {
+            schema: types,
+            col_names: HashMap::new(),
+        }
     }
 }
 
@@ -110,7 +124,10 @@ impl From<&Vec<Column>> for Schema {
                 Column::String(_) => schema.push(DataType::String),
             };
         }
-        Schema { schema, col_names: HashMap::new() }
+        Schema {
+            schema,
+            col_names: HashMap::new(),
+        }
     }
 }
 

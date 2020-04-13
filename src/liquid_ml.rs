@@ -151,11 +151,11 @@ impl LiquidML {
     }
 
     /// Create a new data frame that consists of all the chunks in `iter` until
-    /// `iter` is consumed. Node 1 will call `next` on the `iter` and 
+    /// `iter` is consumed. Node 1 will call `next` on the `iter` and
     /// distributes these chunks to all the other nodes, sending up to 2 chunks
-    /// concurrently so as to restrict memory usage. 
+    /// concurrently so as to restrict memory usage.
     ///
-    /// There is a possibility to increase the concurrency of sending the 
+    /// There is a possibility to increase the concurrency of sending the
     /// chunks, this would change the API slightly but not in a major way.
     ///
     /// `await`ing this function will block until the data is completely

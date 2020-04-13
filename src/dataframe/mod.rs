@@ -1,33 +1,44 @@
-//! A module for creating and manipulating `DataFrame`s. A `DataFrame` can be
+//! A module for creating and manipulating data frame`s. A data frame can be
 //! created from a [`SoR`](https://docs.rs/sorer/0.1.0/sorer/) file,
 //! or by adding `Column`s or `Row`s programmatically.
 //!
-//! The `DataFrame` is lightly inspired by those found in `R` or `pandas`, and
-//! supports optionally named columns. You may analyze the data in a
-//! `DataFrame` across many distributed machines in a horizontally scalable
+//! A data frame in `liquid_ml` is lightly inspired by those found in `R` or
+//! `pandas`, and supports optionally named columns. You may analyze the data
+//! in a data frame across many distributed machines in a horizontally scalable
 //! manner by implementing the `Rower` trait to perform `map` or `filter`
-//! operations on a `DataFrame`. A DataFrame is stored in columnar format to 
-//! support high performance data  analytics fast. 
+//! operations.
 //!
-//! The DataFrame module provides 2 implementations for a DataFrame:
-//!  - a [`Local DataFrame`](crate::dataframe::local_dataframe) which can be 
-//!  used to analyze data on a node locally and removes network latency
-//!  - a [`Distributed DataFrame`](crate::dataframe::distributed_dataframe) which
-//!  upon creation will distribute its data across multiple nodes and provides 
-//!  distributed versions of map and filter operations. 
+//! The `dataframe` module provides 2 implementations for a data frame:
 //!
-//! DataFrames use these supplementary data structures and can be useful in 
-//! analyzing DataFrames:
-//!  - `Row` : Which is a single row of Data from the dataframe and provides a 
-//!  useful API to help write `Rowers`
-//!  - `Schema` : This can be especially useful whena SoR File is read and 
-//!  different things need to be done based on the inferred schema
+//! # [`LocalDataFrame`](crate::dataframe::local_dataframe)
 //!
-//! The DataFrame also declares the rower and fielder visitor traits that can be 
-//! used to build visitors that iterate over the elements of a row or dataframe.
+//! A [`LocalDataFrame`](crate::dataframe::local_dataframe) which can be
+//! used to analyze data on a node locally for data that fits in memory.
 //!
-//! NOTE: RFC to add iterators along with the current visitors, since these are 
-//! cleaner to write in rust
+//! # [`DistributedDataFrame`](crate::dataframe::distributed_dataframe)
+//!
+//! A [`DistributedDataFrame`](crate::dataframe::distributed_dataframe)
+//! which upon creation will distribute its data across multiple nodes and
+//! provides distributed versions of map and filter operations. If you need
+//! these features of a `DistributedDataFrame`, it is highly recommended
+//! that you check out the `LiquidML` struct since that provides many
+//! convenient helper functions for working with `DistributedDataFrame`s.
+//! Using a `DistributedDataFrame` directly is only recommended if you
+//! really know what you are doing.
+//!
+//! Data frames use these supplementary data structures and can be useful in
+//! understanding DataFrames:
+//!  - `Row` : A single row of `Data` from the data frame and provides a
+//!     useful API to help implement the `Rower` trait
+//!  - `Schema` : This can be especially useful when a `SoR` File is read and
+//!     different things need to be done based on the inferred schema
+//!
+//! The `dataframe` module also declares the `Rower` and `Fielder` visitor
+//! traits that can be used to build visitors that iterate over the elements of
+//! a row or data frame.
+//!
+//! NOTE: RFC to add iterators along with the current visitors, since iterators
+//! are more idiomatic to write in rust
 use crate::kv::{KVStore, Key};
 use crate::network::Client;
 use deepsize::DeepSizeOf;
@@ -58,40 +69,51 @@ pub struct LocalDataFrame {
     pub n_threads: usize,
 }
 
-/// Represents a distributed data frame which uses a local `KVStore` and a
-/// collection of `Key`s for all the chunks in this data frame. Provides
-/// convenient `map` and `filter` methods that operate on the entire
-/// distributed data frame with a given `Rower`.
+/// Represents a distributed, immutable data frame which uses a local
+/// `KVStore` which contains a given node's owned data, and a collection of
+/// `Key`s for all the chunks in the entire data frame so that this
+/// `DistributedDataFrame` can request and operate on chunks of data that
+/// belong to other nodes. Provides convenient `map` and `filter` methods that
+/// operate on the entire distributed data frame with a given `Rower`.
 #[derive(Debug)]
 pub struct DistributedDataFrame {
     /// The `Schema` of this `DistributedDataFrame`
     pub schema: Schema,
-    /// The name of this `DistributedDataFrame`
+    /// The name of this `DistributedDataFrame`. Must be unique in a `LiquidML`
+    /// instance
     pub df_name: String,
-    /// Keys that point to data in different nodes.
+    /// A map of the range of row indexs to the `Key`s that point to the chunk
+    /// of data with those rows, which may belong to different nodes.
     pub df_chunk_map: HashMap<Range<usize>, Key>,
-    /// cached, ddf is immutable
+    /// The number of rows in this entire `DistributedDataFrame`
     pub num_rows: usize,
     /// The id of the node this `DistributedDataFrame` is running on
     pub node_id: usize,
-    /// How many nodes are there in this DDF?
+    /// How many nodes are there in this `DistributedDataFrame`?
     pub num_nodes: usize,
     /// What's the address of the `Server`?
     pub server_addr: String,
     /// What's my IP address?
     pub my_ip: String,
-    /// Used for communication with other nodes in this DDF
+    /// Used for communication with other nodes in this `DistributedDataFrame`
     network: Arc<RwLock<Client<DistributedDFMsg>>>,
-    /// The `KVStore`
+    /// The `KVStore`, which stores the serialized data owned by this
+    /// `DistributedDataFrame` and deserialized cached data that may or may
+    /// not belong to this node
     kv: Arc<KVStore<LocalDataFrame>>,
-    /// Used for processing messages: TODO better explanation
+    /// Used for processing messages so that the asynchronous task running
+    /// the `process_message` function can notify other asynchronous tasks
+    /// when the `row` of this `DistributedDataFrame` is ready to use for
+    /// operations (such as returning the result to the `get_row` function
     internal_notifier: Arc<Notify>,
-    /// Used for sending rows back and forth TODO: better explanation
+    /// Is mutated by the asynchronous `process_message` task to be a requested
+    /// row when the network responds to `GetRow` requests, to enable getter
+    /// methods for data such as `get_row`
     row: Arc<RwLock<Row>>,
     /// A notifier that gets notified when the `Server` has sent a `Kill`
     /// message to this `DistributedDataFrame`'s network `Client`
     kill_notifier: Arc<Notify>,
-    /// Used for lower level messages TODO: better explanation
+    /// Used for lower level messages, such as sending arbitrary `Rower`s
     blob_receiver: Mutex<Receiver<Vec<u8>>>,
     /// Used for processing filter results TODO: maybe a better way to do this
     filter_results: Mutex<Receiver<DistributedDFMsg>>,
@@ -136,12 +158,9 @@ pub(crate) enum DistributedDFMsg {
 pub struct Schema {
     /// The `DataType`s of this `Schema`
     pub schema: Vec<DataType>,
-    /// The optional names of each `Column`, which must be unique if they are
-    /// `Some`
-    /// pub col_names: Vec<Option<String>>,
-    /// A reverse col_name map for all the named columns to make getting
-    /// index by column name faster
-    pub col_names : HashMap<String, usize>,
+    /// A reverse column name to column index map for all the named columns.
+    /// Helps getting the index by column name faster.
+    pub col_names: HashMap<String, usize>,
 }
 
 /// Represents a single row in a `DataFrame`. Has a clone of the `DataFrame`s
@@ -149,7 +168,7 @@ pub struct Schema {
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
 pub struct Row {
     /// A clone of the `Schema` of the `DataFrame` this `Row` is from.
-    pub(crate) schema: Schema,//Vec<DataType>,
+    pub(crate) schema: Schema, //Vec<DataType>,
     /// The data of this `Row` as boxed values.
     pub(crate) data: Vec<Data>,
     /// The offset of this `Row` in the `DataFrame`
