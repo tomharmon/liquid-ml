@@ -445,6 +445,9 @@ impl DistributedDataFrame {
         self.schema.col_idx(col_name)
     }
 
+    // TODO: make the function signature consistent with filter by
+    //       returning the result everywhere. Once the first node gets the 
+    //       final result, broadcast it to all nodes so everyone gets it
     /// Perform a distributed map operation on this `DistributedDataFrame` with
     /// the given `rower`. Returns `Some(rower)` (of the joined results) if the
     /// `node_id` of this `DistributedDataFrame` is `1`, and `None` otherwise.

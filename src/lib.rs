@@ -83,14 +83,13 @@
 //!
 //!
 //! ## DataFrame
-//! The `DataFrame` represents a higher level API for accessing and processing data
-//! held in the `KV` stores. The `DataFrame` has convenient functions to access
-//! data in a columnar or row based format. It also supports named columns and
-//! rows. Row based processing is done using visitors which implement the `Rower`
-//! trait and calling either `DataFrame::filter`, `DataFrame::map`,
-//! or `DataFrame::pmap`, the latter of which runs on as many threads that the
-//! machine it's running on has. Column based processing can be done more manually
-//! by directly getting getting columns as a `Vec` of data.
+//! The `DataFrame` represents a higher level API for accessing and processing
+//! data held in the `KV` stores. The `DataFrame` has convenient functions to
+//! access data in a columnar or row based format. It also supports named
+//! columns and rows. Row based processing is done using visitors which
+//! implement the `Rower` trait and calling either `DataFrame::filter`,
+//! `DataFrame::map`, or `DataFrame::pmap`, the latter of which runs on as many
+//! threads that the machine it's running on has.
 //!
 //! ## Application Layer
 //! The `Application` layer is an even higher level API for writing programs to
@@ -114,19 +113,20 @@
 //! ### Tokio
 //! The networking layer uses [`tokio`](https://docs.rs/tokio/0.2.13/tokio/) to
 //! use asynchronous programming to handle connections with multiple clients
-//! concurrently. `Tokio` is an asynchronous run time for Rust since there is not
-//! one included in the standard library. It also includes some faster
-//! synchronization primitives that are faster than those in the standard library
-//! (e.g. `RwLock`). `Tokio` is open source under an MIT license.
+//! concurrently. `Tokio` is an asynchronous run time for Rust since there is
+//! not one included in the standard library. It also includes some faster
+//! synchronization primitives that are faster than those in the standard
+//! library (e.g. `RwLock`). `Tokio` is open source under an MIT license.
 //!
 //! ### Bincode
 //! `Bincode` is a crate for encoding and decoding using a binary serialization
-//! strategy. It is extremely fast and is developed by Mozilla, though it is open
-//! source under an MIT license.
+//! strategy. It is extremely fast and is developed by Mozilla, though it is
+//! open source under an MIT license.
 //!
 //! ### Serde
-//! `Serde` is a framework for serializing and deserializing Rust data structures
-//! efficiently and generally. `Serde` is open source under an MIT license.
+//! `Serde` is a framework for serializing and deserializing Rust data
+//! structures efficiently and generally. `Serde` is open source under an MIT
+//! license.
 //!
 //!
 //! ### Miscellaneous
@@ -348,12 +348,17 @@
 //! None
 //!
 //! # Status
-//! We are done with Milestone 3 and have spent a lot of time polishing up our
-//! documentation, api, implementation, and examples so that our architecture
-//! design is clear and as good as possible.
+//! We are done with the entire application except maybe a few minor tweaks
+//! here and there, a bit more documentation and examples in the data frame
+//! and application level modules, more testing, and random forest.
 //!
-//! We have also implemented the example code from Milestone 1 since that is one of
-//! the goals of Milestone 3. This can be found at
+//! We believe our API to be complete and that it won't need to change any
+//! more for the purposes of this class project.
+//!
+//!
+//! ## Milestone 3 (Demo client)
+//! We have implemented the example code from Milestone 1 since that is
+//! one of the goals of Milestone 3. This can be found at
 //! `src/liquid_ml/examples/demo_client.rs`.
 //! This program runs the demo program and can be run as follows:
 //! 1. Start the `Server` with this command: `cargo run --bin server`
@@ -370,41 +375,30 @@
 //! to 'cancel' some asynchronous tasks when `Kill` messages are received (not
 //! easy in Rust, but possible).
 //!
-//! We have not really polished the example and the program will print its logs to
-//! the console which is the simplest way to see the program running.
-//! And as expected the third client will print `SUCCESS` at the end.
+//! The third client will print `SUCCESS` at the end.
 //!
-//! ### Testing
-//! We found it pretty hard to do networking testing so much of the distributed
-//! system is not currently tested. We have a few possibilities we want to try with
-//! regards to mocking the network and having more robust testing and will
-//! attempt this in the next milestone.
-//!
-//! However, we have very robust testing of the non-networked components and are
-//! confident in the correctness.
 //!
 //! ## Completed Features
-//! 1. SoRer - robust schema on read file parsing with well tested and umented
-//!    behavior. Performance of over 400MB/s for a 16 column file on machine h
-//!    8GB RAM, Intel i5-4690K CPU with 4 threads.
+//! 1. SoRer - robust schema on read file parsing with well tested and
+//!    documented behavior. Performance of over 400MB/s for a 16 column file on
+//!    machine with 8GB RAM, Intel i5-4690K CPU with 4 threads.
 //! 2. DataFrame + relevant related APIs - implementations to construct a aFrame
-//!    from a `.sor` file, map, pmap, and filter, plus all other methods vided
-//!    in the original DataFrame API and related APIs (Schema etc).
+//!    from a `.sor` file, map, pmap, and filter, plus all other methods
+//!    provided in the original DataFrame API and related APIs (Schema etc).
 //! 3. Generic networking API - Currently allows for directed communication ween
 //!    distributed nodes, using one central server for registration. Is also
 //!    generic across message types. Need to polish off orderly shutdown.
 //! 4. KVStore implemented as required and is able to communicate with other
 //!    KVStores and process different messages.
-//! 5. A more fully featured proof of concept version of the application layer
-//!    been implemented
+//! 5. The application layer has been completely implemented
+//! 6. Distributed DataFrame layer has been completely implemented. Supports
+//!    distributed filter
+//! 7. All the applications, including Linus, work as desired.
 //!
 //! ## Road Map
 //! 0. Build robust integration tests to define how the distributed system ks.
 //! 1. Fix up orderly shutdown of the network layer.
-//! 2. Make the client a trait so that the KVStore can be tested using a mock ent
-//! 3. Implement the example programs needed to demonstrate functionality of the
-//!    project.
-//! 4. Implement random forest.
+//! 2. Implement random forest.
 
 pub mod dataframe;
 pub mod error;
