@@ -1,3 +1,4 @@
+use chrono::{Datelike, NaiveDateTime};
 use clap::Clap;
 use csv::Reader;
 use serde::Deserialize;
@@ -32,14 +33,14 @@ struct Row {
     high: f64,
     low: f64,
     close: f64,
-    volume: usize,
+    volume: i64,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProcessedRow {
     //year: usize, // scaling?
-    /// The day of year scaled between 0-1
-    day_of_year: f64,
+    /// The day of year
+    day_of_year: i64,
     /// The opening price of a candlestick, scaled ?
     open: f64,
     /// The highest price traded during a candlestick, scaled ?
@@ -49,7 +50,7 @@ struct ProcessedRow {
     /// The price of the last trade during a candlestick, scaled ?
     close: f64,
     /// The amount of shares traded during a candlestick, scaled ?
-    volume: f64,
+    volume: i64,
     /// The change in price from open to close of this candlestick, scaled
     /// from 0-1
     delta: f64,
@@ -75,12 +76,94 @@ struct ProcessedRow {
 /// Takes an ordered sliding window of the last 21 candlesticks (rows), the
 /// row to process, and the next 21 candlesticks, and produces a new processed
 /// row.
+///
+/// Note that according to our research, feature scaling is not needed for
+/// decision trees/random forest
 fn process_row(
     sliding_window: &Vec<Row>,
     row: &Row,
     forward_window: &Vec<Row>,
 ) -> ProcessedRow {
-    unimplemented!()
+    assert_eq!(sliding_window.len(), 21);
+    assert_eq!(forward_window.len(), 21);
+    let date_time =
+        NaiveDateTime::parse_from_str(&row.date, "%Y-%m-%d %H:%M:%S").unwrap();
+    // not accounting for leap years
+    let day_of_year = date_time.ordinal() as i64;
+
+    let open = row.open;
+    let high = row.high;
+    let low = row.low;
+    let close = row.close;
+
+    let volume = row.volume;
+
+    let delta = row.close - row.open;
+    let bull_wick = if row.close - row.open >= 0.0 {
+        // this is a bullish candlestick
+        row.high - row.close
+    } else {
+        // this is a bearish candlestick
+        row.high - row.open
+    };
+    let bear_wick = if row.close - row.open >= 0.0 {
+        // this is a bullish candlestick
+        row.open - row.low
+    } else {
+        // this is a bearish candlestick
+        row.close - row.low
+    };
+
+    // rsi calculation
+    let sliding_window_delta: Vec<_> =
+        sliding_window.iter().map(|r| r.close - r.open).collect();
+    let avg_gain = sliding_window_delta.iter().fold(0.0, |acc, &d| {
+        if d >= 0.0 {
+            acc + d
+        } else {
+            acc
+        }
+    }) / 21.0;
+    let avg_loss = sliding_window_delta.iter().fold(0.0, |acc, &d| {
+        if d <= 0.0 {
+            acc + d.abs()
+        } else {
+            acc
+        }
+    }) / 21.0;
+    let rs = avg_gain / avg_loss;
+    let rsi = 100.0 - 100.0 / (1.0 + rs);
+
+    // sma calculation
+    let sma =
+        sliding_window.iter().fold(0.0, |acc, r| acc + avg_ohlc(r)) / 21.0;
+
+    // TODO: adx calculation
+
+    // label calculation
+    let forward_delta =
+        avg_ohlc(forward_window.last().unwrap()) - avg_ohlc(row);
+    let label = forward_delta > 0.0;
+
+    ProcessedRow {
+        day_of_year,
+        open,
+        high,
+        low,
+        close,
+        volume,
+        delta,
+        bull_wick,
+        bear_wick,
+        rsi,
+        sma,
+        label,
+    }
+}
+
+// takes a row and returns the average of the open, high, low, and close
+fn avg_ohlc(r: &Row) -> f64 {
+    (r.open + r.high + r.low + r.close) / 4.0
 }
 
 fn main() {
@@ -128,7 +211,7 @@ fn main() {
     let mut csv_reader = Reader::from_path(&opts.input_file).unwrap();
     let mut peek_iter = csv_reader.deserialize().skip(21 * 2).peekable();
     let mut csv_reader = Reader::from_path(&opts.input_file).unwrap();
-    let mut iter = csv_reader.deserialize().skip(21);
+    let iter = csv_reader.deserialize().skip(21);
     let mut results = Vec::new();
 
     for result in iter {
@@ -145,17 +228,18 @@ fn main() {
         if peek_iter.peek().is_none() {
             break;
         } else {
+            forward_window.remove(0);
             forward_window.push(peek_iter.next().unwrap().unwrap());
         }
     }
 
     // 4. Save the processed results in a `SoR` file
-    let mut writer = BufWriter::new(File::open(&opts.output_file).unwrap());
+    let mut writer = BufWriter::new(File::create(&opts.output_file).unwrap());
     for processed_row in results {
         writer
             .write(
                 format!(
-                    "<{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}>",
+                    "<{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}>\n",
                     processed_row.day_of_year,
                     processed_row.open,
                     processed_row.high,

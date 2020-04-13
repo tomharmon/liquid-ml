@@ -8,7 +8,7 @@ edition = "2018"
 
 [dependencies]
 # sorer = { git = "https://github.com/SamedhG/sorer", branch = "master" }
-sorer = {path = "../sorer/"}
+sorer = { path = "../sorer/" }
 tokio = { version = "0.2.15", features = ["full", "blocking"] }
 tokio-util = { version = "0.3.1", features = ["codec"] }
 thiserror = "1.0.14"
@@ -35,3 +35,4 @@ lto = true
 [dev-dependencies]
 bitvec = { version = "0.17.4", features = ["serde"] }
 csv = "1.1.3"
+chrono = "0.4.11"
