@@ -1,40 +1,38 @@
 //! # Introduction
-//! LiquidML is an in-memory platform for distributed, scalable machine learning
-//! and data analytics. It ships with the random forest machine learning algorithm
-//! built in, allowing users to easily classify data using the power of AI.
+//! LiquidML is an in-memory platform for distributed, scalable machine
+//! learning and data analytics. It ships with the random forest machine
+//! learning algorithm built in, allowing users to easily classify data using
+//! the power of AI.
 //!
-//! LiquidML is written in Rust for both performance and safety reasons, allowing
-//! many optimizations to be made more easily without the risk of a memory safety
-//! bug. This helps guarantee security around our clients' data, as many memory
-//! safety bugs can be exploited by malicious hackers.
+//! LiquidML is written in Rust for both performance and safety reasons,
+//! allowing many optimizations to be made more easily without the risk of a
+//! memory safety bug. This helps guarantee security around our clients' data,
+//! as many memory safety bugs can be exploited by malicious hackers.
 //!
-//! LiquidML makes it fast and easy to derive insights from your data by extending
-//! it to apply your own analytics tools to your data in a distributed, scalable
-//! fashion.
+//! LiquidML makes it fast and easy to derive insights from your data by
+//! extending it to apply your own analytics tools to your data in a
+//! distributed, scalable fashion.
 //!
 //! LiquidML is currently in development but the finished product will be
 //! implemented soon.
 //!
 //! **Note**: it is highly recommended that you install Rust via the
-//! `install_rust` Make target. If you have any issues with building, running, or
-//! testing the projects, make sure you run the `update_rust` Make target. Also,
-//! please use the stable channel of Rust when building the project.
+//! `install_rust` Make target. If you have any issues with building, running,
+//! or testing the projects, make sure you run the `update_rust` Make target.
+//! Also, please use the stable channel of Rust when building the project.
 //!
 //! It is also highly recommended that you run the `doc` Make target to view
-//! the documentation get a better view of the design of the project. If you don't,
-//! it would also make Tom very sad. We have made updates to this memo where
-//! appropriate, but most of our recent changes have been in our code as well as
-//! very significant changes to our documentation. For a more in-depth view, you
-//! may even run the `doc_everything` target, though this is very unnecessary.
+//! the documentation get a better view of the design of the project. If you
+//! don't, it would also make Tom very sad.
 //!
 //!
 //! # Architecture
 //! LiquidML consists of the following architectural components:
-//! - SoRer
-//! - Networking Layer
-//! - KV Store
-//! - DataFrame
-//! - Application Layer
+//! - SoRer, for inferring schemas and parsing files
+//! - Networking Layer, for communication over TCP
+//! - KV Store, for associating ownership of data frame chunks with nodes
+//! - DataFrame, for local and distributed data frames and UDFs
+//! - Application Layer, for convenience of using the entire system
 //!
 //! ## SoRer
 //! The main purpose of the `SoRer` is to handle parsing files of an unknown
@@ -44,68 +42,103 @@
 //! [here](https://docs.rs/sorer/0.1.0/sorer/)
 //!
 //! ## Networking
-//! The network layer is the lowest level component of a `LiquidML` instance. It
-//! provides a simple registration `Server` and a network of distributed `Client`s,
-//! each with a unique ID assigned by the `Server`. The networking layer uses
-//! `TCP` to communicate. `Client`s are able to send messages directly to any
-//! other `Client` after they register with the `Server`.
+//! The network layer is the lowest level component of a `LiquidML` instance.
+//! It provides a simple registration `Server` and a network of distributed
+//! `Client`s, each with a unique ID assigned by the `Server`. The networking
+//! layer uses `TCP` to communicate. `Client`s are able to send messages
+//! directly to any other `Client` of the same client type after they register
+//! with the `Server`.
 //!
-//! The `Client` is designed asynchronously so that it can listen for messages from
-//! the `Server` or any number of `Client`s (within physical limitations)
+//! The `Client` is designed asynchronously so that it can listen for messages
+//! from the `Server` or any number of `Client`s (within physical limitations)
 //! concurrently. Messages from the `Server` are processed internally by the
-//! `Client`, while messages from other `Client`s are sent over a `mpsc` channel
-//! which is passed in during construction of the `Client`. This channel acts as
-//! a queue of messages so that they may be processed in whichever way a user
-//! of the `Client` wants. Because of this the networking layer is not tightly
-//! coupled to any system that uses it.
+//! `Client`, while messages from other `Client`s are sent over a `mpsc`
+//! channel which is passed in during construction of the `Client`. This
+//! channel acts as a queue of messages so that they may be processed in
+//! whichever way a user of the `Client` wants. Because of this the networking
+//! layer is not tightly coupled to any system that uses it. `Client`s are
+//! constructed with a client type so that sub-networks of different client
+//! types can be dynamically created. This supports the `liquid_ml`
+//! distributed filter implementation.
 //!
 //! The `Client` trait is generic, and is parameterized by a type `T`,
 //! where `T` is the type of messages that can be sent between `Client`s. A
-//! `Client` implementation is provided for any message type that implements the
-//! following traits: `Send + Sync` from the standard library and
+//! `Client` implementation is provided for any message type that implements
+//! the following traits: `Send + Sync` from the standard library and
 //! `DeserializeOwned + Serialize` from the serialization/deserialization crate
 //! [`Serde`](https://crates.io/crates/serde).
 //!
 //!
 //! ## KV Store
-//! The `KVStore` stores blobs of serialized data that are associated with `Key`s,
-//! as well as caches deserialized values in memory.
+//! The `KVStore` stores blobs of serialized data that are associated with
+//! `Key`s, as well as caches deserialized values in memory.
 //!
-//! `Key`s know which node that the data for that `Key` belongs to. Cached values
-//! that are likely no longer needed are smartly evicted using an LRU map to avoid
-//! running out of memory since `LiquidML` is designed to be run using data sets
-//! that are much larger than what would fit into memory.
+//! `Key`s know which node that the data for that `Key` belongs to. Cached
+//! values that are likely no longer needed are smartly evicted using an LRU
+//! map to avoid running out of memory since `LiquidML` is designed to be run
+//! using data sets that are much larger than what would fit into memory. The
+//! LRU cache has a fixed size limit that is set to 1/3 of the total memory
+//! on each node.
 //!
 //! Caching also helps to improve performance by reducing network calls.  Each
 //! `KVStore` store implements functionality to utilize the network layer to
-//! get data from a different node if the data is available elsewhere and not in
-//! this `KVStore`.
+//! get data from a different node if the data is available elsewhere and not
+//! in this `KVStore`.
 //!
 //!
-//! ## DataFrame
-//! The `DataFrame` represents a higher level API for accessing and processing
-//! data held in the `KV` stores. The `DataFrame` has convenient functions to
-//! access data in a columnar or row based format. It also supports named
-//! columns and rows. Row based processing is done using visitors which
-//! implement the `Rower` trait and calling either `DataFrame::filter`,
-//! `DataFrame::map`, or `DataFrame::pmap`, the latter of which runs on as many
-//! threads that the machine it's running on has.
+//! ## Data frame
+//! A data frame in `liquid_ml` is lightly inspired by those found in `R` or
+//! `pandas`, and supports optionally named columns. You may analyze the data
+//! in a data frame across many distributed machines in a horizontally scalable
+//! manner by implementing the `Rower` trait to perform `map` or `filter`
+//! operations.
+//!
+//! The `dataframe` module provides 2 implementations for a data frame:
+//!
+//! ### `LocalDataFrame`
+//! A `LocalDataFrame` should be used to analyze data sets that fit into memory
+//! to avoid network latency of a `DistributedDataFrame` and to make things
+//! simple. It is mutable and gives more direct control to the user. It also
+//! provides convenient functions for performing `filter` or `map` operations
+//! when given a user-defined `Rower`
+//!
+//! ### `DistributedDataFrame`
+//! A [`DistributedDataFrame`](crate::dataframe::distributed_dataframe) is
+//! an abstraction over a distributed system of nodes that run `KVStore`s which
+//! contain chunks of `LocalDataFrame`s. Therefore each `DistributedDataFrame`
+//! simply holds a pointer to a `KVStore` and a map of ranges of row indices
+//! to the `Key`s for the chunks of data with that range of row indices.
+//!
+//! Upon creation node 1 of a `DistributedDataFrame` will distribute data
+//! across multiple nodes from `SoR` files, iterators, and other conveient ways
+//! of adding data. Each chunk that node 1 distributes is as large as possible
+//! while distributing the data evenly between nodes since experimental testing
+//! found this was optimal for performance of `map` and `filter`.
+//! Methods for distributed versions of these `map` and `filter` operations
+//! are provided.
+//!
+//! **Note**: If you need these features of a `DistributedDataFrame`, it is
+//! highly recommended that you check out the `LiquidML` struct since that
+//! provides many convenient helper functions for working with
+//! `DistributedDataFrame`s.  Using a `DistributedDataFrame` directly is only
+//! recommended if you really know what you are doing.
 //!
 //! ## Application Layer
 //! The `Application` layer is an even higher level API for writing programs to
-//! perform data analysis on the entire distributed system.
-//!
-//! The `Application` layer abstracts away co-ordination of the distributed
-//! system and make it very easy for a user to run `pmap`, `map`, or `filter`.
+//! perform data analysis on the entire distributed system. It allows a user
+//! to create and analyze `DistributedDataFrame`s without worrying about
+//! `KVStore`s, nodes, networking, or any other complications of distributed
+//! systems, making it very easy for a user to run `map` or `filter`.
 //!
 //! The `Application` also provides a `run` method which takes a function and
 //! executes that function. The signature of this user-implemented function
 //! is `KVStore -> ()` (`()` is the unit type in Rust, and this signature
 //! is a slight simplification). This allows much lower-level access for more
 //! advanced users so that they may have more powerful and general usage of the
-//! system beyond our provided implementations of `pmap`, `map`, and `filter`.
+//! system beyond our provided implementations of `map`, and `filter`.
 //!
-//! See the use case section for illustrative examples.
+//! See the use case section and the `examples` directory for illustrative
+//! examples.
 //!
 //! # Implementation
 //!
@@ -131,17 +164,17 @@
 //!
 //! ### Miscellaneous
 //! - `lru`: provides a Least Recently Used map, since one is not available
-//!    in the Rust standard library anymore. `lru` is heavily based on the original
-//!    standard library implementation (they're practically the same).
+//!    in the Rust standard library anymore. `lru` is heavily based on the
+//!    original standard library implementation (they're practically the same).
 //! - `thiserror`: helpful for defining error types
-//! - `num_cpus`: provides a function to find the number of logical cores available
-//!     on a machine
-//! - `futures`: used for the `SinkExt` trait (used for sending messages over TCP).
-//!    `tokio` defines the `StreamExt` trait (used for reading messages over TCP).
-//!    These traits are split across crates because of the split in the Rust
-//!    eco-system because it took a while for `async`/`await` to become stabilized.
-//!    It is a pain to have both imports but everyone in the ecosystem has to deal
-//!    with it.
+//! - `num_cpus`: provides a function to find the number of logical cores
+//!    available on a machine
+//! - `futures`: used for the `SinkExt` trait (used for sending messages over
+//!    TCP). `tokio` defines the `StreamExt` trait (used for reading messages
+//!    over TCP). These traits are split across crates because of the split in
+//!    the Rust eco-system because it took a while for `async`/`await` to
+//!    become stabilized.  It is a pain to have both imports but everyone in
+//!    the ecosystem has to deal with it.
 //! - `crossbeam-utils`: used to get around some limitations of lifetimes when
 //!    spawning threads. Threads spawned with the Rust standard library have a
 //!    lifetime of static `'static`, but `crossbeam-utils` provides a way to
@@ -155,9 +188,10 @@
 //! some helper functions in the `network` module.
 //!
 //! There is little handling of many of the complicated edge cases associated
-//! with distributed systems in the networking layer. It's assumed that most things
-//! happen without any errors. Some of the basic checking that is done is checking
-//! for connections being closed and ensuring messages are of the right type.
+//! with distributed systems in the networking layer. It's assumed that most
+//! things happen without any errors. Some of the basic checking that is done
+//! is checking for connections being closed and ensuring messages are of the
+//! right type.
 //!
 //! ### Client
 //! The `Client` struct represents a node and does the following tasks
@@ -169,8 +203,8 @@
 //!   `TCPStream`. Messages are forwarded one layer up to the `KVStore` via an
 //!   `mpsc` channel.
 //!
-//! A `Client` can be used to send a message directly to any other `Client` at
-//! any time by using the following method:
+//! A `Client` can be used to send a message directly to any other `Client` of
+//! the same type at any time by using the following method:
 //!
 //! `client.send_msg(target_id: usize, message: Serialize)`
 //!
@@ -179,18 +213,18 @@
 //!
 //! Registration process from `Client` perspective:
 //! 1. Connect to the `Server`
-//! 2. Send the `Server` a `Message<ControlMsg::Introduction>` message containing
-//!    the `IP:Port` of this `Client`
-//! 3. The `Server` will respond with the `Message<ControlMsg::Directory>` message
-//!    containing the `IP:Port` of all other currently connected `Client`s
-//! 4. The newly created `Client` connects to all other existing `Client`s. When
-//!    each connection is made:
-//!   - A `Message<ControlMsg::Introduction>` is sent to the
-//!     other `Client`.
+//! 2. Send the `Server` a `Message<ControlMsg::Introduction>` message
+//!    containing the `IP:Port` of this `Client`
+//! 3. The `Server` will respond with the `Message<ControlMsg::Directory>`
+//!    message containing the `IP:Port` of all other currently connected
+//!    `Client`s
+//! 4. The newly created `Client` connects to all other existing `Client`s.
+//!    When each connection is made:
+//!   - A `Message<ControlMsg::Introduction>` is sent to the other `Client`.
 //!   - They are added to the `Directory` of this `Client`.
-//!   - An `mpsc` channel is created that is used to send messages to whatever is
-//!     using the network layer and thus needs to process and respond to messages.
-//!     In `LiquidML`, this is the `KVStore`.
+//!   - An `mpsc` channel is created that is used to send messages to whatever
+//!     is using the network layer and thus needs to process and respond to
+//!     messages. In `LiquidML`, this is the `KVStore`.
 //!   - A green thread is spawned to receive future messages from the other
 //!     `Client`. When the messages are received they are sent over the `mpsc`
 //!     channel.
@@ -204,14 +238,15 @@
 //! 1. Accept an incoming TCP connection from a new `Client`
 //! 2. Read a `Message<ControlMsg::Introduction>` message from the new `Client`
 //!    containing the `IP:Port` of the new `Client`
-//! 3. Reply to the new `Client` with a `Message<ControlMsg::Directory>` message
+//! 3. Reply to the new `Client` with a `Message<ControlMsg::Directory>`
+//!    message
 //! 4. Add the `Connection` with the new `Client` to the `Directory` of this
 //!    `Server`
 //! 5. Listen for new connections, when one arrives go to #1
 //!
-//! Due to the servers fairly simple functionality, a default implementation of a
-//! server comes packaged with the `LiquidML` system and can be started by running
-//! the following command:
+//! Due to the servers fairly simple functionality, a default implementation of
+//! a server comes packaged with the `LiquidML` system and can be started by
+//! running the following command:
 //!
 //! `
 //! cargo run --bin server -- --address <Optional IP Address>
@@ -222,35 +257,27 @@
 //! ## KVStore
 //! There currently is a working implementation of a distributed KV store,
 //! with `get`, `wait_and_get`, `put`, and `send_blob`. We also implemented a
-//! method for processing messages (`process_messages`). See their documentation
-//! for further details. The `KVStore` implementation is in a close to
-//! completed state.
+//! method for processing messages (`process_messages`). See their
+//! documentation for further details.
 //!
 //! ## DataFrame
 //! The `DataFrame` and supporting classes loosely implement the management
 //! provided API with better defined error handling using custom `LiquidError`
-//! enumerations. A few discrepancies with certain data types were introduced due
-//! to the use of Rust. A `from_sor` function was implemented that uses our `sorer`
-//! crate to ingest raw data from a SoR file to create a `DataFrame`.
+//! enumerations. A few discrepancies with certain data types were introduced
+//! due to the use of Rust. A `from_sor` function was implemented that uses our
+//! `sorer` crate to ingest raw data from a SoR file to create a `DataFrame`.
 //!
 //! ## Application
-//! The `Application` struct is used to store the state of the node currently. It
-//! provides a clean simple constructor to start up the client and setup an empty
-//! KVStore. We currently also provide a run function that takes an async function //! and
-//! runs it on the KVStore (until the system is terminated).
-//!
-//! We are currently setting up functionality to directly ingest a SoR across the
-//! network (currently it is assumed the entire SoR file is available on every
-//! node) and  call `pmap` on it as if the whole `DataFrame` was locally available.
-//! Our goal is being able to provide an API where the user does not need to concern
-//! themselves with the distributed nature of the dataset at all. This part of the
-//! program is currently poorly tested and incomplete however the direct KV access
-//! allows building projects such as the Milestone 1 demo project extremely simple.
+//! The `Application` struct is used to store the state of the node currently.
+//! It provides a clean simple constructor to start up the client and setup an
+//! empty KVStore. We currently also provide a run function that takes an async
+//! function and runs it on the KVStore until the `Server` sends a `Kill`
+//! message to all nodes.
 //!
 //!
 //! # Use Cases
-//! Please check the `src/liquid_ml/examples/` directory for more fully featured
-//! examples.
+//! Please check the `src/liquid_ml/examples/` directory for more fully
+//! featured examples.
 //!
 //!
 //! Creating a `DataFrame` from a SoR file:
@@ -262,9 +289,9 @@
 //! assert_eq!(df.n_rows(), 2);
 //! ```
 //!
-//! Using the Application Level API after defining your own `Rower` implementation.
-//! This form of programming, where the user is unaware of the distributed nature
-//! of the system, is what we want to achieve in our API.
+//! Using the Application Level API after defining your own `Rower`
+//! implementation.  This form of programming, where the user is unaware of
+//! the distributed nature of the system, is what we want to achieve in our API.
 //!
 //! ```rust,no_run
 //! use liquid_ml::dataframe::{Data, Rower, Row};
@@ -349,31 +376,73 @@
 //!
 //! # Status
 //! We are done with the entire application except maybe a few minor tweaks
-//! here and there, a bit more documentation and examples in the data frame
-//! and application level modules, more testing, and random forest.
+//! here and there, adding a bit more documentation and examples in the data
+//! frame and application level modules, more testing, and random forest.
+//!
+//! We finished our `DistributedDataFrame` implementation and an implementation
+//! of a distributed filter since we thought it was cool.
 //!
 //! We believe our API to be complete and that it won't need to change any
 //! more for the purposes of this class project.
 //!
+//! ## Milestone 5 (Linus)
+//! The code can be found in `src/liquid_ml/examples/seven_degrees.rs`
+//!
+//! This program runs the Linus program for 4 degrees and can be run as follows:
+//! 1. Start the `Server` with this command: `cargo run --bin server`
+//! 2. Start 3 clients, each with a different `IP:Port`, with the following
+//!    command:
+//!
+//! `
+//! cargo run --example seven_degrees -- -m <IP:Port> -c <full path to commits file>
+//! `
+//!
+//! Full description of the command line arguments available can be seen by
+//! running the following command:
+//!
+//! `
+//! cargo run --example seven_degrees -- --help
+//! `
+//!
+//! We found that even with using swap space, that the seven_degrees example
+//! had peak memory usage of `18GB` and took ~5 minutes with 4 degrees of
+//! Linus and using the full sized files.
+//!
+//! One computer was a desktop with only 8GB of RAM and an i5-4690k, the
+//! other was a (plugged in) laptop with 16GB of RAM and an i7.
+//!
+//! ## Milestone 4 (Word Count)
+//! The code can be found in `src/liquid_ml/examples/word_count.rs`
+//!
+//! This program runs the word count example and can be run as follows:
+//! 1. Start the `Server` with this command: `cargo run --bin server`
+//! 2. Start 3 clients, each with a different `IP:Port`, with the following
+//!    command:
+//!
+//! `
+//! cargo run --example word_count -- -m <IP:Port>
+//! `
 //!
 //! ## Milestone 3 (Demo client)
 //! We have implemented the example code from Milestone 1 since that is
 //! one of the goals of Milestone 3. This can be found at
 //! `src/liquid_ml/examples/demo_client.rs`.
+//!
 //! This program runs the demo program and can be run as follows:
 //! 1. Start the `Server` with this command: `cargo run --bin server`
-//! 2. Start 3 clients, each with a different `IP:Port`, with the following command:
+//! 2. Start 3 clients, each with a different `IP:Port`, with the following
+//!    command:
 //!
 //! `
 //! cargo run --example demo_client -- -m <IP:Port>
 //! `
 //!
-//! We also added most of the pieces for orderly shutdown, such as `Kill` messages
-//! and a way for the `Client` to listen for these `Kill` messages from the
-//! `Server`. Our `Application` currently `await`s a `Kill` messages before it
-//! exits. It is not fully complete, however, since we need to figure out how
-//! to 'cancel' some asynchronous tasks when `Kill` messages are received (not
-//! easy in Rust, but possible).
+//! We also added most of the pieces for orderly shutdown, such as `Kill`
+//! messages and a way for the `Client` to listen for these `Kill` messages
+//! from the `Server`. Our `Application` currently `await`s a `Kill` messages
+//! before it exits. It is not fully complete, however, since we need to figure
+//! out how to 'cancel' some asynchronous tasks when `Kill` messages are
+//! received (not easy in Rust, but possible).
 //!
 //! The third client will print `SUCCESS` at the end.
 //!

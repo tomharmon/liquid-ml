@@ -43,14 +43,14 @@ struct Opts {
         long = "projects",
         default_value = "/home/tom/code/7degrees/projects.ltgt"
     )]
-    projects: String,
+    _projects: String,
     /// The name of the users file
     #[clap(
         short = "u",
         long = "users",
         default_value = "/home/tom/code/7degrees/users.ltgt"
     )]
-    users: String,
+    _users: String,
 }
 
 /// Finds all the projects that these users have ever worked on

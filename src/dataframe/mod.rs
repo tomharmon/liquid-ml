@@ -17,14 +17,25 @@
 //!
 //! # [`DistributedDataFrame`](crate::dataframe::distributed_dataframe)
 //!
-//! A [`DistributedDataFrame`](crate::dataframe::distributed_dataframe)
-//! which upon creation will distribute its data across multiple nodes and
-//! provides distributed versions of map and filter operations. If you need
-//! these features of a `DistributedDataFrame`, it is highly recommended
-//! that you check out the `LiquidML` struct since that provides many
-//! convenient helper functions for working with `DistributedDataFrame`s.
-//! Using a `DistributedDataFrame` directly is only recommended if you
-//! really know what you are doing.
+//! A [`DistributedDataFrame`](crate::dataframe::distributed_dataframe) is
+//! an abstraction over a distributed system of nodes that run `KVStore`s which
+//! contain chunks of `LocalDataFrame`s. Therefore each `DistributedDataFrame`
+//! simply holds a pointer to a `KVStore` and a map of ranges of row indices
+//! to the `Key`s for the chunks of data with that range of row indices.
+//!
+//! Upon creation node 1 of a `DistributedDataFrame` will distribute data
+//! across multiple nodes from `SoR` files, iterators, and other conveient ways
+//! of adding data. Each chunk that node 1 distributes is as large as possible
+//! while distributing the data evenly between nodes since experimental testing
+//! found this was optimal for performance of `map` and `filter`.
+//! Methods for distributed versions of these `map` and `filter` operations
+//! are provided.
+//!
+//! **Note**: If you need these features of a `DistributedDataFrame`, it is
+//! highly recommended that you check out the `LiquidML` struct since that
+//! provides many convenient helper functions for working with
+//! `DistributedDataFrame`s.  Using a `DistributedDataFrame` directly is only
+//! recommended if you really know what you are doing.
 //!
 //! Data frames use these supplementary data structures and can be useful in
 //! understanding DataFrames:
