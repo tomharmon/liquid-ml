@@ -1,9 +1,8 @@
 use bincode::{deserialize, serialize};
-use bitvec::prelude::*;
 use bytecount;
 use clap::Clap;
 use futures::future::try_join_all;
-use liquid_ml::dataframe::{Data, Row, Rower};
+use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
 use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
@@ -21,8 +20,7 @@ struct Opts {
     #[clap(
         short = "s",
         long = "server_addr",
-        default_value = "127.0.0.1:9000":qa
-
+        default_value = "127.0.0.1:9000"
     )]
     server_address: String,
     /// The IP:Port at which this application must run
@@ -35,97 +33,77 @@ struct Opts {
     #[clap(
         short = "d",
         long = "data",
-        default_value = "/home/tom/code/7degrees/commits.ltgt"
+        default_value = "/home/tom/Downloads/spy_processed.sor"
     )]
     data: String,
+}
+
+/// Purged walk-forward cross-validation: used because of the drawbacks for
+/// applying k-fold cross-validation to time-series data. Further explanation
+/// found here:
+///
+/// https://medium.com/@samuel.monnier/cross-validation-tools-for-time-series-ffa1a5a09bf9
+///
+/// Splits a dataset into `k` equal blocks of contiguous samples, and a
+/// training set of `p` contiguous blocks. The returned splits are then:
+///
+/// 1. Train set: blocks 1 to p, validation set: block p+1
+/// 2. Train set: blocks 2 to p+1, validation set: block p+2
+/// 3. …
+///
+/// The returned vec is a list of (training set, validation set)
+fn walk_fwd_cross_val_split(
+    data: &LocalDataFrame,
+    n_splits: usize,
+    period: usize,
+) -> Vec<(LocalDataFrame, LocalDataFrame)> {
+    // calculate p = data.len() / n_splits
+    let p = data.n_rows();
+
+    let mut split_data = Vec::new();
+    let mut cur_row = 0;
+    for _ in 0..n_splits {
+        // for each split
+        let mut training_data = LocalDataFrame::new(data.get_schema());
+        let mut row = Row::new(data.get_schema());
+        for _ in 0..p {
+            data.fill_row(cur_row, &mut row).unwrap();
+            // collect rows 0..p and add to train set
+            training_data.add_row(&row).unwrap();
+            cur_row += 1;
+        }
+        // skip the training samples whose evaluation time is posterior to the
+        // prediction time of validation samples
+        cur_row += period;
+
+        // collect rows 0..p and add to validation set
+        let mut validation_data = LocalDataFrame::new(data.get_schema());
+        for _ in 0..p {
+            data.fill_row(cur_row, &mut row).unwrap();
+            // collect rows 0..p and add to validation set
+            validation_data.add_row(&row).unwrap();
+            cur_row += 1;
+        }
+
+        cur_row += period;
+        split_data.push((training_data, validation_data));
+    }
+
+    split_data
 }
 
 /// Finds all the projects that these users have ever worked on
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct RandomForest {
-    users: BitVec,
-    projects: BitVec,
-    new_projects: BitVec,
+    users: Vec<u8>,
 }
 
-impl RandomForest {
-    fn new(
-        num_projects: usize,
-        prev_users: BitVec,
-        prev_projects: BitVec,
-    ) -> Self {
-        let v = BitVec::repeat(false, num_projects);
-        ProjectRower {
-            users: prev_users,
-            projects: prev_projects,
-            new_projects: v,
-        }
-    }
-}
-
-impl Rower for ProjectRower {
+impl Rower for RandomForest {
     fn visit(&mut self, r: &Row) -> bool {
-        let pid = match r.get(0).unwrap() {
-            Data::Int(x) => *x as usize,
-            _ => panic!("Invalid DF"),
-        };
-        let uid = match r.get(1).unwrap() {
-            Data::Int(x) => *x as usize,
-            _ => panic!("Invalid DF"),
-        };
-        if *self.users.get(uid).unwrap() && !self.projects.get(pid).unwrap() {
-            self.new_projects.set(pid, true);
-        }
         true
     }
 
     fn join(mut self, other: Self) -> Self {
-        self.new_projects |= other.new_projects;
-        self
-    }
-}
-
-/// Finds all the users that have commits on these projects
-#[derive(Clone, Serialize, Deserialize, Debug)]
-struct UserRower {
-    users: BitVec,
-    projects: BitVec,
-    new_users: BitVec,
-}
-
-impl UserRower {
-    fn new(
-        num_users: usize,
-        prev_users: BitVec,
-        prev_projects: BitVec,
-    ) -> Self {
-        let v = BitVec::repeat(false, num_users);
-        UserRower {
-            users: prev_users,
-            projects: prev_projects,
-            new_users: v,
-        }
-    }
-}
-
-impl Rower for UserRower {
-    fn visit(&mut self, r: &Row) -> bool {
-        let pid = match r.get(0).unwrap() {
-            Data::Int(x) => *x as usize,
-            _ => panic!("Invalid DF"),
-        };
-        let uid = match r.get(1).unwrap() {
-            Data::Int(x) => *x as usize,
-            _ => panic!("Invalid DF"),
-        };
-        if *self.projects.get(pid).unwrap() && !self.users.get(uid).unwrap() {
-            self.new_users.set(uid, true);
-        }
-        true
-    }
-
-    fn join(mut self, other: Self) -> Self {
-        self.new_users |= other.new_users;
         self
     }
 }
@@ -152,74 +130,8 @@ async fn main() -> Result<(), LiquidError> {
     let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;
-    // NOTE: IS this table needed?
-    //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
-    app.df_from_sor("commits", &opts.commits).await?;
-    // NOTE: IS this table needed?
-    //app.df_from_sor("projects", "~/code/7degrees/projects.ltgt").await?;
+    app.df_from_sor("data", &opts.data).await?;
 
-    // assume the max of pid is <= num_lines
-    //let num_projects = count_new_lines(&opts.projects);
-    //let num_users = count_new_lines(&opts.users);
-
-    let num_projects = 125_500_000;
-    let num_users = 32_500_000;
-    let mut users = BitVec::repeat(false, num_users);
-    users.set(4967, true);
-    let mut projects = BitVec::repeat(false, num_projects);
-    for i in 0..4 {
-        println!("degree {}", i);
-        let mut pr = ProjectRower::new(num_projects, users, projects);
-        // Node 1 will get the rower back and send it to all the other nodes
-        // other nodes will wait for node 1 to send the final combined rower to
-        // them
-        pr = match app.map("commits", pr).await? {
-            None => {
-                let blob =
-                    { app.blob_receiver.lock().await.recv().await.unwrap() };
-                deserialize(&blob[..])?
-            }
-            Some(rower) => {
-                let serialized = serialize(&rower)?;
-                let mut futs = Vec::new();
-                for i in 2..(app.num_nodes + 1) {
-                    futs.push(app.kv.send_blob(i, serialized.clone()));
-                }
-                try_join_all(futs).await?;
-
-                rower
-            }
-        };
-        dbg!("finished projects rower");
-        users = pr.users;
-        projects = pr.new_projects;
-        let mut ur = UserRower::new(num_users, users, projects);
-        // Node 1 will get the rower back and send it to all the other nodes
-        // other nodes will wait for node 1 to send the final combined rower to
-        // them
-        ur = match app.map("commits", ur).await? {
-            None => {
-                let blob =
-                    { app.blob_receiver.lock().await.recv().await.unwrap() };
-                deserialize(&blob[..])?
-            }
-            Some(rower) => {
-                let serialized = serialize(&rower)?;
-                let mut futs = Vec::new();
-                // Could send concurrently does it matter?
-                for i in 2..(app.num_nodes + 1) {
-                    futs.push(app.kv.send_blob(i, serialized.clone()));
-                }
-                try_join_all(futs).await?;
-
-                rower
-            }
-        };
-        dbg!("finished users rower");
-        users = ur.new_users;
-        projects = ur.projects;
-        println!("num users found: {}", users.count_ones());
-    }
     app.kill_notifier.notified().await;
 
     Ok(())
