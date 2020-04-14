@@ -1,4 +1,4 @@
-use chrono::{Datelike, NaiveDateTime};
+use chrono::{Datelike, NaiveDateTime, Timelike};
 use clap::Clap;
 use csv::Reader;
 use serde::Deserialize;
@@ -21,7 +21,7 @@ struct Opts {
     #[clap(
         short = "o",
         long = "output_file",
-        default_value = "/home/tom/Downloads/spy_processed.csv"
+        default_value = "/home/tom/Downloads/spy_processed.sor"
     )]
     output_file: String,
 }
@@ -38,9 +38,12 @@ struct Row {
 
 #[derive(Debug, Deserialize)]
 struct ProcessedRow {
-    //year: usize, // scaling?
     /// The day of year
     day_of_year: i64,
+    /// The hour of the day
+    hour: i64,
+    /// The minute of the hour
+    minute: i64,
     /// The opening price of a candlestick, scaled ?
     open: f64,
     /// The highest price traded during a candlestick, scaled ?
@@ -90,6 +93,8 @@ fn process_row(
         NaiveDateTime::parse_from_str(&row.date, "%Y-%m-%d %H:%M:%S").unwrap();
     // not accounting for leap years
     let day_of_year = date_time.ordinal() as i64;
+    let hour = date_time.hour() as i64;
+    let minute = date_time.minute() as i64;
 
     let open = row.open;
     let high = row.high;
@@ -147,6 +152,8 @@ fn process_row(
 
     ProcessedRow {
         day_of_year,
+        hour,
+        minute,
         open,
         high,
         low,
@@ -239,8 +246,10 @@ fn main() {
         writer
             .write(
                 format!(
-                    "<{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}>\n",
+                    "<{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}>\n",
                     processed_row.day_of_year,
+                    processed_row.hour,
+                    processed_row.minute,
                     processed_row.open,
                     processed_row.high,
                     processed_row.low,
