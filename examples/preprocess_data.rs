@@ -39,26 +39,25 @@ struct Row {
 #[derive(Debug, Deserialize)]
 struct ProcessedRow {
     /// The day of year
-    day_of_year: i64,
+    day_of_year: f64,
     /// The hour of the day
-    hour: i64,
+    hour: f64,
     /// The minute of the hour
-    minute: i64,
-    /// The opening price of a candlestick, scaled ?
+    minute: f64,
+    /// The opening price of a candlestick
     open: f64,
-    /// The highest price traded during a candlestick, scaled ?
+    /// The highest price traded during a candlestick
     high: f64,
-    /// The lowest price traded during a candlestick, scaled ?
+    /// The lowest price traded during a candlestick
     low: f64,
-    /// The price of the last trade during a candlestick, scaled ?
+    /// The price of the last trade during a candlestick
     close: f64,
-    /// The amount of shares traded during a candlestick, scaled ?
-    volume: i64,
-    /// The change in price from open to close of this candlestick, scaled
-    /// from 0-1
+    /// The amount of shares traded during a candlestick
+    volume: f64,
+    /// The change in price from open to close of this candlestick
     delta: f64,
     /// The difference between this candlestick's high and the opening price
-    /// of this candlestick, scaled from 0-1
+    /// of this candlestick
     bull_wick: f64,
     /// The difference between this candlestick's low and the closing price
     /// of this candlestick, scaled from 0-1
@@ -92,16 +91,16 @@ fn process_row(
     let date_time =
         NaiveDateTime::parse_from_str(&row.date, "%Y-%m-%d %H:%M:%S").unwrap();
     // not accounting for leap years
-    let day_of_year = date_time.ordinal() as i64;
-    let hour = date_time.hour() as i64;
-    let minute = date_time.minute() as i64;
+    let day_of_year = date_time.ordinal() as f64;
+    let hour = date_time.hour() as f64;
+    let minute = date_time.minute() as f64;
 
     let open = row.open;
     let high = row.high;
     let low = row.low;
     let close = row.close;
 
-    let volume = row.volume;
+    let volume = row.volume as f64;
 
     let delta = row.close - row.open;
     let bull_wick = if row.close - row.open >= 0.0 {

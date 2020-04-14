@@ -2,7 +2,7 @@ use bincode::{deserialize, serialize};
 use bytecount;
 use clap::Clap;
 use futures::future::try_join_all;
-use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
+use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower, Column};
 use liquid_ml::error::LiquidError;
 use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use rand::{self, Rng};
 
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap
@@ -57,8 +58,7 @@ fn walk_fwd_cross_val_split(
     n_splits: usize,
     period: usize,
 ) -> Vec<(LocalDataFrame, LocalDataFrame)> {
-    // calculate p = data.len() / n_splits
-    let p = data.n_rows();
+    let p = data.n_rows() / n_splits;
 
     let mut split_data = Vec::new();
     let mut cur_row = 0;
@@ -91,6 +91,150 @@ fn walk_fwd_cross_val_split(
 
     split_data
 }
+
+// returns accuracy from 0-1
+fn accuracy(actual: Vec<bool>, predicted: Vec<bool>) -> f64 {
+    assert_eq!(actual.len(), predicted.len());
+    actual.iter().zip(predicted.iter()).fold(0, |acc, (actual, pred)| {
+        if actual == pred { acc + 1 } else { acc }
+    }) as f64 / actual.len() as f64
+}
+
+
+#[derive(Debug, Clone)]
+struct TestSplit {
+    left: LocalDataFrame,
+    right: LocalDataFrame,
+    value: f64,
+    index: usize,
+}
+
+impl Rower for TestSplit {
+    fn visit(&mut self, row: &Row) -> bool {
+        if row.get(self.index).unwrap().unwrap_float() < self.value {
+            self.left.add_row(row).unwrap();
+        } else {
+            self.right.add_row(row).unwrap();
+        }
+        true
+    }
+
+    fn join(mut self, other: Self) -> Self {
+        self.left = self.left.combine(other.left).unwrap();
+        self.right = self.right.combine(other.right).unwrap();
+        self
+    }
+}
+
+enum Split {
+    Terminal(bool),
+    SubTree(LocalDataFrame),
+}
+
+struct SplitInfo {
+    index: usize,
+    value: f64,
+    left: Split,
+    right: Split,
+}
+
+// this assumes the last column is a 
+fn gini_index(left_split: &LocalDataFrame, right_split: &LocalDataFrame) -> f64 {
+    let n_samples = left_split.n_rows() + right_split.n_rows();
+    let mut gini = 0.0;
+    let groups = vec![left_split, right_split];
+    
+    for group in groups {
+        if group.n_rows() == 0 { continue; }
+        let num_trues = match group.data.get(group.n_cols() - 1).unwrap() {
+            Column::Bool(c) => c.iter().fold(0, |acc, v| {
+                if v.unwrap() { acc + 1} else { acc }
+            }),
+            _ => panic!(),
+        };
+        let ratio = num_trues as f64 / group.n_rows() as f64;
+        let score = ratio.powi(2) + (1.0 - ratio).powi(2);
+        gini += (1.0 - score) * (group.n_rows() as f64 / n_samples as f64);
+
+    }
+    gini
+}
+
+
+fn get_split(data: LocalDataFrame, n_features: usize) -> SplitInfo {
+    let mut features = Vec::new();
+    let mut rng = rand::thread_rng();
+    while features.len() < n_features {
+        let i = rng.gen::<u32>();
+        if !features.contains(&i) {
+            features.push(i);
+        }
+    }
+
+    let mut split_info = SplitInfo {
+        index: 0,
+        value: 0.0,
+        left: Split::SubTree(LocalDataFrame::new(data.get_schema())),
+        right: Split::SubTree(LocalDataFrame::new(data.get_schema()))
+    };
+    let mut b_score = 1_000_000_000.0;
+    
+    let mut row = Row::new(data.get_schema());
+    for feature_idx in features {
+        for i in 0..data.n_rows() {
+            let b_value = data.get(feature_idx as usize, i).unwrap().unwrap_float();
+            let mut test_split = TestSplit {
+                index: feature_idx as usize,
+                value: b_value,
+                left: LocalDataFrame::new(data.get_schema()),
+                right: LocalDataFrame::new(data.get_schema())
+            };
+
+            test_split = data.pmap(test_split);
+            let gini = gini_index(&test_split.left, &test_split.right);
+            if gini < b_score {
+                split_info.index = feature_idx as usize;
+                split_info.value = b_value;
+                split_info.left = Split::SubTree(test_split.left);
+                split_info.right = Split::SubTree(test_split.right);
+                b_score = gini;
+            }
+        }
+    }
+
+    split_info
+}
+
+struct NumTrueRower {
+    num_trues: usize,
+}
+
+impl Rower for NumTrueRower {
+    fn visit(&mut self, row: &Row) -> bool {
+        if row.get(row.width() - 1).unwrap().unwrap_bool() {
+            self.num_trues += 1;
+        }
+        true
+    }
+
+    fn join(mut self, other: Self) -> Self {
+        self.num_trues += other.num_trues;
+        self
+    }
+}
+
+fn to_terminal(data: LocalDataFrame) -> bool {
+    let mut r = NumTrueRower { num_trues: 0 };
+    r = data.map(r);
+    r.num_trues > data.n_rows()
+}
+
+fn split(mut node: SplitInfo, max_depth: usize, min_size: usize, n_features: usize, depth: usize) {
+    if node.left.n_rows() == 0 || node.right.n_rows() == 0 {
+        node.left = 
+    }
+}
+
 
 /// Finds all the projects that these users have ever worked on
 #[derive(Clone, Serialize, Deserialize, Debug)]
