@@ -93,10 +93,10 @@ fn walk_fwd_cross_val_split(
 }
 
 // returns accuracy from 0-1
-fn accuracy(actual: Vec<bool>, predicted: Vec<bool>) -> f64 {
+fn accuracy(actual: Vec<Option<bool>>, predicted: Vec<Option<bool>>) -> f64 {
     assert_eq!(actual.len(), predicted.len());
     actual.iter().zip(predicted.iter()).fold(0, |acc, (actual, pred)| {
-        if actual == pred { acc + 1 } else { acc }
+        if &actual.unwrap() == &pred.unwrap() { acc + 1 } else { acc }
     }) as f64 / actual.len() as f64
 }
 
