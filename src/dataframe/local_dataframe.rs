@@ -24,6 +24,7 @@ impl LocalDataFrame {
             schema,
             data,
             n_threads,
+            cur_row_idx: 0,
         }
     }
 
@@ -49,6 +50,7 @@ impl LocalDataFrame {
             schema,
             data,
             n_threads: num_cpus::get(),
+            cur_row_idx: 0,
         }
     }
 
@@ -491,6 +493,21 @@ impl LocalDataFrame {
     }
 }
 
+impl Iterator for LocalDataFrame {
+    type Item = Row;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur_row_idx < self.n_rows() {
+            let mut row = Row::new(self.get_schema());
+            self.fill_row(self.cur_row_idx, &mut row).unwrap();
+            self.cur_row_idx += 1;
+            Some(row)
+        } else {
+            None
+        }
+    }
+}
+
 fn filter_helper<T: Rower>(
     df: &LocalDataFrame,
     r: &mut T,
@@ -557,6 +574,7 @@ impl From<Vec<Column>> for LocalDataFrame {
             schema,
             n_threads,
             data,
+            cur_row_idx: 0,
         }
     }
 }

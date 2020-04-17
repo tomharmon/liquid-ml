@@ -78,6 +78,8 @@ pub struct LocalDataFrame {
     pub data: Vec<Column>,
     /// Number of threads for this computer
     pub n_threads: usize,
+    /// Current row index for implementing the `Iterator` trait
+    cur_row_idx: usize,
 }
 
 /// Represents a distributed, immutable data frame which uses a local
@@ -176,7 +178,7 @@ pub struct Schema {
 
 /// Represents a single row in a `DataFrame`. Has a clone of the `DataFrame`s
 /// `Schema` and holds data as a `Vec<Data>`.
-#[derive(Serialize, Deserialize, PartialEq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug, DeepSizeOf)]
 pub struct Row {
     /// A clone of the `Schema` of the `DataFrame` this `Row` is from.
     pub(crate) schema: Schema, //Vec<DataType>,
