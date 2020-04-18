@@ -43,7 +43,8 @@ struct Opts {
 struct Split {
     value: f64,
     feature_idx: usize,
-    groups: Vec<LocalDataFrame>,
+    left: LocalDataFrame,
+    right: LocalDataFrame
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +52,8 @@ enum DecisionTree {
     Node {
         left: Box<DecisionTree>,
         right: Box<DecisionTree>,
+        feature_idx: usize,
+        value: f64
     },
     Leaf(bool),
 }
@@ -124,15 +127,8 @@ fn accuracy(actual: Vec<Option<bool>>, predicted: Vec<Option<bool>>) -> f64 {
         / actual.len() as f64
 }
 
-#[derive(Debug, Clone)]
-struct TestSplit {
-    left: LocalDataFrame,
-    right: LocalDataFrame,
-    value: f64,
-    feature_idx: usize,
-}
 
-impl Rower for TestSplit {
+impl Rower for Split {
     fn visit(&mut self, row: &Row) -> bool {
         if row.get(self.feature_idx).unwrap().unwrap_float() < self.value {
             self.left.add_row(row).unwrap();
@@ -149,6 +145,7 @@ impl Rower for TestSplit {
     }
 }
 
+/// WTF is this
 struct SplitInfo {
     index: usize,
     value: f64,
@@ -157,7 +154,7 @@ struct SplitInfo {
 }
 
 // this assumes the last column is a boolean label
-fn gini_index(groups: &[LocalDataFrame], classes: &[bool]) -> f64 {
+fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
     let n_samples = groups[0].n_rows() + groups[1].n_rows();
     let mut gini = 0.0;
 
@@ -185,6 +182,7 @@ fn gini_index(groups: &[LocalDataFrame], classes: &[bool]) -> f64 {
     gini
 }
 
+/// Finds the best split for a Local Dataframe for a single split
 fn get_split(data: LocalDataFrame) -> Split {
     /*let mut features = Vec::new();
     let mut rng = rand::thread_rng();
@@ -196,38 +194,28 @@ fn get_split(data: LocalDataFrame) -> Split {
     }*/
     let class_labels = vec![true, false];
 
-    let mut split = Split {
-        feature_idx: 0,
-        value: 0.0,
-        groups: Vec::new()
-    };
     let mut best_score = 1_000_000_000.0;
-    let mut best_value = 1_000_000_000.0;
-    let mut row = Row::new(data.get_schema());
+    let mut split = None;
     for feature_idx in 0..data.n_cols() - 1 {
         for i in 0..data.n_rows() {
-            let best_value =
+            let new_value =
                 data.get(feature_idx as usize, i).unwrap().unwrap_float();
-            let mut test_split = TestSplit {
+            let mut test_split = Split {
                 feature_idx: feature_idx as usize,
-                value: best_value,
+                value: new_value,
                 left: LocalDataFrame::new(data.get_schema()),
                 right: LocalDataFrame::new(data.get_schema()),
             };
 
             test_split = data.pmap(test_split);
-            let groups = vec![test_split.left, test_split.right];
-            let gini = gini_index(&groups, &class_labels);
+            let gini = gini_index(&[&test_split.left, &test_split.right], &class_labels);
             if gini < best_score {
-                split.feature_idx = feature_idx as usize;
-                split.value = best_value;
-                split.groups = groups;
+                split = Some(test_split); 
                 best_score = gini;
             }
         }
     }
-
-    split
+    split.unwrap()
 }
 
 struct NumTrueRower {
@@ -257,104 +245,84 @@ fn to_terminal(data: LocalDataFrame) -> bool {
 
 
 fn split(
-    mut node: Split,
+    to_split: Split,
     max_depth: usize,
     min_size: usize,
     depth: usize,
 ) -> DecisionTree {
 
-    let left = node.groups.get(0).unwrap();
-    let right = node.groups.get(1).unwrap();
+    let left = to_split.left;
+    let right = to_split.right;
 
     if left.n_rows() == 0 || right.n_rows() == 0 {
         return DecisionTree::Leaf(to_terminal(left.combine(right.clone()).unwrap()));
     }
-    if depth >= max_depth {
-        return DecisionTree::Node {
-            left: Box::new(DecisionTree::Leaf(to_terminal(left))),
-            right: Box::new(DecisionTree::Leaf(to_terminal(right))),
-        };
-    }
-    DecisionTree::Leaf(false)
-}
 
+    let new_left : DecisionTree = if left.n_rows() <= min_size || depth >= max_depth { 
+        DecisionTree::Leaf(to_terminal(left))
+    } else {
+        let split_left = get_split(left);
+        split(split_left, max_depth, min_size, depth + 1)
+    };
+    let new_right : DecisionTree = if right.n_rows() <= min_size || depth >= max_depth { 
+        DecisionTree::Leaf(to_terminal(right))
+    } else {
+        let split_right = get_split(right);
+        split(split_right, max_depth, min_size, depth + 1)
+    };
 
-/*fn split(
-    node: &mut DecisionTree,
-    max_depth: usize,
-    min_size: usize,
-    depth: usize,
-) {
-    match node {
-        DecisionTree::Node { left, right, split } => {
-            let l = split.l
-            match (left, right) {
-                (DecisionTree::Leaf(b1), DecisionTree::Leaf(b2) => DecisionTree::Leaf( b1 && b2 ),
-
-
-            }
-            // check for a no split
-            if split.groups[0].n_rows() == 0 || split.groups[1].n_rows() == 0 {
-                let combined =
-                    split.groups[0].combine(split.groups[1]).unwrap();
-                let leaf = DecisionTree::Leaf(to_terminal(combined));
-                left = &mut Box::new(Some(leaf.clone()));
-                right = &mut Box::new(Some(leaf));
-                return;
-            }
-            // check for max depth
-            if depth >= max_depth {
-                let left_leaf =
-                    DecisionTree::Leaf(to_terminal(split.groups[0]));
-                let right_leaf =
-                    DecisionTree::Leaf(to_terminal(split.groups[1]));
-                left = &mut Box::new(Some(left_leaf.clone()));
-                right = &mut Box::new(Some(right_leaf.clone()));
-                return;
-            }
-            // process the left child
-            if split.groups[0].n_rows() <= min_size {
-                let left_leaf =
-                    DecisionTree::Leaf(to_terminal(split.groups[0]));
-                left = &mut Box::new(Some(left_leaf.clone()));
-            } else {
-                todo!();
-            }
-        }
-        DecisionTree::Leaf => todo!(),
-        _ => panic!(),
+    DecisionTree::Node {
+        left: Box::new(new_left),
+        right: Box::new(new_right),
+        value: to_split.value,
+        feature_idx: to_split.feature_idx
     }
 }
-*/
-/// Finds all the projects that these users have ever worked on
-#[derive(Clone, Serialize, Deserialize, Debug)]
-struct RandomForest {
-    users: Vec<u8>,
+
+fn build_tree(data: LocalDataFrame, max_depth: usize, min_size: usize) -> DecisionTree {
+    let root = get_split(data);
+    split(root, max_depth, min_size, 1)
 }
 
-impl Rower for RandomForest {
-    fn visit(&mut self, r: &Row) -> bool {
-        true
-    }
+#[derive(Debug, Clone)]
+struct Predictor {
+    tree: DecisionTree,
+    results: Vec<bool>
+}
 
+impl Rower for Predictor {
+    fn visit(&mut self, row: &Row) -> bool {
+        let result = predict(&self.tree, row);   
+        self.results.push(result);
+        result
+    }
+    
     fn join(mut self, other: Self) -> Self {
+        self.results.extend(other.results.into_iter());
         self
     }
 }
 
-fn count_new_lines(file_name: &str) -> usize {
-    let mut buf_reader = BufReader::new(File::open(file_name).unwrap());
-    let mut new_lines = 0;
+fn predict(tree: &DecisionTree, row: &Row) -> bool {
+   match tree {
+       DecisionTree::Node {left, right, feature_idx, value} => {
+           if row.get(*feature_idx).unwrap().unwrap_float() < *value {
+                predict(left, row)
+           } else {
+                predict(right, row)
+           }
+       },
+       DecisionTree::Leaf(v) => *v
+   }
+}
 
-    loop {
-        let bytes_read = buf_reader.fill_buf().unwrap();
-        let len = bytes_read.len();
-        if len == 0 {
-            return new_lines;
-        };
-        new_lines += bytecount::count(bytes_read, b'\n');
-        buf_reader.consume(len);
-    }
+fn decision_tree(train: LocalDataFrame, test: LocalDataFrame, max_depth: usize, min_size: usize) -> Vec<bool> {
+    let tree = build_tree(train, max_depth, min_size);
+    let predictor = Predictor {
+        tree,
+        results: Vec::new()
+    };
+    test.pmap(predictor).results
 }
 
 #[tokio::main]
