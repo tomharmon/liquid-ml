@@ -242,10 +242,11 @@ fn main() {
     // 4. Save the processed results in a `SoR` file
     let mut writer = BufWriter::new(File::create(&opts.output_file).unwrap());
     for processed_row in results {
+        let label = if processed_row.label { 1 } else { 0 };
         writer
             .write(
                 format!(
-                    "<{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}><{}>\n",
+                    "<{}.0><{}.0><{}.0><{}><{}><{}><{}><{}.0><{}><{}><{}><{}><{}><{}>\n",
                     processed_row.day_of_year,
                     processed_row.hour,
                     processed_row.minute,
@@ -259,7 +260,7 @@ fn main() {
                     processed_row.bear_wick,
                     processed_row.rsi,
                     processed_row.sma,
-                    processed_row.label
+                    label
                 )
                 .as_bytes(),
             )

@@ -2,6 +2,7 @@ use bincode::{deserialize, serialize};
 use clap::Clap;
 use liquid_ml::dataframe::{Column, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
+use liquid_ml::kv::Key;
 use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
 use rand;
@@ -279,15 +280,27 @@ async fn main() -> Result<(), LiquidError> {
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;
     app.df_from_sor("data", &opts.data).await?;
+    println!("done distributing data");
 
     let ddf = app.data_frames.get("data").unwrap();
-    // TODO: check this
-    let (_, my_local_key) = ddf
+    // TODO: fix this
+    let keys: Vec<_> = ddf
         .df_chunk_map
         .iter()
-        .find(|(_, key)| key.home == app.node_id)
-        .unwrap();
-    let ldf = app.kv.wait_and_get(my_local_key).await?;
+        .filter(|(_, key)| key.home == app.node_id)
+        .collect();
+    let mut my_local_key = Key::new("fake", 0);
+    let mut largest = 0;
+    for (range, key) in keys {
+        if range.end - range.start > largest {
+            largest = range.end - range.start;
+            my_local_key = key.clone();
+        }
+    }
+
+    dbg!(&my_local_key);
+    let ldf = app.kv.wait_and_get(&my_local_key).await?;
+    println!("got ldf");
     let tree = build_tree(ldf, 5, 10);
     println!("built local tree");
     let trees = if app.node_id == 1 {
@@ -298,14 +311,17 @@ async fn main() -> Result<(), LiquidError> {
             trees.push((tree, 0, 0));
         }
         let ser_trees = serialize(&trees)?;
-        for i in 2..app.num_nodes {
+        for i in 2..app.num_nodes + 1 {
             app.kv.send_blob(i, ser_trees.clone()).await?;
         }
         trees
     } else {
         let t = serialize(&tree)?;
+        println!("serialized our tree");
         app.kv.send_blob(1, t).await?;
+        println!("sent our tree");
         let blob = { app.blob_receiver.lock().await.recv().await.unwrap() };
+        println!("received final");
         deserialize(&blob[..])?
     };
     println!("have all the trees, starting evaluator map");
