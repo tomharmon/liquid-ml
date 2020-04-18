@@ -1,5 +1,3 @@
-use bincode::{deserialize, serialize};
-use bytecount;
 use clap::Clap;
 use futures::future::try_join_all;
 use liquid_ml::dataframe::{Column, Data, LocalDataFrame, Row, Rower};
@@ -9,8 +7,6 @@ use log::Level;
 use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
 use simple_logger;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap
@@ -44,16 +40,16 @@ struct Split {
     value: f64,
     feature_idx: usize,
     left: LocalDataFrame,
-    right: LocalDataFrame
+    right: LocalDataFrame,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 enum DecisionTree {
     Node {
         left: Box<DecisionTree>,
         right: Box<DecisionTree>,
         feature_idx: usize,
-        value: f64
+        value: f64,
     },
     Leaf(bool),
 }
@@ -112,13 +108,13 @@ fn walk_fwd_cross_val_split(
 }
 
 // returns accuracy from 0-1
-fn accuracy(actual: Vec<Option<bool>>, predicted: Vec<Option<bool>>) -> f64 {
+fn accuracy(actual: Vec<Option<bool>>, predicted: Vec<bool>) -> f64 {
     assert_eq!(actual.len(), predicted.len());
     actual
         .iter()
         .zip(predicted.iter())
         .fold(0, |acc, (actual, pred)| {
-            if &actual.unwrap() == &pred.unwrap() {
+            if &actual.unwrap() == pred {
                 acc + 1
             } else {
                 acc
@@ -126,7 +122,6 @@ fn accuracy(actual: Vec<Option<bool>>, predicted: Vec<Option<bool>>) -> f64 {
         }) as f64
         / actual.len() as f64
 }
-
 
 impl Rower for Split {
     fn visit(&mut self, row: &Row) -> bool {
@@ -143,14 +138,6 @@ impl Rower for Split {
         self.right = self.right.combine(other.right).unwrap();
         self
     }
-}
-
-/// WTF is this
-struct SplitInfo {
-    index: usize,
-    value: f64,
-    left: Split,
-    right: Split,
 }
 
 // this assumes the last column is a boolean label
@@ -173,7 +160,7 @@ fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
                     }
                 }),
                 _ => panic!(),
-            };
+            } / group.n_rows() as f64;
             score += p * p;
         }
         gini += (1.0 - score) * (group.n_rows() as f64 / n_samples as f64);
@@ -208,9 +195,12 @@ fn get_split(data: LocalDataFrame) -> Split {
             };
 
             test_split = data.pmap(test_split);
-            let gini = gini_index(&[&test_split.left, &test_split.right], &class_labels);
+            let gini = gini_index(
+                &[&test_split.left, &test_split.right],
+                &class_labels,
+            );
             if gini < best_score {
-                split = Some(test_split); 
+                split = Some(test_split);
                 best_score = gini;
             }
         }
@@ -243,43 +233,50 @@ fn to_terminal(data: LocalDataFrame) -> bool {
     r.num_trues > (data.n_rows() / 2)
 }
 
-
 fn split(
     to_split: Split,
     max_depth: usize,
     min_size: usize,
     depth: usize,
 ) -> DecisionTree {
-
     let left = to_split.left;
     let right = to_split.right;
+    println!("{}, {}", left.n_rows(), right.n_rows());
 
     if left.n_rows() == 0 || right.n_rows() == 0 {
-        return DecisionTree::Leaf(to_terminal(left.combine(right.clone()).unwrap()));
+        return DecisionTree::Leaf(to_terminal(
+            left.combine(right.clone()).unwrap(),
+        ));
     }
 
-    let new_left : DecisionTree = if left.n_rows() <= min_size || depth >= max_depth { 
-        DecisionTree::Leaf(to_terminal(left))
-    } else {
-        let split_left = get_split(left);
-        split(split_left, max_depth, min_size, depth + 1)
-    };
-    let new_right : DecisionTree = if right.n_rows() <= min_size || depth >= max_depth { 
-        DecisionTree::Leaf(to_terminal(right))
-    } else {
-        let split_right = get_split(right);
-        split(split_right, max_depth, min_size, depth + 1)
-    };
+    let new_left: DecisionTree =
+        if left.n_rows() <= min_size || depth >= max_depth {
+            DecisionTree::Leaf(to_terminal(left))
+        } else {
+            let split_left = get_split(left);
+            split(split_left, max_depth, min_size, depth + 1)
+        };
+    let new_right: DecisionTree =
+        if right.n_rows() <= min_size || depth >= max_depth {
+            DecisionTree::Leaf(to_terminal(right))
+        } else {
+            let split_right = get_split(right);
+            split(split_right, max_depth, min_size, depth + 1)
+        };
 
     DecisionTree::Node {
         left: Box::new(new_left),
         right: Box::new(new_right),
         value: to_split.value,
-        feature_idx: to_split.feature_idx
+        feature_idx: to_split.feature_idx,
     }
 }
 
-fn build_tree(data: LocalDataFrame, max_depth: usize, min_size: usize) -> DecisionTree {
+fn build_tree(
+    data: LocalDataFrame,
+    max_depth: usize,
+    min_size: usize,
+) -> DecisionTree {
     let root = get_split(data);
     split(root, max_depth, min_size, 1)
 }
@@ -287,16 +284,16 @@ fn build_tree(data: LocalDataFrame, max_depth: usize, min_size: usize) -> Decisi
 #[derive(Debug, Clone)]
 struct Predictor {
     tree: DecisionTree,
-    results: Vec<bool>
+    results: Vec<bool>,
 }
 
 impl Rower for Predictor {
     fn visit(&mut self, row: &Row) -> bool {
-        let result = predict(&self.tree, row);   
+        let result = predict(&self.tree, row);
         self.results.push(result);
         result
     }
-    
+
     fn join(mut self, other: Self) -> Self {
         self.results.extend(other.results.into_iter());
         self
@@ -304,37 +301,103 @@ impl Rower for Predictor {
 }
 
 fn predict(tree: &DecisionTree, row: &Row) -> bool {
-   match tree {
-       DecisionTree::Node {left, right, feature_idx, value} => {
-           if row.get(*feature_idx).unwrap().unwrap_float() < *value {
+    match tree {
+        DecisionTree::Node {
+            left,
+            right,
+            feature_idx,
+            value,
+        } => {
+            if row.get(*feature_idx).unwrap().unwrap_float() < *value {
                 predict(left, row)
-           } else {
+            } else {
                 predict(right, row)
-           }
-       },
-       DecisionTree::Leaf(v) => *v
-   }
+            }
+        }
+        DecisionTree::Leaf(v) => *v,
+    }
 }
 
-fn decision_tree(train: LocalDataFrame, test: LocalDataFrame, max_depth: usize, min_size: usize) -> Vec<bool> {
+fn decision_tree(
+    train: LocalDataFrame,
+    test: LocalDataFrame,
+    max_depth: usize,
+    min_size: usize,
+) -> Vec<bool> {
     let tree = build_tree(train, max_depth, min_size);
     let predictor = Predictor {
         tree,
-        results: Vec::new()
+        results: Vec::new(),
     };
     test.pmap(predictor).results
 }
 
-#[tokio::main]
-async fn main() -> Result<(), LiquidError> {
+fn cross_val_split(
+    data: LocalDataFrame,
+    n_folds: usize,
+) -> Vec<LocalDataFrame> {
+    let mut folds = Vec::new();
+    let mut rng = rand::thread_rng();
+    let fold_size = data.n_rows() / n_folds;
+    let mut row = Row::new(data.get_schema());
+    let r = rand::seq::index::sample(&mut rng, data.n_rows(), data.n_rows());
+    let mut r_iter = r.iter();
+    for _ in 0..n_folds {
+        let mut f = LocalDataFrame::new(data.get_schema());
+        while f.n_rows() < fold_size {
+            let i = r_iter.next().unwrap();
+            data.fill_row(i, &mut row).unwrap();
+            f.add_row(&row).unwrap();
+        }
+        folds.push(f);
+    }
+    folds
+}
+
+fn evaluation(
+    data: LocalDataFrame,
+    n_folds: usize,
+    max_depth: usize,
+    min_size: usize,
+) -> Vec<f64> {
+    let folds = cross_val_split(data, n_folds);
+    let mut scores = Vec::new();
+    for i in 0..folds.len() {
+        let testing = folds.get(i).unwrap().clone();
+        let mut training = LocalDataFrame::new(testing.get_schema());
+        for j in 0..folds.len() {
+            if i != j {
+                training =
+                    training.combine(folds.get(j).unwrap().clone()).unwrap();
+            }
+        }
+        let actual = match &testing.data.get(testing.n_cols() - 1).unwrap() {
+            Column::Bool(b) => b.clone(),
+            _ => panic!("nope"),
+        };
+        let predictions = decision_tree(training, testing, max_depth, min_size);
+        scores.push(accuracy(actual, predictions));
+    }
+    scores
+}
+
+//#[tokio::main]
+//async
+
+fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Error).unwrap();
-    let mut app =
+    /*let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;
     app.df_from_sor("data", &opts.data).await?;
 
-    app.kill_notifier.notified().await;
-
+    app.kill_notifier.notified().await;*/
+    let data = LocalDataFrame::from_sor(&opts.data, 0, 10000000000);
+    //println!("{:?}", data);
+    //let tree = build_tree(data, 5, 10);
+    //println!("{:?}", tree);
+    let scores = evaluation(data, 5, 5, 10);
+    println!("{:?}", scores);
     Ok(())
 }
