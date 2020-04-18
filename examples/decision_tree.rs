@@ -4,7 +4,7 @@ use liquid_ml::error::LiquidError;
 use rand;
 use serde::{Deserialize, Serialize};
 
-/// This example builds and evaluates a decision tree 
+/// This example builds and evaluates a decision tree
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {

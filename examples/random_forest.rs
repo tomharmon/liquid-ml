@@ -1,3 +1,4 @@
+use bincode::{deserialize, serialize};
 use clap::Clap;
 use futures::future::try_join_all;
 use liquid_ml::dataframe::{Column, Data, LocalDataFrame, Row, Rower};
@@ -7,7 +8,7 @@ use log::Level;
 use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
 use simple_logger;
-
+use std::sync::Arc;
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap
 #[derive(Clap)]
@@ -30,7 +31,7 @@ struct Opts {
     #[clap(
         short = "d",
         long = "data",
-        default_value = "/home/tom/Downloads/spy_processed.sor"
+        default_value = "examples/banknote.sor"
     )]
     data: String,
 }
@@ -54,75 +55,7 @@ enum DecisionTree {
     Leaf(bool),
 }
 
-/// Purged walk-forward cross-validation: used because of the drawbacks for
-/// applying k-fold cross-validation to time-series data. Further explanation
-/// found here:
-///
-/// https://medium.com/@samuel.monnier/cross-validation-tools-for-time-series-ffa1a5a09bf9
-///
-/// Splits a dataset into `k` equal blocks of contiguous samples, and a
-/// training set of `p` contiguous blocks. The returned splits are then:
-///
-/// 1. Train set: blocks 1 to p, validation set: block p+1
-/// 2. Train set: blocks 2 to p+1, validation set: block p+2
-/// 3. …
-///
-/// The returned vec is a list of (training set, validation set)
-fn walk_fwd_cross_val_split(
-    data: &LocalDataFrame,
-    n_splits: usize,
-    period: usize,
-) -> Vec<(LocalDataFrame, LocalDataFrame)> {
-    let p = data.n_rows() / n_splits;
-
-    let mut split_data = Vec::new();
-    let mut cur_row = 0;
-    for _ in 0..n_splits {
-        // for each split
-        let mut training_data = LocalDataFrame::new(data.get_schema());
-        let mut row = Row::new(data.get_schema());
-        for _ in 0..p {
-            data.fill_row(cur_row, &mut row).unwrap();
-            // collect rows 0..p and add to train set
-            training_data.add_row(&row).unwrap();
-            cur_row += 1;
-        }
-        // skip the training samples whose evaluation time is posterior to the
-        // prediction time of validation samples
-        cur_row += period;
-
-        // collect rows 0..p and add to validation set
-        let mut validation_data = LocalDataFrame::new(data.get_schema());
-        for _ in 0..p {
-            data.fill_row(cur_row, &mut row).unwrap();
-            // collect rows 0..p and add to validation set
-            validation_data.add_row(&row).unwrap();
-            cur_row += 1;
-        }
-
-        cur_row += period;
-        split_data.push((training_data, validation_data));
-    }
-
-    split_data
-}
-
-// returns accuracy from 0-1
-fn accuracy(actual: Vec<Option<bool>>, predicted: Vec<bool>) -> f64 {
-    assert_eq!(actual.len(), predicted.len());
-    actual
-        .iter()
-        .zip(predicted.iter())
-        .fold(0, |acc, (actual, pred)| {
-            if &actual.unwrap() == pred {
-                acc + 1
-            } else {
-                acc
-            }
-        }) as f64
-        / actual.len() as f64
-}
-
+/// Split a dataframe based on a specific feature and its value
 impl Rower for Split {
     fn visit(&mut self, row: &Row) -> bool {
         if row.get(self.feature_idx).unwrap().unwrap_float() < self.value {
@@ -140,7 +73,8 @@ impl Rower for Split {
     }
 }
 
-// this assumes the last column is a boolean label
+/// Compute the Gini Index
+/// NOTE: this assumes the last column is a boolean label
 fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
     let n_samples = groups[0].n_rows() + groups[1].n_rows();
     let mut gini = 0.0;
@@ -170,20 +104,18 @@ fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
 }
 
 /// Finds the best split for a Local Dataframe for a single split
-fn get_split(data: LocalDataFrame) -> Split {
-    /*let mut features = Vec::new();
+fn get_split(data: &LocalDataFrame) -> Split {
     let mut rng = rand::thread_rng();
-    while features.len() < n_features {
-        let i = rng.gen::<u32>();
-        if !features.contains(&i) {
-            features.push(i);
-        }
-    }*/
+    let r = rand::seq::index::sample(
+        &mut rng,
+        data.n_cols() - 1,
+        (data.n_cols() as f64 - 1.0).sqrt() as usize,
+    );
     let class_labels = vec![true, false];
 
     let mut best_score = 1_000_000_000.0;
     let mut split = None;
-    for feature_idx in 0..data.n_cols() - 1 {
+    for feature_idx in r.iter() {
         for i in 0..data.n_rows() {
             let new_value =
                 data.get(feature_idx as usize, i).unwrap().unwrap_float();
@@ -253,14 +185,14 @@ fn split(
         if left.n_rows() <= min_size || depth >= max_depth {
             DecisionTree::Leaf(to_terminal(left))
         } else {
-            let split_left = get_split(left);
+            let split_left = get_split(&left);
             split(split_left, max_depth, min_size, depth + 1)
         };
     let new_right: DecisionTree =
         if right.n_rows() <= min_size || depth >= max_depth {
             DecisionTree::Leaf(to_terminal(right))
         } else {
-            let split_right = get_split(right);
+            let split_right = get_split(&right);
             split(split_right, max_depth, min_size, depth + 1)
         };
 
@@ -273,29 +205,51 @@ fn split(
 }
 
 fn build_tree(
-    data: LocalDataFrame,
+    data: Arc<LocalDataFrame>,
     max_depth: usize,
     min_size: usize,
 ) -> DecisionTree {
-    let root = get_split(data);
+    let root = get_split(&data);
     split(root, max_depth, min_size, 1)
 }
 
-#[derive(Debug, Clone)]
-struct Predictor {
-    tree: DecisionTree,
-    results: Vec<bool>,
+/// Represents a Rower that evaluates the accuracy of the Forest
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Evaluator {
+    /// A vec of the (tree, number of correct predictions, total number of tests)
+    trees: Vec<(DecisionTree, usize, usize)>,
+    total_accuracy: (usize, usize),
 }
 
-impl Rower for Predictor {
+impl Rower for Evaluator {
     fn visit(&mut self, row: &Row) -> bool {
-        let result = predict(&self.tree, row);
-        self.results.push(result);
-        result
+        let mut num_trues = 0;
+        let true_value = row.get(row.width() - 1).unwrap().unwrap_bool();
+        for (tree, num_correct, total) in self.trees.iter_mut() {
+            let prediction = predict(&tree, row);
+            if prediction == true_value {
+                *num_correct += 1;
+                num_trues += 1;
+            }
+            *total += 1;
+        }
+        let r_forest_pred = num_trues > self.trees.len();
+        if r_forest_pred == true_value {
+            self.total_accuracy.0 += 1;
+        }
+        self.total_accuracy.1 += 1;
+        num_trues > self.trees.len()
     }
 
     fn join(mut self, other: Self) -> Self {
-        self.results.extend(other.results.into_iter());
+        for ((_, c1, t1), (_, c2, t2)) in
+            self.trees.iter_mut().zip(other.trees.iter())
+        {
+            *c1 += c2;
+            *t1 += t2;
+        }
+        self.total_accuracy.0 += other.total_accuracy.0;
+        self.total_accuracy.1 += other.total_accuracy.1;
         self
     }
 }
@@ -318,86 +272,60 @@ fn predict(tree: &DecisionTree, row: &Row) -> bool {
     }
 }
 
-fn decision_tree(
-    train: LocalDataFrame,
-    test: LocalDataFrame,
-    max_depth: usize,
-    min_size: usize,
-) -> Vec<bool> {
-    let tree = build_tree(train, max_depth, min_size);
-    let predictor = Predictor {
-        tree,
-        results: Vec::new(),
-    };
-    test.pmap(predictor).results
-}
-
-fn cross_val_split(
-    data: LocalDataFrame,
-    n_folds: usize,
-) -> Vec<LocalDataFrame> {
-    let mut folds = Vec::new();
-    let mut rng = rand::thread_rng();
-    let fold_size = data.n_rows() / n_folds;
-    let mut row = Row::new(data.get_schema());
-    let r = rand::seq::index::sample(&mut rng, data.n_rows(), data.n_rows());
-    let mut r_iter = r.iter();
-    for _ in 0..n_folds {
-        let mut f = LocalDataFrame::new(data.get_schema());
-        while f.n_rows() < fold_size {
-            let i = r_iter.next().unwrap();
-            data.fill_row(i, &mut row).unwrap();
-            f.add_row(&row).unwrap();
-        }
-        folds.push(f);
-    }
-    folds
-}
-
-fn evaluation(
-    data: LocalDataFrame,
-    n_folds: usize,
-    max_depth: usize,
-    min_size: usize,
-) -> Vec<f64> {
-    let folds = cross_val_split(data, n_folds);
-    let mut scores = Vec::new();
-    for i in 0..folds.len() {
-        let testing = folds.get(i).unwrap().clone();
-        let mut training = LocalDataFrame::new(testing.get_schema());
-        for j in 0..folds.len() {
-            if i != j {
-                training =
-                    training.combine(folds.get(j).unwrap().clone()).unwrap();
-            }
-        }
-        let actual = match &testing.data.get(testing.n_cols() - 1).unwrap() {
-            Column::Bool(b) => b.clone(),
-            _ => panic!("nope"),
-        };
-        let predictions = decision_tree(training, testing, max_depth, min_size);
-        scores.push(accuracy(actual, predictions));
-    }
-    scores
-}
-
-//#[tokio::main]
-//async
-
-fn main() -> Result<(), LiquidError> {
+#[tokio::main]
+async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
     simple_logger::init_with_level(Level::Error).unwrap();
-    /*let mut app =
+    let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;
     app.df_from_sor("data", &opts.data).await?;
 
-    app.kill_notifier.notified().await;*/
-    let data = LocalDataFrame::from_sor(&opts.data, 0, 10000000000);
-    //println!("{:?}", data);
-    //let tree = build_tree(data, 5, 10);
-    //println!("{:?}", tree);
-    let scores = evaluation(data, 5, 5, 10);
-    println!("{:?}", scores);
+    let ddf = app.data_frames.get("data").unwrap();
+    // TODO: check this
+    let (_, my_local_key) = ddf
+        .df_chunk_map
+        .iter()
+        .find(|(_, key)| key.home == app.node_id)
+        .unwrap();
+    let ldf = app.kv.wait_and_get(my_local_key).await?;
+    let tree = build_tree(ldf, 10, 1000);
+    let trees = if app.node_id == 1 {
+        let mut trees: Vec<(DecisionTree, usize, usize)> = Vec::new();
+        for _ in 0..app.num_nodes - 1 {
+            let blob = app.blob_receiver.lock().await.recv().await.unwrap();
+            let tree = deserialize(&blob[..])?;
+            trees.push((tree, 0, 0));
+        }
+        let ser_trees = serialize(&trees)?;
+        for i in 2..app.num_nodes {
+            app.kv.send_blob(i, ser_trees.clone()).await?;
+        }
+        trees
+    } else {
+        let t = serialize(&tree)?;
+        app.kv.send_blob(1, t).await?;
+        let blob = app.blob_receiver.lock().await.recv().await.unwrap();
+        deserialize(&blob[..])?
+    };
+
+    let eval = Evaluator {
+        trees,
+        total_accuracy: (0, 0),
+    };
+    let r = app.map("data", eval).await?;
+    match r {
+        None => println!("done"),
+        Some(e) => {
+            e.trees.iter().for_each(|(_, c, t)| {
+                println!("accuracy: {}", *c as f64 / *t as f64)
+            });
+            println!(
+                "RF accuracy: {}",
+                e.total_accuracy.0 as f64 / e.total_accuracy.1 as f64
+            );
+        }
+    }
+    app.kill_notifier.notified().await;
     Ok(())
 }
