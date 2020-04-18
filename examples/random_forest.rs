@@ -25,7 +25,7 @@ struct Opts {
     #[clap(short = "m", long = "my_addr", default_value = "127.0.0.2:9002")]
     my_address: String,
     /// The number of nodes for the distributed system
-    #[clap(short = "n", long = "num_nodes", default_value = "3")]
+    #[clap(short = "n", long = "num_nodes", default_value = "12")]
     num_nodes: usize,
     /// The name of the data file
     #[clap(
@@ -34,6 +34,12 @@ struct Opts {
         default_value = "examples/banknote.sor"
     )]
     data: String,
+    /// The max depth of the tree
+    #[clap(long = "max_depth", default_value = "10")]
+    max_depth: usize,
+    /// The min size of a node to split on
+    #[clap(long = "min_size", default_value = "25000")]
+    min_size: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +111,7 @@ fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
 
 /// Finds the best split for a Local Dataframe for a single split
 fn get_split(data: &LocalDataFrame) -> Split {
+    println!("getting a split");
     let mut rng = rand::thread_rng();
     let r = rand::seq::index::sample(
         &mut rng,
@@ -173,7 +180,7 @@ fn split(
 ) -> DecisionTree {
     let left = to_split.left;
     let right = to_split.right;
-    println!("{}, {}", left.n_rows(), right.n_rows());
+    println!("split with {}, {}", left.n_rows(), right.n_rows());
 
     if left.n_rows() == 0 || right.n_rows() == 0 {
         return DecisionTree::Leaf(to_terminal(
@@ -301,7 +308,7 @@ async fn main() -> Result<(), LiquidError> {
     dbg!(&my_local_key);
     let ldf = app.kv.wait_and_get(&my_local_key).await?;
     println!("got ldf");
-    let tree = build_tree(ldf, 5, 10);
+    let tree = build_tree(ldf, opts.max_depth, opts.min_size);
     println!("built local tree");
     let trees = if app.node_id == 1 {
         let mut trees: Vec<(DecisionTree, usize, usize)> = Vec::new();
