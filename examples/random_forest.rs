@@ -1,11 +1,10 @@
 use bincode::{deserialize, serialize};
 use clap::Clap;
-use futures::future::try_join_all;
-use liquid_ml::dataframe::{Column, Data, LocalDataFrame, Row, Rower};
+use liquid_ml::dataframe::{Column, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
 use liquid_ml::liquid_ml::LiquidML;
 use log::Level;
-use rand::{self, Rng};
+use rand;
 use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::sync::Arc;
@@ -289,11 +288,12 @@ async fn main() -> Result<(), LiquidError> {
         .find(|(_, key)| key.home == app.node_id)
         .unwrap();
     let ldf = app.kv.wait_and_get(my_local_key).await?;
-    let tree = build_tree(ldf, 10, 1000);
+    let tree = build_tree(ldf, 5, 10);
+    println!("built local tree");
     let trees = if app.node_id == 1 {
         let mut trees: Vec<(DecisionTree, usize, usize)> = Vec::new();
         for _ in 0..app.num_nodes - 1 {
-            let blob = app.blob_receiver.lock().await.recv().await.unwrap();
+            let blob = { app.blob_receiver.lock().await.recv().await.unwrap() };
             let tree = deserialize(&blob[..])?;
             trees.push((tree, 0, 0));
         }
@@ -305,9 +305,10 @@ async fn main() -> Result<(), LiquidError> {
     } else {
         let t = serialize(&tree)?;
         app.kv.send_blob(1, t).await?;
-        let blob = app.blob_receiver.lock().await.recv().await.unwrap();
+        let blob = { app.blob_receiver.lock().await.recv().await.unwrap() };
         deserialize(&blob[..])?
     };
+    println!("have all the trees, starting evaluator map");
 
     let eval = Evaluator {
         trees,
