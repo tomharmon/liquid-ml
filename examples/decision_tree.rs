@@ -1,10 +1,8 @@
 use clap::Clap;
 use liquid_ml::dataframe::{Column, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
-use log::Level;
 use rand;
 use serde::{Deserialize, Serialize};
-use simple_logger;
 
 /// This example builds and evaluates a decision tree 
 #[derive(Clap)]
@@ -166,7 +164,6 @@ fn split(
 ) -> DecisionTree {
     let left = to_split.left;
     let right = to_split.right;
-    println!("{}, {}", left.n_rows(), right.n_rows());
 
     if left.n_rows() == 0 || right.n_rows() == 0 {
         return DecisionTree::Leaf(to_terminal(
@@ -302,26 +299,14 @@ fn evaluation(
         };
         let predictions = decision_tree(training, testing, max_depth, min_size);
         scores.push(accuracy(actual, predictions));
+        println!("fold {} done evaluating", i);
     }
     scores
 }
 
-//#[tokio::main]
-//async
-
 fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Error).unwrap();
-    /*let mut app =
-        LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
-            .await?;
-    app.df_from_sor("data", &opts.data).await?;
-
-    app.kill_notifier.notified().await;*/
     let data = LocalDataFrame::from_sor(&opts.data, 0, 10000000000);
-    //println!("{:?}", data);
-    //let tree = build_tree(data, 5, 10);
-    //println!("{:?}", tree);
     let scores = evaluation(data, 5, 5, 10);
     println!("{:?}", scores);
     Ok(())
