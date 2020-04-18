@@ -49,9 +49,8 @@ struct Split {
 #[derive(Debug, Clone)]
 enum DecisionTree {
     Node {
-        left: Box<Option<DecisionTree>>,
-        right: Box<Option<DecisionTree>>,
-        split: Split,
+        left: Box<DecisionTree>,
+        right: Box<DecisionTree>,
     },
     Leaf(bool),
 }
@@ -186,7 +185,7 @@ fn gini_index(groups: &[LocalDataFrame], classes: &[bool]) -> f64 {
     gini
 }
 
-fn get_split(data: LocalDataFrame) -> (Split, Vec<LocalDataFrame>) {
+fn get_split(data: LocalDataFrame) -> Split {
     /*let mut features = Vec::new();
     let mut rng = rand::thread_rng();
     while features.len() < n_features {
@@ -200,10 +199,11 @@ fn get_split(data: LocalDataFrame) -> (Split, Vec<LocalDataFrame>) {
     let mut split = Split {
         feature_idx: 0,
         value: 0.0,
+        groups: Vec::new()
     };
     let mut best_score = 1_000_000_000.0;
+    let mut best_value = 1_000_000_000.0;
     let mut row = Row::new(data.get_schema());
-    let mut best_groups = Vec::new();
     for feature_idx in 0..data.n_cols() - 1 {
         for i in 0..data.n_rows() {
             let best_value =
@@ -221,13 +221,13 @@ fn get_split(data: LocalDataFrame) -> (Split, Vec<LocalDataFrame>) {
             if gini < best_score {
                 split.feature_idx = feature_idx as usize;
                 split.value = best_value;
-                best_groups = groups;
+                split.groups = groups;
                 best_score = gini;
             }
         }
     }
 
-    (split, best_groups)
+    split
 }
 
 struct NumTrueRower {
@@ -255,7 +255,31 @@ fn to_terminal(data: LocalDataFrame) -> bool {
     r.num_trues > (data.n_rows() / 2)
 }
 
+
 fn split(
+    mut node: Split,
+    max_depth: usize,
+    min_size: usize,
+    depth: usize,
+) -> DecisionTree {
+
+    let left = node.groups.get(0).unwrap();
+    let right = node.groups.get(1).unwrap();
+
+    if left.n_rows() == 0 || right.n_rows() == 0 {
+        return DecisionTree::Leaf(to_terminal(left.combine(right.clone()).unwrap()));
+    }
+    if depth >= max_depth {
+        return DecisionTree::Node {
+            left: Box::new(DecisionTree::Leaf(to_terminal(left))),
+            right: Box::new(DecisionTree::Leaf(to_terminal(right))),
+        };
+    }
+    DecisionTree::Leaf(false)
+}
+
+
+/*fn split(
     node: &mut DecisionTree,
     max_depth: usize,
     min_size: usize,
@@ -263,6 +287,12 @@ fn split(
 ) {
     match node {
         DecisionTree::Node { left, right, split } => {
+            let l = split.l
+            match (left, right) {
+                (DecisionTree::Leaf(b1), DecisionTree::Leaf(b2) => DecisionTree::Leaf( b1 && b2 ),
+
+
+            }
             // check for a no split
             if split.groups[0].n_rows() == 0 || split.groups[1].n_rows() == 0 {
                 let combined =
@@ -295,7 +325,7 @@ fn split(
         _ => panic!(),
     }
 }
-
+*/
 /// Finds all the projects that these users have ever worked on
 #[derive(Clone, Serialize, Deserialize, Debug)]
 struct RandomForest {
