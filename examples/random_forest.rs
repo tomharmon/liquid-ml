@@ -4,7 +4,7 @@ use liquid_ml::dataframe::{Column, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::Key;
 use liquid_ml::liquid_ml::LiquidML;
-use log::Level;
+use log::{info, debug, Level};
 use rand;
 use serde::{Deserialize, Serialize};
 use simple_logger;
@@ -148,7 +148,7 @@ fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
 /// time, where `m` is the number of features and `n` is the number of rows in
 /// `data`
 fn get_split(data: &LocalDataFrame) -> Split {
-    println!("getting a split");
+    info!("Getting a split");
     let mut rng = rand::thread_rng();
     let r = rand::seq::index::sample(
         &mut rng,
@@ -178,8 +178,10 @@ fn get_split(data: &LocalDataFrame) -> Split {
             if gini < best_score {
                 split = Some(test_split);
                 best_score = gini;
+                debug!("Found a better split with gini score {}", gini);
             }
         }
+        info!("Finished evaluating a feature");
     }
     split.unwrap()
 }
@@ -232,7 +234,7 @@ fn split(
 ) -> DecisionTree {
     let left = to_split.left;
     let right = to_split.right;
-    println!("split with {}, {}", left.n_rows(), right.n_rows());
+    info!("Building decision tree with split {}, {}", left.n_rows(), right.n_rows());
 
     if left.n_rows() == 0 || right.n_rows() == 0 {
         return DecisionTree::Leaf(to_terminal(
@@ -340,12 +342,11 @@ fn predict(tree: &DecisionTree, row: &Row) -> bool {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Error).unwrap();
+    simple_logger::init_with_level(Level::Debug).unwrap();
     let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;
     app.df_from_sor("data", &opts.data).await?;
-    println!("done distributing data");
 
     let ddf = app.data_frames.get("data").unwrap();
     // TODO: fix this
@@ -365,7 +366,6 @@ async fn main() -> Result<(), LiquidError> {
 
     dbg!(&my_local_key);
     let ldf = app.kv.wait_and_get(&my_local_key).await?;
-    println!("got ldf");
     let tree = build_tree(ldf, opts.max_depth, opts.min_size);
     println!("built local tree");
     let trees = if app.node_id == 1 {
