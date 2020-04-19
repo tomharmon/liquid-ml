@@ -493,21 +493,6 @@ impl LocalDataFrame {
     }
 }
 
-impl Iterator for LocalDataFrame {
-    type Item = Row;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur_row_idx < self.n_rows() {
-            let mut row = Row::new(self.get_schema());
-            self.fill_row(self.cur_row_idx, &mut row).unwrap();
-            self.cur_row_idx += 1;
-            Some(row)
-        } else {
-            None
-        }
-    }
-}
-
 fn filter_helper<T: Rower>(
     df: &LocalDataFrame,
     r: &mut T,

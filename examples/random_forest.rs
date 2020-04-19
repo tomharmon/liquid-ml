@@ -4,7 +4,7 @@ use liquid_ml::dataframe::{Column, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
 use liquid_ml::kv::Key;
 use liquid_ml::liquid_ml::LiquidML;
-use log::{info, debug, Level};
+use log::{debug, info, Level};
 use rand;
 use serde::{Deserialize, Serialize};
 use simple_logger;
@@ -188,6 +188,7 @@ fn get_split(data: &LocalDataFrame) -> Split {
 
 /// Counts the number of labels in the last column (labels) of the dataframe
 /// that match the `label` of this `NumLabelRower`
+#[derive(Debug, Clone)]
 struct NumLabelRower {
     /// Number of rows whose label matches our label
     num_matching_labels: usize,
@@ -234,7 +235,11 @@ fn split(
 ) -> DecisionTree {
     let left = to_split.left;
     let right = to_split.right;
-    info!("Building decision tree with split {}, {}", left.n_rows(), right.n_rows());
+    info!(
+        "Building decision tree with split {}, {}",
+        left.n_rows(),
+        right.n_rows()
+    );
 
     if left.n_rows() == 0 || right.n_rows() == 0 {
         return DecisionTree::Leaf(to_terminal(
