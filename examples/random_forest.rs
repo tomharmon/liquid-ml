@@ -10,8 +10,20 @@ use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::sync::Arc;
 
-/// This example builds and evaluates a random forest model for binary 
-/// classification
+/// This example builds and evaluates a random forest model for binary
+/// classification.
+///
+/// NOTE: this example currently creates a random forest by building a decision
+/// tree on each node by using the data on that node as training data, and
+/// testing the tree with all the data on all other nodes.
+///
+/// The accuracy of the Random Forest produced could be increased by changing
+/// this example to train a decision tree with the data on all nodes except
+/// the node where it's being trained, and then test the tree with the data on
+/// that node. This would have a lot higher network latency from moving the
+/// data around on all nodes but would greatly improve the accuracy of the
+/// model. We have not yet performed testing to compare these two approaches
+/// but it would be nice to do.
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
@@ -39,7 +51,7 @@ struct Opts {
     #[clap(long = "max_depth", default_value = "10")]
     max_depth: usize,
     /// The min size of a node to split on
-    #[clap(long = "min_size", default_value = "25000")]
+    #[clap(long = "min_size", default_value = "50000")]
     min_size: usize,
 }
 
@@ -111,6 +123,8 @@ fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
         }
         let mut score = 0.0;
         for class in classes {
+            // calulcate the proportion of labels in this `group` that belongs
+            // to the label `class`
             let p = match group.data.get(group.n_cols() - 1).unwrap() {
                 Column::Bool(c) => c.iter().fold(0.0, |acc, v| {
                     if v.unwrap() == *class {
@@ -130,8 +144,9 @@ fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
 }
 
 /// Finds the best split for a Local Dataframe by brute-forcing splitting on
-/// all features on all rows, takes `O(mn^2)` time, where `m` is the number of
-/// features and `n` is the number of rows in `data`
+/// a randomly selected subset of features on all rows, takes `O(m^(1/2)n^2)`
+/// time, where `m` is the number of features and `n` is the number of rows in
+/// `data`
 fn get_split(data: &LocalDataFrame) -> Split {
     println!("getting a split");
     let mut rng = rand::thread_rng();
@@ -169,21 +184,25 @@ fn get_split(data: &LocalDataFrame) -> Split {
     split.unwrap()
 }
 
-/// Counts the number of trues in the last column(labels) of the dataframe
-struct NumTrueRower {
-    num_trues: usize,
+/// Counts the number of labels in the last column (labels) of the dataframe
+/// that match the `label` of this `NumLabelRower`
+struct NumLabelRower {
+    /// Number of rows whose label matches our label
+    num_matching_labels: usize,
+    /// The label we are searching for
+    label: bool,
 }
 
-impl Rower for NumTrueRower {
+impl Rower for NumLabelRower {
     fn visit(&mut self, row: &Row) -> bool {
-        if row.get(row.width() - 1).unwrap().unwrap_bool() {
-            self.num_trues += 1;
+        if row.get(row.width() - 1).unwrap().unwrap_bool() == self.label {
+            self.num_matching_labels += 1;
         }
         true
     }
 
     fn join(mut self, other: Self) -> Self {
-        self.num_trues += other.num_trues;
+        self.num_matching_labels += other.num_matching_labels;
         self
     }
 }
@@ -191,9 +210,12 @@ impl Rower for NumTrueRower {
 /// Returns the most common output value, assumes predictions are boolean values
 /// Takes `O(n) time`
 fn to_terminal(data: LocalDataFrame) -> bool {
-    let mut r = NumTrueRower { num_trues: 0 };
+    let mut r = NumLabelRower {
+        num_matching_labels: 0,
+        label: true,
+    };
     r = data.map(r);
-    r.num_trues > (data.n_rows() / 2)
+    r.num_matching_labels > (data.n_rows() / 2)
 }
 
 /// Splits `to_split` and recursively builds a decision tree. Calls `get_split`
@@ -258,7 +280,7 @@ struct Evaluator {
     /// A vec of the (tree, number of correct predictions, total number of rows)
     trees: Vec<(DecisionTree, usize, usize)>,
     /// Bookkeeping to keep track of the accuracy of the aggregated predictions
-    /// of the Random Forest. First element in the tuple is the number of 
+    /// of the Random Forest. First element in the tuple is the number of
     /// correct predictions, the second element is the total number of rows
     total_accuracy: (usize, usize),
 }
@@ -378,10 +400,10 @@ async fn main() -> Result<(), LiquidError> {
         None => println!("done"),
         Some(e) => {
             e.trees.iter().for_each(|(_, c, t)| {
-                println!("accuracy: {}", *c as f64 / *t as f64)
+                println!("decision tree accuracy: {}", *c as f64 / *t as f64)
             });
             println!(
-                "RF accuracy: {}",
+                "Random Forest accuracy: {}",
                 e.total_accuracy.0 as f64 / e.total_accuracy.1 as f64
             );
         }

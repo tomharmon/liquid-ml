@@ -152,21 +152,25 @@ fn get_split(data: LocalDataFrame) -> Split {
     split.unwrap()
 }
 
-/// Counts the number of trues in the last column(labels) of the dataframe
-struct NumTrueRower {
-    num_trues: usize,
+/// Counts the number of labels in the last column (labels) of the dataframe
+/// that match the `label` of this `NumLabelRower`
+struct NumLabelRower {
+    /// Number of rows whose label matches our label
+    num_matching_labels: usize,
+    /// The label we are searching for
+    label: bool,
 }
 
-impl Rower for NumTrueRower {
+impl Rower for NumLabelRower {
     fn visit(&mut self, row: &Row) -> bool {
-        if row.get(row.width() - 1).unwrap().unwrap_bool() {
-            self.num_trues += 1;
+        if row.get(row.width() - 1).unwrap().unwrap_bool() == self.label {
+            self.num_matching_labels += 1;
         }
         true
     }
 
     fn join(mut self, other: Self) -> Self {
-        self.num_trues += other.num_trues;
+        self.num_matching_labels += other.num_matching_labels;
         self
     }
 }
@@ -174,9 +178,12 @@ impl Rower for NumTrueRower {
 /// Returns the most common output value, assumes predictions are boolean values
 /// Takes `O(n) time`
 fn to_terminal(data: LocalDataFrame) -> bool {
-    let mut r = NumTrueRower { num_trues: 0 };
+    let mut r = NumLabelRower {
+        num_matching_labels: 0,
+        label: true,
+    };
     r = data.map(r);
-    r.num_trues > (data.n_rows() / 2)
+    r.num_matching_labels > (data.n_rows() / 2)
 }
 
 /// Splits `to_split` and recursively builds a decision tree. Calls `get_split`
