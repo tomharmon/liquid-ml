@@ -9,8 +9,9 @@ use rand;
 use serde::{Deserialize, Serialize};
 use simple_logger;
 use std::sync::Arc;
-/// This is a simple example showing how to load a sor file from disk and
-/// distribute it across nodes, and perform pmap
+
+/// This example builds and evaluates a random forest model for binary 
+/// classification
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
@@ -42,22 +43,41 @@ struct Opts {
     min_size: usize,
 }
 
+/// A struct to represent the results of splitting a decision tree based on
+/// a specific feature, where a training set gets split based on the value of
+/// that feature and the value of that feature for every row
 #[derive(Debug, Clone)]
 struct Split {
+    /// The value of the feature we are splitting on for the given row we are
+    /// evaluating
     value: f64,
+    /// The column index of the feature we are splitting on
     feature_idx: usize,
+    /// A clone of all the rows less than `value`
     left: LocalDataFrame,
+    /// A clone of all the rows greater than `value`
     right: LocalDataFrame,
 }
 
+/// Represents a learned decision tree, used for making predictions once
+/// training is completed
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum DecisionTree {
+    /// Represents a node in a decision tree that is split on a feature
     Node {
+        /// The left child node of this node
         left: Box<DecisionTree>,
+        /// The right child node of this node
         right: Box<DecisionTree>,
+        /// The column index of the feature this node is split on
         feature_idx: usize,
+        /// The value of the feature that determines whether we follow the left
+        /// or right child node when making predictions with a new row. `value`
+        /// is compared to the value at the `feature_idx` in the row we are
+        /// predicting
         value: f64,
     },
+    /// Represents a classification in the decision tree
     Leaf(bool),
 }
 
@@ -79,7 +99,7 @@ impl Rower for Split {
     }
 }
 
-/// Compute the Gini Index
+/// Calculate the gini index to evaluate the information gain based on a split
 /// NOTE: this assumes the last column is a boolean label
 fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
     let n_samples = groups[0].n_rows() + groups[1].n_rows();
@@ -109,7 +129,9 @@ fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
     gini
 }
 
-/// Finds the best split for a Local Dataframe for a single split
+/// Finds the best split for a Local Dataframe by brute-forcing splitting on
+/// all features on all rows, takes `O(mn^2)` time, where `m` is the number of
+/// features and `n` is the number of rows in `data`
 fn get_split(data: &LocalDataFrame) -> Split {
     println!("getting a split");
     let mut rng = rand::thread_rng();
@@ -147,6 +169,7 @@ fn get_split(data: &LocalDataFrame) -> Split {
     split.unwrap()
 }
 
+/// Counts the number of trues in the last column(labels) of the dataframe
 struct NumTrueRower {
     num_trues: usize,
 }
@@ -165,13 +188,20 @@ impl Rower for NumTrueRower {
     }
 }
 
-// returns the most common output value, assumes predictions are boolean values
+/// Returns the most common output value, assumes predictions are boolean values
+/// Takes `O(n) time`
 fn to_terminal(data: LocalDataFrame) -> bool {
     let mut r = NumTrueRower { num_trues: 0 };
     r = data.map(r);
     r.num_trues > (data.n_rows() / 2)
 }
 
+/// Splits `to_split` and recursively builds a decision tree. Calls `get_split`
+/// for non-terminal nodes and `to_terminal` for nodes that are terminal.
+///
+/// A node is determined to be terminal if the tree exceeds `max_depth` or if
+/// the number of rows in the left or right split are less than `min_size`,
+/// which are effectively hyper-parameters to the decision tree model
 fn split(
     to_split: Split,
     max_depth: usize,
@@ -211,6 +241,8 @@ fn split(
     }
 }
 
+/// Builds a decision tree recursively. Takes `O(mn^2logn)` time, where
+/// `m` is the number of features and `n` is the number of rows in `data`
 fn build_tree(
     data: Arc<LocalDataFrame>,
     max_depth: usize,
@@ -220,11 +252,14 @@ fn build_tree(
     split(root, max_depth, min_size, 1)
 }
 
-/// Represents a Rower that evaluates the accuracy of the Forest
+/// Represents a Rower that evaluates the accuracy of the Random Forest
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Evaluator {
-    /// A vec of the (tree, number of correct predictions, total number of tests)
+    /// A vec of the (tree, number of correct predictions, total number of rows)
     trees: Vec<(DecisionTree, usize, usize)>,
+    /// Bookkeeping to keep track of the accuracy of the aggregated predictions
+    /// of the Random Forest. First element in the tuple is the number of 
+    /// correct predictions, the second element is the total number of rows
     total_accuracy: (usize, usize),
 }
 
@@ -261,6 +296,7 @@ impl Rower for Evaluator {
     }
 }
 
+/// Given a decision tree, makes a prediction. Takes `O(logn)` time
 fn predict(tree: &DecisionTree, row: &Row) -> bool {
     match tree {
         DecisionTree::Node {

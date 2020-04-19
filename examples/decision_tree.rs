@@ -4,7 +4,7 @@ use liquid_ml::error::LiquidError;
 use rand;
 use serde::{Deserialize, Serialize};
 
-/// This example builds and evaluates a decision tree
+/// This example builds and evaluates a binary classification decision tree
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
@@ -17,26 +17,45 @@ struct Opts {
     data: String,
 }
 
+/// A struct to represent the results of splitting a decision tree based on
+/// a specific feature, where a training set gets split based on the value of
+/// that feature and the value of that feature for every row
 #[derive(Debug, Clone)]
 struct Split {
+    /// The value of the feature we are splitting on for the given row we are
+    /// evaluating
     value: f64,
+    /// The column index of the feature we are splitting on
     feature_idx: usize,
+    /// A clone of all the rows less than `value`
     left: LocalDataFrame,
+    /// A clone of all the rows greater than `value`
     right: LocalDataFrame,
 }
 
+/// Represents a learned decision tree, used for making predictions once
+/// training is completed
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum DecisionTree {
+    /// Represents a node in a decision tree that is split on a feature
     Node {
+        /// The left child node of this node
         left: Box<DecisionTree>,
+        /// The right child node of this node
         right: Box<DecisionTree>,
+        /// The column index of the feature this node is split on
         feature_idx: usize,
+        /// The value of the feature that determines whether we follow the left
+        /// or right child node when making predictions with a new row. `value`
+        /// is compared to the value at the `feature_idx` in the row we are
+        /// predicting
         value: f64,
     },
+    /// Represents a classification in the decision tree
     Leaf(bool),
 }
 
-// returns accuracy from 0-1
+/// returns accuracy from 0-1
 fn accuracy(actual: Vec<Option<bool>>, predicted: Vec<bool>) -> f64 {
     assert_eq!(actual.len(), predicted.len());
     actual
@@ -52,7 +71,7 @@ fn accuracy(actual: Vec<Option<bool>>, predicted: Vec<bool>) -> f64 {
         / actual.len() as f64
 }
 
-// A rower that splits the dataset based on a given feature
+/// A rower that splits the data set based on a given feature
 impl Rower for Split {
     fn visit(&mut self, row: &Row) -> bool {
         if row.get(self.feature_idx).unwrap().unwrap_float() < self.value {
@@ -70,7 +89,8 @@ impl Rower for Split {
     }
 }
 
-// this assumes the last column is a boolean label
+/// Calculate the gini index to evaluate the information gain based on a split
+/// NOTE: this assumes the last column is a boolean label
 fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
     let n_samples = groups[0].n_rows() + groups[1].n_rows();
     let mut gini = 0.0;
@@ -99,7 +119,9 @@ fn gini_index(groups: &[&LocalDataFrame], classes: &[bool]) -> f64 {
     gini
 }
 
-/// Finds the best split for a Local Dataframe for a single split
+/// Finds the best split for a Local Dataframe by brute-forcing splitting on
+/// all features on all rows, takes `O(mn^2)` time, where `m` is the number of
+/// features and `n` is the number of rows in `data`
 fn get_split(data: LocalDataFrame) -> Split {
     let class_labels = vec![true, false];
 
@@ -149,13 +171,20 @@ impl Rower for NumTrueRower {
     }
 }
 
-// returns the most common output value, assumes predictions are boolean values
+/// Returns the most common output value, assumes predictions are boolean values
+/// Takes `O(n) time`
 fn to_terminal(data: LocalDataFrame) -> bool {
     let mut r = NumTrueRower { num_trues: 0 };
     r = data.map(r);
     r.num_trues > (data.n_rows() / 2)
 }
 
+/// Splits `to_split` and recursively builds a decision tree. Calls `get_split`
+/// for non-terminal nodes and `to_terminal` for nodes that are terminal.
+///
+/// A node is determined to be terminal if the tree exceeds `max_depth` or if
+/// the number of rows in the left or right split are less than `min_size`,
+/// which are effectively hyper-parameters to the decision tree model
 fn split(
     to_split: Split,
     max_depth: usize,
@@ -194,6 +223,8 @@ fn split(
     }
 }
 
+/// Builds a decision tree recursively. Takes `O(mn^2logn)` time, where
+/// `m` is the number of features and `n` is the number of rows in `data`
 fn build_tree(
     data: LocalDataFrame,
     max_depth: usize,
@@ -203,6 +234,8 @@ fn build_tree(
     split(root, max_depth, min_size, 1)
 }
 
+/// A struct that represents a decision tree and its predictions from a testing
+/// set
 #[derive(Debug, Clone)]
 struct Predictor {
     tree: DecisionTree,
@@ -222,6 +255,7 @@ impl Rower for Predictor {
     }
 }
 
+/// Given a decision tree, makes a prediction. Takes `O(logn)` time
 fn predict(tree: &DecisionTree, row: &Row) -> bool {
     match tree {
         DecisionTree::Node {
@@ -240,6 +274,8 @@ fn predict(tree: &DecisionTree, row: &Row) -> bool {
     }
 }
 
+/// Builds a decision tree with the `train` data and tests it with the `test`
+/// data
 fn decision_tree(
     train: LocalDataFrame,
     test: LocalDataFrame,
