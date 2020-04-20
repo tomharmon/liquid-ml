@@ -1,123 +1,45 @@
 //! A module with methods to create, organize, and communicate with nodes in a
-//! distributed system over TCP, as well as `Client` and `Server`
-//! implementations for `LiquidML`.
+//! distributed system over `TCP`, as well as implementations of [`Client`] and
+//! [`Server`] for `LiquidML`.
 //!
-//! The `Server` struct acts as a simple registration server. Once started with
-//! a given `IP:Port` via the `Server::new` method, calling the (blocking)
-//! `Server::accept_new_connections` method will allow  `Client` nodes to also
-//! start up and connect to a distributed system. A `Server` may also order
-//! graceful shutdown of the system by broadcasting `Kill` messages to nodes.
+//! The [`Server`] struct acts as a simple registration server. Once
+//! constructed, calling the [`accept_new_connections`] method will allow
+//! [`Client`] nodes to also start up and connect to a distributed system. A
+//! [`Server`] may also kindly request order graceful shutdown of the
+//! system by broadcasting [`Kill`] messages to nodes.
 //!
-//! When new `Client`s connect to the `Server`, they send a
-//! `ControlMsg::Introduction` to tell the `Server` the `Client`'s address
-//! (`IP:Port`) as well as its `client_type` (which is a `String` to allow for
-//! dynamic types). The `Server` then responds with a `ControlMsg::Directory`
-//! of all the currently connected `Client`s of that `client_type` so that the
-//! new `Client` may connect to them.
+//! # Pre-packaged Server Binary and Server Usage
 //!
+//! An pre-packaged [`Server`] binary is available in `src/bin/server.rs` and
+//! provides all needed functionality for `liquid_ml`.
 //!
-//! ## Pre-packaged Server Binary and Server Usage
+//! The [`Server`] binary may be run using the following command:
 //!
-//! An pre-packaged `Server` binary is available in `src/bin/server.rs` and
-//! will fit the needs of `liquid_ml` and your needs if you don't need
-//! to improve or extend the `network` module.
-//!
-//! The `Server` binary may be run using the following command:
 //! `cargo run --bin server -- --address <Optional 'IP:Port' Address>`
 //!
-//! If an IP:Port is not provided, the server defaults to `127.0.0.1:9000`
+//! If an address is not provided, the [`Server`] defaults to `127.0.0.1:9000`
 //!
-//! ## `Client` Design
+//! # [`Client`] Design
 //!
-//! The `Client` is designed so that it can perform various networking
-//! operations asynchronously. It can listen for messages from
-//! the `Server` or any number of `Client`s (within physical limitations)
-//! concurrently. Messages from the `Server` are processed internally by the
-//! `Client`, while messages from other `Client`s are sent over a `mpsc` channel
-//! and notifies the receiving end when messages are sent. Because of this a
-//! `Client` and the networking layer can be used by higher level components
-//! without being tightly coupled.
+//! The [`Client`] is designed so that it can perform various networking
+//! operations asynchronously and thus it can listen for messages from the
+//! [`Server`] or any number of [`Client`]s (within physical limitations)
+//! concurrently.
 //!
+//! Messages from the [`Server`] are processed internally by the [`Client`],
+//! while messages from other [`Client`]s are sent over a [`mpsc`] channel
+//! (which is passed in during construction) for processing. Because of this a
+//! [`Client`] can be used by higher level components without being tightly
+//! coupled.
 //!
-//! Constructing a new `Client` does these things:
-//! 1. Connects to the `Server`
-//! 2. Sends the server a `ControlMsg::Introduction` containing their address
-//!    and type
-//! 3. The server responds with a `ControlMsg::Directory` of all the addresses
-//!    of the nodes of that `client_type`
-//! 4. Connects to all other existing `Client`s by spawning a Tokio task
-//!    for each connection that will read messages from the connection,
-//!    publish them to the `mpsc` channel passed in during construction of this
-//!    `Client`
+//! [`Client`]s are stringly typed to support dynamic client type generation.
+//! [`Client`]s may only connect to other [`Client`]s of the same type.
 //!
-//! ## Client Usage
-//! For a more in-depth and useful example, it may be worthwhile to look at
-//! the source code for the `KVStore`. Here is a toy example that may be
-//! useful for getting started.
-//!
-//! Assume that the `Server` is already running at `68.2.3.4:9000`
-//!
-//! Client 1 starts up, waits for Client 2 to connect, and sends 'Hi' to
-//! Client 2 then the program exits
-//!
-//! ```rust,no_run
-//! use std::sync::Arc;
-//! use tokio::sync::{Notify, mpsc};
-//! use liquid_ml::network::{Client, Message};
-//! use liquid_ml::error::LiquidError;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), LiquidError> {
-//!     let (sender, receiver) = mpsc::channel(100);
-//!     // The `kill_notifier` is used by the `Client` to tell
-//!     // higher-level components that use the `Client` when a `Kill` message
-//!     // is received from the `Server` so that higher-level components
-//!     // can perform orderly shutdown
-//!     let kill_notifier = Arc::new(Notify::new());
-//!     let client = Client::<String>::new("68.2.3.4:9000", // server address
-//!                                        "69.0.4.20", // our ip
-//!                                        Some("9000"), // our port
-//!                                        sender, // to forward messages
-//!                                        kill_notifier, // for orderly shutdown
-//!                                        2, // number of nodes in this network
-//!                                        true, // wait for all nodes
-//!                                        "demo-client" // our type
-//!                                        ).await.unwrap();
-//!     // `Client::new` returns a `Arc<RwLock<Client>>` so that it may
-//!     // be used concurrently
-//!     let id = { client.read().await.id };
-//!     { client.write().await.send_msg(id + 1, "Hi".to_string()).await? };
-//!     Ok(())
-//! }
-//! ```
-//!
-//! Client 2 starts up, waits to connect to Client 1, and then the message
-//! sent by Client 1 is available on the receiver after it's been sent. The
-//! message is popped from the queue and printed.
-//!
-//! ```rust,no_run
-//! use std::sync::Arc;
-//! use tokio::sync::{Notify, mpsc};
-//! use liquid_ml::network::{Client, Message};
-//! use liquid_ml::error::LiquidError;
-//!
-//! #[tokio::main]
-//! async fn main() -> Result<(), LiquidError> {
-//!     let (sender, mut receiver) = mpsc::channel(100);
-//!     let kill_notifier = Arc::new(Notify::new());
-//!     let client = Client::<String>::new("68.2.3.4:9000",
-//!                                        "64.4.4.20",
-//!                                        Some("9000"),
-//!                                        sender,
-//!                                        kill_notifier,
-//!                                        2,
-//!                                        true,
-//!                                        "my-client").await.unwrap();
-//!     let msg = receiver.recv().await.unwrap();
-//!     println!("{}", msg.msg);
-//!     Ok(())
-//! }
-//! ```
+//! [`Client`]: struct.Client.html
+//! [`Server`]: struct.Server.html
+//! [`Kill`]: enum.ControlMsg.html
+//! [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
+//! [`accept_new_connections`]: struct.Server.html#method.accept_new_connections
 use crate::error::LiquidError;
 use futures::SinkExt;
 use serde::de::DeserializeOwned;
@@ -130,50 +52,86 @@ use tokio::stream::StreamExt;
 use tokio::sync::mpsc::Sender;
 use tokio_util::codec::{FramedRead, FramedWrite, LengthDelimitedCodec};
 
-/// A connection to another `Client`, used for sending directed communication
+/// A connection to another [`Client`], used for directed communication
+///
+/// [`Client`]: struct.Client.html
 #[derive(Debug)]
 pub(crate) struct Connection<T> {
-    /// The `IP:Port` of another `Client` that we're connected to
+    /// The `IP:Port` of another [`Client`] that we're connected to
+    ///
+    /// [`Client`]: struct.Client.html
     pub(crate) address: String,
-    /// The buffered stream used for sending messages to the other `Client`
+    /// The buffered and framed message codec used for sending messages to the
+    /// other [`Client`]
+    ///
+    /// [`Client`]: struct.Client.html
     pub(crate) sink: FramedSink<T>,
 }
 
+/// A buffered and framed message codec for reading messages of type `T`
 type FramedStream<T> = FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>;
+/// A buffered and framed message codec for sending messages of type `T`
 type FramedSink<T> = FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>;
 
-/// Represents a `Client` node in a distributed system that is generic for type
-/// `T`, where `T` is the types of messages that can be sent between `Client`s
+/// Represents a [`Client`] node in a distributed system that is generic for
+/// type `T`, where `T` is the types of messages that can be sent between
+/// [`Client`]s
+///
+/// [`Client`]: struct.Client.html
 #[derive(Debug)]
 pub struct Client<T> {
-    /// The `id` of this `Client`, assigned by the `Server` on startup
+    /// The `id` of this [`Client`], assigned by the [`Server`] on startup
+    /// to be monotonically increasing based on the order of connections
+    ///
+    /// [`Client`]: struct.Client.html
+    /// [`Server`]: struct.Server.html
     pub id: usize,
-    /// The `address` of this `Client` in the format `IP:Port`
+    /// The `address` of this [`Client`] in the format `IP:Port`
+    ///
+    /// [`Client`]: struct.Client.html
     pub address: String,
     /// The id of the current message
     pub(crate) msg_id: usize,
-    /// A directory which is a map of client id to a [`Connection`](Connection)
+    /// A directory which is a map of client id to the [`Connection`] with that
+    /// [`Client`]
+    ///
+    /// [`Connection`]: struct.Connection.html
+    /// [`Client`]: struct.Client.html
     pub(crate) directory: HashMap<usize, Connection<T>>,
-    /// A buffered sink to send messages to the `Server`
+    /// A buffered and framed message codec for sending messages to the
+    /// [`Server`]
+    ///
+    /// [`Server`]: struct.Server.html
     _server: FramedSink<ControlMsg>,
-    /// When this `Client` gets a message, it uses this `mpsc` channel to
-    /// forward messages to whatever layer is using this `Client` for
+    /// When this [`Client`] gets a message, it uses this [`mpsc`] channel to
+    /// forward messages to whatever layer is using this [`Client`] for
     /// networking to avoid tight coupling. The above layer will receive the
-    /// messages on the other half of this `mpsc` channel.
+    /// messages on the other half of this [`mpsc`] channel.
+    ///
+    /// [`Client`]: struct.Client.html
+    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     sender: Sender<Message<T>>,
-    /// the type of this `Client`
+    /// the type of this [`Client`]
+    ///
+    /// [`Client`]: struct.Client.html
     client_type: String,
 }
 
-/// Represents a registration `Server` in a distributed system.
+/// Represents a registration [`Server`] in a distributed system.
+///
+/// [`Server`]: struct.Server.html
 #[derive(Debug)]
 pub struct Server {
-    /// The `address` of this `Server`
+    /// The `address` of this [`Server`]
+    ///
+    /// [`Server`]: struct.Server.html
     pub(crate) address: String,
     /// The id of the current message
     pub(crate) msg_id: usize,
-    /// A directory which is a map of client types to a
-    /// `HashMap` of `node_id` to a [`Connection`](Connection)
+    /// A directory which is a `HashMap` of client types to a `HashMap` of
+    /// `node_id` to a [`Connection`]
+    ///
+    /// [`Connection`]: struct.Connection.html
     pub(crate) directory:
         HashMap<String, HashMap<usize, Connection<ControlMsg>>>,
 }
@@ -192,25 +150,35 @@ pub struct Message<T> {
     pub msg: T,
 }
 
-/// Control messages to facilitate communication with the registration `Server`
-/// and other `Client`s
+/// Control messages to facilitate communication with the registration
+/// [`Server`] and other [`Client`]s
+///
+/// [`Server`]: struct.Server.html
+/// [`Client`]: struct.Client.html
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ControlMsg {
-    /// A directory message sent by the `Server` to new `Client`s once they
-    /// connect to the `Server` so that they know which other `Client`s are
+    /// A directory message sent by the [`Server`] to new [`Client`]s once they
+    /// connect so that they know which other [`Client`]s of that type are
     /// currently connected
+    ///
+    /// [`Server`]: struct.Server.html
+    /// [`Client`]: struct.Client.html
     Directory { dir: Vec<(usize, String)> },
-    /// An introduction that a new `Client` sends to all other existing
-    /// `Client`s and the server
+    /// An introduction that a new [`Client`] sends to all other existing
+    /// [`Client`]s and the [`Server`]
     Introduction {
         address: String,
         client_type: String,
     },
-    /// A message the `Server` sends to `Client`s to inform them to shut down
+    /// A message the [`Server`] sends to [`Client`]s to inform them to shut
+    /// down
+    ///
+    /// [`Server`]: struct.Server.html
+    /// [`Client`]: struct.Client.html
     Kill,
 }
 
-/// A message encoder/decoder to help frame messages sent over TCP,
+/// A message encoder/decoder to help frame messages sent over `TCP`,
 /// particularly in the case of very large messages. Uses a very simple method
 /// of writing the length of the serialized message at the very start of
 /// a frame, followed by the serialized message. When decoding, this length
@@ -221,8 +189,7 @@ pub(crate) struct MessageCodec<T> {
     pub(crate) codec: LengthDelimitedCodec,
 }
 
-/// Reads a message of from the given `reader` into the `buffer` and deserialize
-/// it into a type `T`
+/// Asynchronously waits to read the next message from the given `reader`
 pub(crate) async fn read_msg<T: DeserializeOwned>(
     reader: &mut FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>,
 ) -> Result<Message<T>, LiquidError> {
@@ -232,7 +199,8 @@ pub(crate) async fn read_msg<T: DeserializeOwned>(
     }
 }
 
-/// Send the given `message` over the given `write_stream`
+/// Send the given `message` to the node with the given `target_id` using
+/// the given `directory`
 pub(crate) async fn send_msg<T: Serialize>(
     target_id: usize,
     message: Message<T>,

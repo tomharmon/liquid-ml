@@ -10,8 +10,10 @@ use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 impl Server {
-    /// Create a new `Server` running on the given `address` in the format of
-    /// `IP:Port`
+    /// Create a new [`Server`] running on the given `address` in the format of
+    /// `IP:Port`.
+    ///
+    /// [`Server`]: struct.Server.html
     pub async fn new(address: &str) -> Result<Self, LiquidError> {
         Ok(Server {
             msg_id: 0,
@@ -20,11 +22,14 @@ impl Server {
         })
     }
 
-    /// A blocking function that allows a `Server` to listen for connections
-    /// from newly started `Client`s. When a new `Client` connects to this
-    /// `Server`, we add the connection to this `Server.directory`, but do
-    /// not listen for further messages from the `Client` since this is not
-    /// required for any desired functionality.
+    /// A blocking function that allows a [`Server`] to listen for connections
+    /// from newly started [`Client`]s. When a new [`Client`] connects to this
+    /// [`Server`], we add the connection to our directory, but do
+    /// not listen for further messages from the [`Client`] since this is not
+    /// required for performing simple registration.
+    ///
+    /// [`Server`]: struct.Server.html
+    /// [`Client`]: struct.Client.html
     pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
         let mut listener = TcpListener::bind(&self.address).await?;
         loop {
@@ -84,7 +89,9 @@ impl Server {
     }
 
     // TODO: abstract/merge with Client::send_msg, they are the same
-    /// Send the given `message` to a client with the given `target_id`.
+    /// Send the given `message` to a [`Client`] with the given `target_id`.
+    ///
+    /// [`Client`]: struct.Client.html
     pub async fn send_msg(
         &mut self,
         target_id: usize,
@@ -107,7 +114,9 @@ impl Server {
         Ok(())
     }
 
-    /// Broadcast the given `message` to all currently connected clients
+    /// Broadcast the given `message` to all currently connected [`Clients`]
+    ///
+    /// [`Client`]: struct.Client.html
     pub async fn broadcast(
         &mut self,
         message: ControlMsg,

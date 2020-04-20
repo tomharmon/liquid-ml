@@ -1,6 +1,7 @@
-//! This binary is packaged with the liquid_ml application and is a default
+//! This binary is packaged with the `liquid_ml` application and is a default
 //! implementation of a registration server. This needs to be running to
-//! facilitate connections between different nodes in the system.  
+//! facilitate connections between different nodes in the system. Refer to the
+//! [`network`](../liquid_ml/network/index.html) module for further information.
 use clap::Clap;
 use liquid_ml::error::LiquidError;
 use liquid_ml::network::Server;
@@ -8,8 +9,9 @@ use log::Level;
 use simple_logger;
 
 /// This is a simple registration server for a `liquid_ml` system and comes
-/// packaged with the `liquid_ml` system. Refer to docs.rs/liquid_ml for
-/// further information.   
+/// packaged with the `liquid_ml` system. This needs to be running to
+/// facilitate connections between different nodes in the system, and each
+/// node must be given the `IP:Port` address of the server.
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
@@ -18,6 +20,8 @@ struct Opts {
     address: String,
 }
 
+/// Can be run by building the binary and running the command:
+/// `cargo --run --bin server`
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();

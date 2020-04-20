@@ -469,6 +469,12 @@
 //! 1. Fix up orderly shutdown of the network layer.
 //! 2. Implement random forest.
 
+/// [`Client`]: struct.Client.html
+/// [`Server`]: struct.Server.html
+/// [`ControlMsg::Directory`]: enum.ControlMsg.html
+/// [`ControlMsg::Introduction`]: enum.ControlMsg.html
+/// [`ControlMsg::Kill`]: enum.ControlMsg.html
+/// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
 pub mod dataframe;
 pub mod error;
 pub mod kv;

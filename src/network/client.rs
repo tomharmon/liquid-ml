@@ -18,43 +18,55 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     Client<RT>
 {
-    /// Create a new `Client` running on the given `my_addr`, which is an
-    /// address in the format `IP:Port`
+    /// Create a new [`Client`] of a given `client_type` that runs at `my_ip`
+    /// and `my_port`
     ///
-    /// Constructing the `Client` does these things:
-    /// 1. Connects to the `Server`
-    /// 2. Sends the server our IP and port
-    /// 3. The `Server` responds with a `ControlMsg::Directory`, containing the
-    ///    addresses of all other currently connected `Client`s with a type
-    ///    that matches this `Client`s `client_type`
-    /// 4. Connects to all other existing `Client`s of our `client_type`,
+    /// Constructing the [`Client`] does these things:
+    /// 1. Connects to the [`Server`]
+    /// 2. Sends the server a [`ControlMsg::Introduction`] containing our `IP`,
+    ///    `port`, and `client_type`
+    /// 3. The [`Server`] responds with a [`ControlMsg::Directory`], containing
+    ///    the addresses of all other currently connected [`Client`]s with a
+    ///    type that matches this [`Client`]s `client_type`
+    /// 4. Connects to all other existing [`Client`]s of our `client_type`,
     ///    spawning a Tokio task for each connection. The task will read
     ///    messages from the connection and and forward it over the sending
-    ///    half of an `mpsc` channel with the given `sender`.
+    ///    half of an [`mpsc`] channel with the given `sender`.
     ///
-    /// Creating a new `Client` returns an `Arc<RwLock<Self>>` so that
-    /// the layer above the `Client` can use it concurrently.
+    /// Creating a new [`Client`] returns an `Arc<RwLock<Self>>` so that
+    /// the layer above the [`Client`] can use it concurrently.
     ///
     /// ## Parameters
-    /// - `server_addr`: The address of the `Server` in `IP:Port` format
-    /// - `my_ip`: The `IP` of this `Client`
-    /// - `my_port`: An optional port for this `Client` to listen for new
+    /// - `server_addr`: The address of the [`Server`] in `IP:Port` format
+    /// - `my_ip`: The `IP` of this [`Client`]
+    /// - `my_port`: An optional port for this [`Client`] to listen for new
     ///              connections. If its `None`, uses the OS to randomly assign
     ///              a port.
-    /// - `sender`: The sending half of an `mpsc` channel, for forwarding
+    /// - `sender`: The sending half of an [`mpsc`] channel, for forwarding
     ///             messages to a higher level component that is using this
-    ///             `Client` so that this component may process the message
-    ///             however it wants to.
-    /// - `kill_notifier`: Created outside of this `Client` and passed in
+    ///             [`Client`] so that this component may process the message
+    ///             however it wants to. You must create this [`mpsc`] channel
+    ///             before constructing a [`Client`], pass in the sending half,
+    ///             and hold onto the receiving half so you may process
+    ///             messages the [`Client`] receives.
+    /// - `kill_notifier`: Created outside of this [`Client`] and passed in
     ///                    during construction so that the higher level
-    ///                    component using this `Client` can be notified when
-    ///                    a `Kill` message is received from the `Server` so
-    ///                    that shut down may be performed orderly.
+    ///                    component using this [`Client`] can be notified when
+    ///                    a [`ControlMsg::Kill`] message is received from the
+    ///                    [`Server`] so that orderly shut down may be
+    ///                    performed.
     /// - `wait_for_all_clients`: Whether to wait for `num_clients` to connect
     ///                           connect to the system before returning from
     ///                           this function.
-    /// - `client_type`: The type of `Client`s for this `Client` to connect
-    ///                  with
+    /// - `client_type`: The type of [`Client`]s for this [`Client`] to connect
+    ///                  with.
+    ///
+    /// [`Client`]: struct.Client.html
+    /// [`Server`]: struct.Server.html
+    /// [`ControlMsg::Directory`]: enum.ControlMsg.html
+    /// [`ControlMsg::Introduction`]: enum.ControlMsg.html
+    /// [`ControlMsg::Kill`]: enum.ControlMsg.html
+    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     pub async fn new(
         server_addr: &str,
         my_ip: &str,
@@ -156,13 +168,17 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         Ok(concurrent_client)
     }
 
-    /// A blocking function that allows a `Client` to listen for connections
-    /// from newly started `Client`s. When a new `Client` connects to this
-    /// `Client`, we add the connection to this `Client.directory`
-    /// and call `Client::recv_msg` so that messages may be forwarded over
-    /// the `sender` given to us during construction.
+    /// A blocking function that allows a [`Client`] to listen for connections
+    /// from newly started [`Client`]s. When a new [`Client`] connects to this
+    /// [`Client`], we add the [`Connection`] to its directory and call spawn a
+    /// `tokio` task to receive messages from the connection when they arrive
+    /// so that messages may be forwarded over the `sender` given to us during
+    /// construction.
+    ///
+    /// [`Client`]: struct.Client.html
+    /// [`Connection`]: struct.Connection.html
     async fn accept_new_connections(
-        client: Arc<RwLock<Client<RT>>>,
+        client: Arc<RwLock<Self>>,
         mut listener: TcpListener,
         num_clients: usize,
         wait_for_all_clients: bool,
@@ -241,17 +257,15 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         }
     }
 
-    /// Connect to a running `Client` with the given `(id, IP:Port)`.
-    /// After connecting, add the `Connection` to the other `Client` to this
-    /// `Client.directory` for sending later messages to the `Client`. Finally,
-    /// spawn a Tokio task to read further messages from the `Client` and
-    /// handle the message.
+    /// Connects a running [`Client`] with a [`Client`] running at the given
+    /// `(id, IP:Port)`. After connecting, adds the [`Connection`] to the other
+    /// [`Client`] to our directory. Finally, spawns a Tokio task to read
+    /// further messages from the [`Client`] and forward them via the [`mpsc`]
+    /// channel.
     ///
-    /// Note that as long as a `Server` is running, you *really should not* use
-    /// this method unless you want to add `Client`s to the system that is
-    /// only connected to certain other `Client`s and not the entire system.
-    /// Calling `Client::new` will connect the new `Client` with
-    /// all other currently existing `Client`s automatically.
+    /// [`Client`]: struct.Client.html
+    /// [`Connection`]: struct.Connection.html
+    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     #[allow(clippy::map_entry)] // clippy is being dumb
     pub(crate) async fn connect(
         &mut self,
@@ -307,9 +321,12 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     }
 
     // TODO: abstract/merge with Server::send_msg, they are the same
-    /// Send the given `message` to a client with the given `target_id`.
-    /// Id's are automatically assigned by a `Server` during the registration
-    /// period when creating a new `Client` with `Client::new`.
+    /// Send the given `message` to a [`Client`] with the given `target_id`.
+    /// Id's are automatically assigned by a [`Server`] during the registration
+    /// period based on the order of connections.
+    ///
+    /// [`Client`]: struct.Client.html
+    /// [`Server`]: struct.Server.html
     pub async fn send_msg(
         &mut self,
         target_id: usize,
@@ -336,8 +353,9 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         Ok(())
     }
 
-    /// Spawns a Tokio task to read messages from the given `reader` and
-    /// handle responding to them.
+    /// Spawns a `Tokio` task to read messages from the given `reader` and
+    /// forward messages over the given `sender` so the message may be
+    /// processed.
     fn recv_msg(mut sender: Sender<Message<RT>>, mut reader: FramedStream<RT>) {
         // TODO: need to properly increment message id but that means self
         // needs to be 'static or mutex'd
@@ -361,8 +379,11 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         });
     }
 
-    /// Spawns a `tokio` task that will handle receiving `Kill` messages from
-    /// the `Server`
+    /// Spawns a `tokio` task that will handle receiving [`Kill`] messages from
+    /// the [`Server`]
+    ///
+    /// [`Server`]: struct.Server.html
+    /// [`Kill`]: enum.ControlMsg.html
     fn recv_server_msg(
         mut reader: FramedStream<ControlMsg>,
         notifier: Arc<Notify>,
