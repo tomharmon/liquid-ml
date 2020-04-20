@@ -208,49 +208,6 @@ impl LiquidML {
         Ok(())
     }
 
-    /*
-     * This is the old function we had for building an Application and
-     * assuming the sor file was on every node. Leaving it here since I think
-     * we should add it back since it's convenient for testing and development
-     * purposes
-     *
-     *
-    /// Create a new application and split the given SoR file across all the
-    /// nodes in the network. Assigns a key with the name `df_name` to
-    /// the `DataFrame` chunk for this node.
-    ///
-    /// Note: assumes the entire SoR file is present on all nodes
-    pub async fn from_sor(
-        file_name: &str,
-        my_addr: &str,
-        server_addr: &str,
-        num_nodes: usize,
-        df_name: &str,
-    ) -> Result<Self, LiquidError> {
-        let app = Application::new(my_addr, server_addr, num_nodes).await?;
-        let file = fs::metadata(file_name).unwrap();
-        let f: File = File::open(file_name).unwrap();
-        let mut reader = BufReader::new(f);
-        let mut size = file.len() / num_nodes as u64;
-        // Note: Node ids start at 1
-        let from = size * (app.node_id - 1) as u64;
-
-        // advance the reader to this node's starting index then
-        // find the next newline character
-        let mut buffer = Vec::new();
-        reader.seek(SeekFrom::Start(from + size)).unwrap();
-        reader.read_until(b'\n', &mut buffer).unwrap();
-        size += buffer.len() as u64 + 1;
-
-        let df = DataFrame::from_sor(file_name, from as usize, size as usize);
-        let key = Key::new(df_name, app.node_id);
-        app.kv.put(&key, df).await?;
-        Ok(app)
-    }
-
-     *
-     */
-
     /// Given a function, run it on this application. This function only
     /// terminates when a kill signal from the [`Server`] has been sent.
     ///
