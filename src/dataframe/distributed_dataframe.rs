@@ -22,12 +22,11 @@ use tokio::sync::{
     Mutex, Notify, RwLock,
 };
 
-/// Represents a distributed, immutable data frame which uses a local
-/// `KVStore` which contains a given node's owned data, and a collection of
-/// `Key`s for all the chunks in the entire data frame so that this
-/// `DistributedDataFrame` can request and operate on chunks of data that
-/// belong to other nodes. Provides convenient `map` and `filter` methods that
-/// operate on the entire distributed data frame with a given `Rower`.
+/// Represents a distributed, immutable data frame. Provides convenient `map`
+/// and `filter` methods that operate on the entire distributed data frame
+/// with a given [`Rower`]
+///
+/// [`Rower`]: trait.Rower.html
 #[derive(Debug)]
 pub struct DistributedDataFrame {
     /// The `Schema` of this `DistributedDataFrame`
@@ -35,8 +34,9 @@ pub struct DistributedDataFrame {
     /// The name of this `DistributedDataFrame`. Must be unique in a `LiquidML`
     /// instance
     pub df_name: String,
-    /// A map of the range of row indexs to the `Key`s that point to the chunk
-    /// of data with those rows, which may belong to different nodes.
+    /// A map of the range of row indices to the `Key`s that point to the chunk
+    /// of data with those rows. Not all `Key`s in this map belong to this node
+    /// of the `DistributedDataFrame`, some may belong to other nodes
     pub df_chunk_map: HashMap<Range<usize>, Key>,
     /// The number of rows in this entire `DistributedDataFrame`
     pub num_rows: usize,
@@ -113,9 +113,11 @@ impl DistributedDataFrame {
     ///
     /// You may use this function directly to create a `DistributedDataFrame`
     /// but it is recommended to use the application layer by calling
-    /// `LiquidML::df_from_sor` instead. Doing so will pass in many of the
+    /// [`LiquidML::df_from_sor`] instead. Doing so will pass in many of the
     /// required parameters for you, particularly the ones that are required
     /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
+    ///
+    /// [`LiquidML::df_from_sor`]: ../struct.LiquidML.html#method.df_from_sor
     pub async fn from_sor(
         server_addr: &str,
         my_ip: &str,
@@ -159,9 +161,11 @@ impl DistributedDataFrame {
     ///
     /// You may use this function directly to create a `DistributedDataFrame`
     /// but it is recommended to use the application layer by calling
-    /// `LiquidML::df_from_iter` instead. Doing so will pass in many of the
+    /// [`LiquidML::df_from_iter`] instead. Doing so will pass in many of the
     /// required parameters for you, particularly the ones that are required
     /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
+    ///
+    /// [`LiquidML::df_from_iter`]: ../struct.LiquidML.html#method.df_from_iter
     pub async fn from_iter(
         server_addr: &str,
         my_ip: &str,
@@ -444,6 +448,14 @@ impl DistributedDataFrame {
     /// `filter`. Node 1 is responsible for distributing the data, and thus
     /// `data` should only be `Some` on node 1.
     ///
+    /// You may use this function directly to create a `DistributedDataFrame`
+    /// but it is recommended to use the application layer by calling
+    /// [`LiquidML::df_from_fn`] instead. Doing so will pass in many of the
+    /// required parameters for you, particularly the ones that are required
+    /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
+    ///
+    /// [`LiquidML::df_from_fn`]: ../struct.LiquidML.html#method.df_from_fn
+    ///
     /// NOTE: this function currently does not verify that `data` is not
     /// jagged, which is a required invariant of the program. There is a plan
     /// to automatically fix jagged data.
@@ -471,12 +483,12 @@ impl DistributedDataFrame {
         .await
     }
 
-    /// Obtains a reference to this `DataFrame`s schema.
+    /// Obtains a reference to this `DistributedDataFrame`s schema.
     pub fn get_schema(&self) -> &Schema {
         &self.schema
     }
 
-    /// Get the `Data` at the given `col_idx`, `row_idx` offsets.
+    /// Get the data at the given `col_idx`, `row_idx` offsets as a boxed value
     pub async fn get(
         &self,
         col_idx: usize,
@@ -486,7 +498,7 @@ impl DistributedDataFrame {
         Ok(r.get(col_idx)?.clone())
     }
 
-    /// Returns a clone of the row at the requested index
+    /// Returns a clone of the row at the requested `index`
     pub async fn get_row(&self, index: usize) -> Result<Row, LiquidError> {
         match self.df_chunk_map.iter().find(|(k, _)| k.contains(&index)) {
             Some((range, key)) => {
@@ -525,9 +537,6 @@ impl DistributedDataFrame {
         self.schema.col_idx(col_name)
     }
 
-    // TODO: make the function signature consistent with filter by
-    //       returning the result everywhere. Once the first node gets the
-    //       final result, broadcast it to all nodes so everyone gets it
     /// Perform a distributed map operation on this `DistributedDataFrame` with
     /// the given `rower`. Returns `Some(rower)` (of the joined results) if the
     /// `node_id` of this `DistributedDataFrame` is `1`, and `None` otherwise.
@@ -603,15 +612,17 @@ impl DistributedDataFrame {
     /// `DistributedDataFrame` is returned to every node so that the results
     /// are consistent everywhere.
     ///
-    /// Because this creates a new `DistributedDataFrame`, the
-    /// `kv_blob_receiver` is required to be passed in. It is recommended that
-    /// you call `LiquidML::filter` instead of this method so that you don't
-    /// have to pass it in, though this method will remain public for users
-    /// who want lower-level access.
-    ///
     /// A local `pfilter` is used on each node to filter over that nodes'
     /// chunks.  By default, each node will use the number of threads available
     /// on that machine.
+    ///
+    /// **NOTE**: Because this creates a new `DistributedDataFrame`, the
+    /// `kv_blob_receiver` is required to be passed in. It is recommended that
+    /// you call [`LiquidML::filter`] instead of this method so that you don't
+    /// have to pass it in, though this method will remain public for users
+    /// who want lower-level access.
+    ///
+    /// [`LiquidML::filter`]: ../struct.LiquidML.html#method.filter
     pub async fn filter<
         T: Rower + Clone + Send + Serialize + DeserializeOwned,
     >(
@@ -917,14 +928,14 @@ impl DistributedDataFrame {
         self.num_rows
     }
 
-    /// Return the number of columns in this `DataFrame`.
+    /// Return the number of columns in this `DistributedDataFrame`.
     pub fn n_cols(&self) -> usize {
         self.schema.width()
     }
 
     /// Sends the given `blob` to the `DistributedDataFrame` with the given
     /// `target_id` This provides a lower level interface to facilitate other
-    /// kinds of messages, such as sending deserialized Rowers
+    /// kinds of messages, such as sending deserialized `Rower`s
     async fn send_blob<T: Serialize>(
         &self,
         target_id: usize,

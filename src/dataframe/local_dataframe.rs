@@ -10,11 +10,12 @@ use sorer::schema::{infer_schema, DataType};
 use std::cmp::Ordering;
 use std::convert::TryInto;
 
-/// Represents a local `DataFrame` which contains `Data` stored in a columnar
-/// format and a well-defined `Schema`
+/// Represents a local data frame which contains data stored in a columnar
+/// format and a well-defined `Schema`. Is useful for data sets that fit into
+/// memory or for testing/debugging purposes.
 #[derive(Serialize, Deserialize, PartialEq, Clone, Debug, DeepSizeOf)]
 pub struct LocalDataFrame {
-    /// The `Schema` of this `DataFrame`
+    /// The `Schema` of this data frame
     pub schema: Schema,
     /// The data of this data frame, in columnar format
     pub data: Vec<Column>,
@@ -188,8 +189,16 @@ impl LocalDataFrame {
 
     /// Get the index of the `Column` with the given `col_name`. Returns `Some`
     /// if a `Column` with the given name exists, or `None` otherwise.
-    pub fn get_col(&self, col_name: &str) -> Option<usize> {
+    pub fn get_col_idx(&self, col_name: &str) -> Option<usize> {
         self.schema.col_idx(col_name)
+    }
+
+    /// Given a column index, returns its name
+    pub fn col_name(
+        &self,
+        col_idx: usize,
+    ) -> Result<Option<&str>, LiquidError> {
+        self.schema.col_name(col_idx)
     }
 
     /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
@@ -349,7 +358,7 @@ impl LocalDataFrame {
     }
 
     /// Applies the given `rower` synchronously to every row in this
-    /// `DataFrame`.
+    /// `LocalDataFrame`
     ///
     /// Since `map` takes an immutable reference to `self`, the `rower` can
     /// not mutate this `DataFrame`. If mutation is desired, the `rower` must
@@ -410,7 +419,7 @@ impl LocalDataFrame {
     }
 
     /// Creates a new `LocalDataFrame` by applying the given `rower` to every
-    /// row in this `DataFrame` sequentially, and cloning rows for which the
+    /// row in this data frame sequentially, and cloning rows for which the
     /// given `rower` returns true from its `accept` method. The `rower` is
     /// cloned `n_threads` times, according to the value of `n_threads` for
     /// this `LocalDataFrame`. Each `rower` gets operates on a chunk of this

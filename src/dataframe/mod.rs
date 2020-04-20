@@ -1,55 +1,75 @@
-//! A module for creating and manipulating data frame`s. A data frame can be
-//! created from a [`SoR`](https://docs.rs/sorer/0.1.0/sorer/) file,
-//! or by adding `Column`s or `Row`s programmatically.
+//! A module for creating and manipulating data frames. A data frame can be
+//! created from a [`SoR`] file, or by adding [`Column`]s or [`Row`]s
+//! programmatically.
 //!
 //! A data frame in `liquid_ml` is lightly inspired by those found in `R` or
 //! `pandas`, and supports optionally named columns. You may analyze the data
-//! in a data frame across many distributed machines in a horizontally scalable
-//! manner by implementing the `Rower` trait to perform `map` or `filter`
-//! operations.
+//! in a data frame by implementing the [`Rower`] trait to perform `map` or
+//! `filter` operations. These operations can be easily performed on either
+//! [`LocalDataFrame`]s for data that fits in memory or
+//! [`DistributedDataFrame`]s for data that is too large to fit in one machine.
 //!
-//! The `dataframe` module provides 2 implementations for a data frame:
+//! **Note**: If you need a [`DistributedDataFrame`], it is highly recommended
+//! that you check out the [`LiquidML`] struct since that provides many
+//! convenient helper functions for working with [`DistributedDataFrame`]s.
+//! Using a [`DistributedDataFrame`] directly is only recommended if you really
+//! know what you are doing. There are also helpful examples of `map` and
+//! `filter` in the [`LiquidML`] documentation
 //!
-//! # [`LocalDataFrame`](crate::dataframe::local_dataframe)
+//! This `dataframe` module provides 2 implementations for a data frame:
 //!
-//! A [`LocalDataFrame`](crate::dataframe::local_dataframe) which can be
-//! used to analyze data on a node locally for data that fits in memory.
+//! # [`LocalDataFrame`]
 //!
-//! # [`DistributedDataFrame`](crate::dataframe::distributed_dataframe)
+//! A [`LocalDataFrame`] can be used to analyze data on a node locally for data
+//! that fits in memory. Is very easy to work with and get up and running
+//! initially when developing. We recommend that when testing and developing
+//! your [`Rower`], that you do so with a [`LocalDataFrame`].
 //!
-//! A [`DistributedDataFrame`](crate::dataframe::distributed_dataframe) is
-//! an abstraction over a distributed system of nodes that run `KVStore`s which
-//! contain chunks of `LocalDataFrame`s. Therefore each `DistributedDataFrame`
-//! simply holds a pointer to a `KVStore` and a map of ranges of row indices
-//! to the `Key`s for the chunks of data with that range of row indices.
+//! # [`DistributedDataFrame`]
 //!
-//! Upon creation node 1 of a `DistributedDataFrame` will distribute data
-//! across multiple nodes from `SoR` files, iterators, and other conveient ways
-//! of adding data. Each chunk that node 1 distributes is as large as possible
-//! while distributing the data evenly between nodes since experimental testing
-//! found this was optimal for performance of `map` and `filter`.
-//! Methods for distributed versions of these `map` and `filter` operations
-//! are provided.
+//! A [`DistributedDataFrame`] is an abstraction over a distributed system of
+//! nodes that run [`KVStore`]s which contain chunks of [`LocalDataFrame`]s.
+//! Therefore each [`DistributedDataFrame`] simply holds a pointer to a
+//! [`KVStore`] and a map of ranges of row indices to the [`Key`]s for the
+//! chunks of data with that range of row indices.
 //!
-//! **Note**: If you need these features of a `DistributedDataFrame`, it is
-//! highly recommended that you check out the `LiquidML` struct since that
-//! provides many convenient helper functions for working with
-//! `DistributedDataFrame`s.  Using a `DistributedDataFrame` directly is only
-//! recommended if you really know what you are doing.
+//! Upon creation, node 1 of a [`DistributedDataFrame`] will distribute chunks
+//! of data across multiple nodes from [`SoR`] files, iterators, and other
+//! convenient ways of adding data. Note that our experimental testing found
+//! that using the largest chunks possible to fit on each node increased
+//! performance by over `2x`. Our [`from_sor`] constructor optimizes for large
+//! chunks, but we have no control over the iterators passed in to
+//! [`from_iter`], so if you are using this function yourself and care about
+//! the performance of `map` and `filter`, then you should also optimize your
+//! iterators this way.
 //!
 //! Data frames use these supplementary data structures and can be useful in
 //! understanding DataFrames:
-//!  - `Row` : A single row of `Data` from the data frame and provides a
-//!     useful API to help implement the `Rower` trait
-//!  - `Schema` : This can be especially useful when a `SoR` File is read and
+//!  - [`Row`] : A single row of [`Data`] from the data frame and provides a
+//!     useful API to help implement the [`Rower`] trait
+//!  - [`Schema`] : This can be especially useful when a [`SoR`] File is read and
 //!     different things need to be done based on the inferred schema
 //!
-//! The `dataframe` module also declares the `Rower` and `Fielder` visitor
+//! The `dataframe` module also declares the [`Rower`] and [`Fielder`] visitor
 //! traits that can be used to build visitors that iterate over the elements of
 //! a row or data frame.
 //!
-//! NOTE: RFC to add iterators along with the current visitors, since iterators
-//! are more idiomatic to write in rust
+//! NOTE: We are likely to add iterators to replace the current visitors, since
+//! iterators are more idiomatic to write in rust
+//!
+//! [`Column`]: struct.Column.html
+//! [`Row`]: struct.Row.html
+//! [`Rower`]: trait.Rower.html
+//! [`Fielder`]: trait.Fielder.html
+//! [`Schema`]: struct.Schema.html
+//! [`Data`]: struct.Data.html
+//! [`LocalDataFrame`]: struct.LocalDataFrame.html
+//! [`DistributedDataFrame`]: struct.DistributedDataFrame.html
+//! [`LiquidML`]: ../struct.LiquidML.html
+//! [`KVStore`]: ../kv/struct.KVStore.html
+//! [`SoR`]: https://docs.rs/sorer
+//! [`from_sor`]: struct.DistributedDataFrame.html#method.from_sor
+//! [`from_iter`]: struct.DistributedDataFrame.html#method.from_iter
 pub use sorer::{
     dataframe::{Column, Data},
     schema::DataType,
@@ -68,7 +88,9 @@ mod schema;
 pub use schema::Schema;
 
 /// A field visitor that may be implemented to iterate and visit all the
-/// elements of a `Row`.
+/// elements of a [`Row`].
+///
+/// [`Row`]: struct.Row.html
 pub trait Fielder {
     /// Called for fields of type `bool` with the value of the field
     fn visit_bool(&mut self, b: bool);
@@ -89,20 +111,33 @@ pub trait Fielder {
 }
 
 /// A trait for visitors who iterate through and process each row of a
-/// `DataFrame`. In `DataFrame::pmap`, `Rower`s are cloned for parallel
-/// execution.
+/// data frame.
 pub trait Rower {
-    /// This function is called once per row. When used in conjunction with
-    /// `pmap`, the row index of `r` is correctly set, meaning that the rower
-    /// may make a copy of the DF it's mapping and mutate that copy, since
-    /// the DF is not easily mutable. The return value is used in
-    /// `DataFrame::filter` to indicate whether a row should be kept.
-    fn visit(&mut self, r: &Row) -> bool;
+    /// This function is called once per row of a data frame.  The return value
+    /// is used in `filter` methods to indicate whether a row should be kept,
+    /// and is meaningless when using `map`.
+    ///
+    /// # Data Frame Mutability
+    /// Since the `row` that is visited is only an immutable reference, it is
+    /// impossible to mutate a data frame via `map`/`filter` since you can't
+    /// mutate each [`Row`] when visiting them. If you wish to get around this
+    /// (purposeful) limitation, you may define a [`Rower`] that has a
+    /// [`LocalDataFrame`] for one of its fields. Then, in your `visit`
+    /// implementation, you may clone each [`Row`] as you visits them, mutate
+    /// them, then adds it to your [`Rower`]'s copy of the [`LocalDataFrame`].
+    /// This way you will have the original and the mutated copy after
+    /// `map`/`filter`.
+    ///
+    /// [`Row`]: struct.Row.html
+    /// [`Rower`]: trait.Rower.html
+    /// [`LocalDataFrame`]: struct.LocalDataFrame.html
+    fn visit(&mut self, row: &Row) -> bool;
 
-    /// Once traversal of the `DataFrame` is complete the rowers that were
-    /// cloned for parallel execution for `DataFrame::pmap` will be joined to
-    /// obtain the final result.  There will be one join for each cloned
-    /// `Rower`. The original `Rower` will be the last to be called join on,
-    /// and that `Rower` will contain the final results.
+    /// In all cases, except when using single-threaded `map` with a
+    /// [`LocalDataFrame`], the [`Rower`]s being executed in separate threads
+    /// or machines will need to be joined and combined to obtain the final
+    /// result. This may be as simple as adding up each [`Rower`]s sum to get
+    /// a total sum or may be much more complicated. In most cases, it is
+    /// usually trivial. The returned [`Rower`] will contain the final results.
     fn join(self, other: Self) -> Self;
 }

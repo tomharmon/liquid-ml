@@ -1,10 +1,5 @@
-//! This module defines an application the highest level component of a
-//! distributed `liquid_ml` system, the application layer. For 90% of use
-//! cases, you will not need to use anything else in this crate besides a
-//! `LiquidML` struct and your own implementation of a `Rower`.
-//!
-//! Non-trivial and trivial examples that use the application can be found in
-//! the examples directory of this crate.
+//! This module defines the implementation of the highest level component in
+//! a `liquid_ml` system.
 use crate::dataframe::{Column, DistributedDataFrame, LocalDataFrame, Rower};
 use crate::error::LiquidError;
 use crate::kv::KVStore;
@@ -15,23 +10,43 @@ use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{mpsc, mpsc::Receiver, Mutex, Notify};
 
-/// Represents a `liquid_ml` application
+/// Represents a `liquid_ml` application, an easy way to create and operate on
+/// multiple [`DistributedDataFrame`]s at the same time.
+///
+/// This struct is the highest level component of a distributed `liquid_ml`
+/// system, the application layer. For 90% of use cases, you will not need to
+/// use anything else in this crate besides a `LiquidML` struct and your own
+/// implementation of a [`Rower`].
+///
+/// Non-trivial and trivial examples that use the application can be found in
+/// the examples directory of this crate.
+///
+/// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
+/// [`Rower`]: dataframe/trait.Rower.html
 pub struct LiquidML {
-    /// A pointer to the KVStore that stores all the data for the application
+    /// A pointer to the `KVStore` that stores all the data for this node of
+    /// the application
     pub kv: Arc<KVStore<LocalDataFrame>>,
-    /// The id of this node, assigned by the registration server
+    /// The id of this node, assigned by the registration [`Server`]
+    ///
+    /// [`Server`]: network/struct.Server.html
     pub node_id: usize,
     /// A receiver for blob messages (received by the `kv`) that can be
     /// processed by the user for lower level access to the network
     pub blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     /// The number of nodes in this network
     pub num_nodes: usize,
-    /// A notifier that gets notified when the `Server` has sent a `Kill`
+    /// A notifier that gets notified when the [`Server`] has sent a [`Kill`]
     /// message
+    ///
+    /// [`Server`]: network/struct.Server.html
+    /// [`Kill`]: network/enum.ControlMsg.html#variant.Kill
     pub kill_notifier: Arc<Notify>,
     /// A map of a data frame's name to that `DistributedDataFrame`
     pub data_frames: HashMap<String, Arc<DistributedDataFrame>>,
-    /// The `IP:Port` address of the `Server`
+    /// The `IP:Port` address of the [`Server`]
+    ///
+    /// [`Server`]: network/struct.Server.html
     pub server_addr: String,
     /// The `IP` of this node
     pub my_ip: String,
@@ -83,13 +98,15 @@ impl LiquidML {
     /// `await`ing this function will block until the data is completely
     /// distributed on all nodes. After the data is distributed, each node
     /// of this distributed `liquid_ml` system will have their `LiquidML`
-    /// struct updated with the information of the new `DistributedDataFrame`
-    /// (ie, a map of `Key`s for each chunk).
+    /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// Note: if `df_name` is not unique, you will not be able to access the
-    ///       old data frame that will be replaced by the new data frame, and
-    ///       the old data frame will not be removed from all nodes. There
-    ///       is a way to fix this, and may be done at a later date.
+    /// **NOTE**: if `df_name` is not unique, you will not be able to access
+    ///           the old data frame that will be replaced by the new data
+    ///           frame, and the old data frame will not be removed from all
+    ///           nodes. There is a way to fix this, and may be done at a
+    ///           later date.
+    ///
+    /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_fn(
         &mut self,
         df_name: &str,
@@ -124,13 +141,15 @@ impl LiquidML {
     /// `await`ing this function will block until the data is completely
     /// distributed on all nodes. After the data is distributed, each node
     /// of this distributed `liquid_ml` system will have their `LiquidML`
-    /// struct updated with the information of the new `DistributedDataFrame`
-    /// (ie, a map of `Key`s for each chunk).
+    /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// Note: if `df_name` is not unique, you will not be able to access the
-    ///       old data frame that will be replaced by the new data frame, and
-    ///       the old data frame will not be removed from all nodes. There
-    ///       is a way to fix this, and may be done at a later date.
+    /// **NOTE**: if `df_name` is not unique, you will not be able to access
+    ///           the old data frame that will be replaced by the new data
+    ///           frame, and the old data frame will not be removed from all
+    ///           nodes. There is a way to fix this, and may be done at a
+    ///           later date.
+    ///
+    /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_sor(
         &mut self,
         df_name: &str,
@@ -161,13 +180,15 @@ impl LiquidML {
     /// `await`ing this function will block until the data is completely
     /// distributed on all nodes. After the data is distributed, each node
     /// of this distributed `liquid_ml` system will have their `LiquidML`
-    /// struct updated with the information of the new `DistributedDataFrame`
-    /// (ie, a map of `Key`s for each chunk).
+    /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// Note: if `df_name` is not unique, you will not be able to access the
-    ///       old data frame that will be replaced by the new data frame, and
-    ///       the old data frame will not be removed from all nodes. There
-    ///       is a way to fix this, and may be done at a later date.
+    /// **NOTE**: if `df_name` is not unique, you will not be able to access
+    ///           the old data frame that will be replaced by the new data
+    ///           frame, and the old data frame will not be removed from all
+    ///           nodes. There is a way to fix this, and may be done at a
+    ///           later date.
+    ///
+    /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_iter(
         &mut self,
         df_name: &str,
@@ -231,11 +252,13 @@ impl LiquidML {
      */
 
     /// Given a function, run it on this application. This function only
-    /// terminates when a kill signal from the `Server` has been sent.
+    /// terminates when a kill signal from the [`Server`] has been sent.
     ///
     /// ## Examples
     /// `examples/demo_client.rs` is a good starting point to see this in
     /// action
+    ///
+    /// [`Server`]: network/struct.Server.html
     pub async fn run<F, Fut>(self, f: F)
     where
         Fut: Future<Output = ()>,
@@ -245,10 +268,10 @@ impl LiquidML {
         self.kill_notifier.notified().await;
     }
 
-    /// Perform a distributed map operation on the `DistributedDataFrame` with
+    /// Perform a distributed map operation on the [`DistributedDataFrame`] with
     /// the name `df_name` and uses the given `rower`. Returns `Some(rower)`
-    /// (of the joined results) if the `node_id` of this `DistributedDataFrame`
-    /// is `1`, and `None` otherwise.
+    /// (of the joined results) if the `node_id` of this
+    /// [`DistributedDataFrame`] is `1`, and `None` otherwise.
     ///
     /// A local `pmap` is used on each node to map over that nodes' chunk.
     /// By default, each node will use the number of threads available on that
@@ -267,6 +290,8 @@ impl LiquidML {
     ///    all nodes can asynchronously send to one node at the same time.
     ///
     /// This implementation went with option 1 for simplicity reasons
+    ///
+    /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn map<T: Rower + Serialize + Clone + DeserializeOwned + Send>(
         &self,
         df_name: &str,
@@ -279,22 +304,18 @@ impl LiquidML {
         df.map(rower).await
     }
 
-    /// Perform a distributed filter operation on the `DistributedDataFrame`
+    /// Perform a distributed filter operation on the [`DistributedDataFrame`]
     /// with the name `df_name` and uses the given `rower`.  This function
-    /// does not mutate the `DistributedDataFrame` in anyway, instead, it
-    /// creates a new `DistributedDataFrame` of the results. This
-    /// `DistributedDataFrame` is returned to every node so that the results
+    /// does not mutate the [`DistributedDataFrame`] in anyway, instead, it
+    /// creates a new [`DistributedDataFrame`] of the results. This
+    /// [`DistributedDataFrame`] is returned to every node so that the results
     /// are consistent everywhere.
-    ///
-    /// Because this creates a new `DistributedDataFrame`, the
-    /// `kv_blob_receiver` is required to be passed in. It is recommended that
-    /// you call `LiquidML::filter` instead of this method so that you don't
-    /// have to pass it in, though this method will remain public for users
-    /// who want lower-level access.
     ///
     /// A local `pfilter` is used on each node to filter over that nodes'
     /// chunks.  By default, each node will use the number of threads available
     /// on that machine.
+    ///
+    /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn filter<
         T: Rower + Serialize + Clone + DeserializeOwned + Send,
     >(

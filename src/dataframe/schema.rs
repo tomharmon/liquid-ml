@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use sorer::{dataframe::Column, schema::DataType};
 use std::collections::HashMap;
 
-/// Represents a `Schema` of a `DataFrame`
+/// Represents a `Schema` of a data frame
 #[derive(
     Serialize, Deserialize, PartialEq, Clone, Debug, Default, DeepSizeOf,
 )]
@@ -67,11 +67,17 @@ impl Schema {
         }
     }
 
-    /// Given a column index, returns its name, which is optional
-    pub fn col_name(&self, col_idx: usize) -> Option<&str> {
+    /// Given a column index, returns its name
+    pub fn col_name(
+        &self,
+        col_idx: usize,
+    ) -> Result<Option<&str>, LiquidError> {
+        if col_idx >= self.width() {
+            return Err(LiquidError::ColIndexOutOfBounds);
+        }
         match self.col_names.iter().find(|(_, &v)| v == col_idx) {
-            Some((col_name, _)) => Some(col_name),
-            None => None,
+            Some((col_name, _)) => Ok(Some(col_name)),
+            None => Ok(None),
         }
     }
 
