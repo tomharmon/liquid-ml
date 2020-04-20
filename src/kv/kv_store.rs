@@ -20,53 +20,85 @@ use tokio::sync::{
     Mutex, Notify, RwLock,
 };
 
-/// A distributed `Key`, `Value` store which is generic for type `T`. Since
-/// this is a distributed `KVStore`, `Key`s know which node the values 'belong'
-/// to.
+/// A distributed [`Key`], [`Value`] store which is generic for type `T`. Since
+/// this is a distributed [`KVStore`], [`Key`]s know which node the values
+/// 'belong' to.
 ///
-/// Internally `KVStore`s store their data in memory as serialized blobs
-/// (`Vec<u8>`). The `KVStore` caches deserialized `Value`s into their type
-/// `T` on a least-recently used basis.
+/// Internally [`KVStore`]s store their data in memory as serialized blobs
+/// (`Vec<u8>`). The [`KVStore`] caches deserialized [`Value`]s into their type
+/// `T` on a least-recently used basis. There is a hard limit on the cache size
+/// that is set to `1/3` the total memory of the machine.
+///
+/// [`Key`]: struct.Key.html
+/// [`KVStore`]: struct.KVStore.html
+/// [`Value`]: type.Key.html
 #[derive(Debug)]
 pub struct KVStore<T> {
-    /// The data owned by this `KVStore`
+    /// The data owned by this [`KVStore`]
+    ///
+    /// [`KVStore`]: struct.KVStore.html
     data: RwLock<HashMap<Key, Value>>,
     /// An `LRU` cache of deserialized values of type `T` with a hard maximum
     /// memory limit set on construction. Not all cached values belong to this
-    /// `KVStore`, some of it may come from other distributed `KVStore`s not
+    /// [`KVStore`], some of it may come from other distributed `KVStore`s not
     /// running on this machine.
+    ///
+    /// [`KVStore`]: struct.KVStore.html
     cache: Mutex<LruCache<Key, Arc<T>>>,
     /// The `network` layer, used to send and receive messages and data with
-    /// other `KVStore`s
+    /// other [`KVStore`]s
+    ///
+    /// [`KVStore`]: struct.KVStore.html
     pub(crate) network: Arc<RwLock<Client<KVMessage>>>,
     /// Used internally for processing data and messages
     internal_notifier: Notify,
-    /// The `id` of the node this `KVStore` is running on
+    /// The `id` of the node this [`KVStore`] is running on
+    ///
+    /// [`KVStore`]: struct.KVStore.html
     pub(crate) id: usize,
     /// A channel to send blobs of data to a higher level component, in
-    /// `liquid-ml` this would be the `Application`
+    /// `liquid-ml` this would be the `LiquidML` struct
+    ///
+    /// [`LiquidML`]: ../struct.LiquidML.html
     blob_sender: Sender<Value>,
-    /// The total amount of memory (in bytes) this `KVStore` is allowed
+    /// The total amount of memory (in bytes) this [`KVStore`] is allowed
     /// to keep in its cache
+    ///
+    /// [`KVStore`]: struct.KVStore.html
     max_cache_size: u64,
 }
 
 /// Represents the kind of messages that can be sent between distributed
-/// `KVStore`s
+/// [`KVStore`]s
+///
+/// [`KVStore`]: struct.KVStore.html
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum KVMessage {
-    /// A message used to kindly tell other `KVStore`s to put the provided
-    /// `Key` and `Value` in their local store
+    /// A message used to kindly tell other [`KVStore`]s to put the provided
+    /// [`Key`] and [`Value`] in their local store
+    ///
+    /// [`KVStore`]: struct.KVStore.html
+    /// [`Key`]: struct.Key.html
+    /// [`Value`]: type.Key.html
     Put(Key, Value),
-    /// A message used to request the `Value` for the given `Key` from other
-    /// `KVStore`s
+    /// A message used to request the [`Value`] for the given [`Key`] from
+    /// other [`KVStore`]s
+    ///
+    /// [`KVStore`]: struct.KVStore.html
+    /// [`Key`]: struct.Key.html
+    /// [`Value`]: type.Key.html
     Get(Key),
-    /// A message used to send a `Key` and its `Value` in response to `Get`
-    /// messages
+    /// A message used to send a [`Key`] and its [`Value`] in response to
+    /// [`Get`] messages
+    ///
+    /// [`KVStore`]: struct.KVStore.html
+    /// [`Key`]: struct.Key.html
+    /// [`Value`]: type.Key.html
+    /// [`Get`]: enum.KVMessage.html#variant.Get
     Data(Key, Value),
     /// A message used to share random blobs of data with other nodes. This
     /// provides a lower level interface to facilitate other kinds of messages
-    Blob(Value),
+    Blob(Vec<u8>),
 }
 
 // TODO: remove `DeserializeOwned + 'static`
@@ -80,26 +112,37 @@ impl<
             + 'static,
     > KVStore<T>
 {
-    /// Creates a new distributed `KVStore`.
+    /// Creates a new distributed [`KVStore`]. Note that you likely do not
+    /// want to use a [`KVStore`] directly, and instead would have a much
+    /// easier time using the application layer directly via the [`LiquidML`]
+    /// struct.
     ///
-    /// ## Parameters
-    /// - `server_addr`: the `IP:Port` of the registration `Server`, used
+    /// # Parameters
+    /// - `server_addr`: the `IP:Port` of the registration [`Server`], used
     ///    for orchestrating the connection of all distributed nodes in the
     ///    system.
-    /// - `my_addr` is the `IP:Port` of this `KVStore`.
-    /// - `blob_sender`: is the sending half of an `mpsc` channel that is
-    ///    passed in by components using this `KVStore` to facilitate
-    ///    lower level messages. Whenever this `KVStore` receives serialized
-    ///    blobs of data from other `KVStore`s in the distributed system, it
-    ///    will use the `blob_sender` to forward the blob to `LiquidML`.
-    /// - `kill_notifier`: is passed in by `LiquidML`, then is passed down to
-    ///    its `Client` so that when the `Client` gets `Kill` messages from
-    ///    the `Server`, the `Client` can notify `LiquidML` it is time to
-    ///    shut down in an orderly fashion.
+    /// - `my_addr` is the `IP:Port` of this [`KVStore`].
+    /// - `blob_sender`: is the sending half of an [`mpsc`] channel that is
+    ///    passed in by components using this [`KVStore`] to facilitate
+    ///    lower level messages. In the case of `liquid_ml`, it will use the
+    ///    `blob_sender` to forward the blob to [`LiquidML`]. If you are not
+    ///    using [`LiquidML`], you must store the receiving half of the
+    ///    [`mpsc`] channel so you may process blobs that are received.
+    /// - `kill_notifier`: When using the application layer directly, this is
+    ///    passed in for you by the [`LiquidML`] struct and is used to perform
+    ///    orderly shutdown when the [`Client`] receives [`Kill`] messages from
+    ///    the [`Server`]
     /// - `num_clients`: the number of nodes in the distributed system,
     ///    including this one.
     /// - `wait_for_all_clients`: whether or not to wait for all other nodes
-    ///    to connect to this one before returning this new `KVStore`.
+    ///    to connect to this one before returning the new [`KVStore`].
+    ///
+    /// [`KVStore`]: struct.KVStore.html
+    /// [`Server`]: ../network/struct.Server.html
+    /// [`Client`]: ../network/struct.Client.html
+    /// [`LiquidML`]: ../struct.LiquidML.html
+    /// [`Kill`]: ../network/enum.ControlMsg.html#variant.Kill
+    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     pub async fn new(
         server_addr: &str,
         my_addr: &str,
@@ -160,16 +203,23 @@ impl<
         kv
     }
 
-    /// Used to retrieve the deserialized `Value` associated with the given
+    /// Used to retrieve the deserialized [`Value`] associated with the given
     /// `key` if the data is held locally on this node in either the cache or
-    /// the store itself. The difference between `get` and `wait_and_get` is
-    /// that `get` returns an error if the data is not owned by this `KVStore`
-    /// or is if it is not owned by this `KVStore` **and** it is not in its
-    /// cache.
+    /// the store itself.
+    ///
+    /// The difference between [`get`] and [`wait_and_get`] is that [`get`]
+    /// returns an error if the data is not owned by this [`KVStore`] or if it
+    /// is not owned by this [`KVStore`] **and** it is not in its cache.
     ///
     /// ## Errors
-    /// If `key` is not in this `KVStore`s cache or is not owned by this
-    /// `KVStore`, then the error `Err(LiquidError::NotPresent)` is returned
+    /// If `key` is not in this [`KVStore`]s cache or is not owned by this
+    /// [`KVStore`], then the error [`LiquidError::NotPresent`] is returned
+    ///
+    /// [`Value`]: type.Key.html
+    /// [`KVStore`]: struct.KVStore.html
+    /// [`get`]: struct.KVStore.html#method.get
+    /// [`wait_and_get`]: struct.KVStore.html#method.wait_and_get
+    /// [`LiquidError::NotPresent`]: ../error/enum.LiquidError.html#variant.NotPresent
     pub async fn get(&self, key: &Key) -> Result<Arc<T>, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
@@ -189,11 +239,11 @@ impl<
     ///
     /// Make sure that you use this function in only one of the two following
     /// ways:
-    /// 1. You know that the data was `put` some microseconds around when
-    ///    `wait_and_get` was called, but can't guarantee it happened exactly
-    ///    before `wait_and_get` is called. In this case, this function can
+    /// 1. You know that the data was [`put`] some microseconds around when
+    ///    [`wait_and_get`] was called, but can't guarantee it happened exactly
+    ///    before [`wait_and_get`] is called. In this case, this function can
     ///    be `await`ed
-    /// 2. The data will be `put` on this `KVStore` sometime in the
+    /// 2. The data will be [`put`] on this [`KVStore`] sometime in the
     ///    future at an unknown time. In this case, this function should
     ///    not be `await`ed but instead given a callback closure via
     ///    calling `and_then` on the returned future
@@ -201,6 +251,10 @@ impl<
     /// If you do not do that, for example in the second case you `await`
     /// despite our warning, then you will waste a lot of time waiting for the
     /// data to be transferred over the network.
+    ///
+    /// [`KVStore`]: struct.KVStore.html
+    /// [`wait_and_get`]: struct.KVStore.html#method.wait_and_get
+    /// [`put`]: struct.KVStore.html#method.put
     pub async fn wait_and_get(&self, key: &Key) -> Result<Arc<T>, LiquidError> {
         if let Some(val) = { self.cache.lock().await.get(key) } {
             return Ok(val.clone());
@@ -241,20 +295,23 @@ impl<
         }
     }
 
-    /// Puts the data held in `value` to the `KVStore` with the `id` in
+    /// Puts the data held in `value` to the [`KVStore`] with the `id` in
     /// `key.home`.
     ///
-    /// ## If `key` belongs to this `KVStore`
-    /// If this `KVStore` did not have this `key` present, `Ok(None)` is
+    /// ## If `key` belongs to this [`KVStore`]
+    /// If this [`KVStore`] did not have this `key` present, `Ok(None)` is
     /// returned.
     ///
-    /// If this `KVStore` does have this `key` present, the `Value` is updated,
-    /// and `Ok(Some<Value>)` of the old `Value` is returned. The key is not
-    /// updated, though; this matters for types that can be == without being
-    /// identical.
+    /// If this [`KVStore`] does have this `key` present, the associated
+    /// [`Value`] is updated, and `Ok(Some<Value>)` of the old [`Value`] is
+    /// returned. The key is not updated, though; this matters for types that
+    /// can be `==` without being identical.
     ///
-    /// ## If `key` belongs to another `KVStore`
+    /// ## If `key` belongs to another [`KVStore`]
     /// `Ok(None)` is returned after the `value` was successfully sent
+    ///
+    /// [`KVStore`]: struct.KVStore.html
+    /// [`Value`]: type.Key.html
     pub async fn put(
         &self,
         key: Key,
@@ -276,9 +333,11 @@ impl<
         }
     }
 
-    /// Sends the given `blob` to the `KVStore` with the given `target_id`
+    /// Sends the given `blob` to the [`KVStore`] with the given `target_id`
     /// This provides a lower level interface to facilitate other kinds of
     /// messages
+    ///
+    /// [`KVStore`]: struct.KVStore.html
     pub async fn send_blob(
         &self,
         target_id: usize,
@@ -291,23 +350,31 @@ impl<
             .await
     }
 
-    /// Processes messages from the queue that is populated by the
-    /// `network::Client`.
+    /// Processes messages from the queue that is populated by a [`Client`].
     ///
     /// This method processes the messages by doing the following:
-    /// 1. Asynchronously await new messages from the `Client` that are
-    ///    sent over an `mpsc` channel.
+    /// 1. Asynchronously await new messages from the [`Client`] that are
+    ///    sent over an [`mpsc`] channel.
     /// 2. Spawn an asynchronous `tokio::task` to respond to the newly
     ///    received message so as to not block further message processing.
     /// 3. Based on the message type, do the following:
-    ///    - `Get` message: call `wait_and_get` to get the data, either
-    ///       internally from this `KVStore` or externally over the network
-    ///       from another one. Once we have the data, respond with a `Data`
-    ///       message containing the requested data.
-    ///    - `Data` message: Deserialize the data and put it into our cache
-    ///    - `Put` message: add the given data to our internal store
-    ///    - `Blob` message: send the data up a higher level similar to how
-    ///       the `Client` processes messages
+    ///    - [`Get`](enum.KVMessage.html#variant.Get) message: call
+    ///       [`wait_and_get`] to get the data, either internally from this
+    ///       [`KVStore`] or externally over the network from another one. Once
+    ///       we have the data, respond with a [`Data`] message containing the
+    ///       requested data.
+    ///    - [`Data`] message: Deserialize the data and put it into our cache
+    ///    - [`Put`] message: add the given data to our internal store
+    ///    - [`Blob`] message: send the data up a higher level similar to how
+    ///       the [`Client`] processes messages
+    ///
+    /// [`wait_and_get`]: struct.KVStore.html#method.wait_and_get
+    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
+    /// [`Data`]: enum.KVMessage.html#variant.Data
+    /// [`Put`]: enum.KVMessage.html#variant.Put
+    /// [`Blob`]: enum.KVMessage.html#variant.Blob
+    /// [`Client`]: ../network/struct.Client.html
+    /// [`KVStore`]: struct.KVStore.html
     pub(crate) async fn process_messages(
         self: Arc<Self>,
         mut receiver: Receiver<Message<KVMessage>>,
@@ -354,7 +421,9 @@ impl<
         }
     }
 
-    /// Gets serialized blobs out of this `KVStore`
+    /// Gets serialized blobs out of this [`KVStore`]
+    ///
+    /// [`KVStore`]: struct.KVStore.html
     async fn get_raw(&self, key: &Key) -> Result<Value, LiquidError> {
         if key.home == self.id {
             match { self.data.read().await.get(key) } {
@@ -384,7 +453,7 @@ impl<
     /// `value` to the cache will take us over that hard limit, then we will
     /// pop items off the cache on a `LRU` basis until there is enough space,
     /// or no items are left. If the size of the `value` is more than the
-    /// `max_cache_size` by itself, will panic.
+    /// `self.max_cache_size` by itself, will panic.
     async fn add_to_cache(
         &self,
         key: Key,

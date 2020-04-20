@@ -109,9 +109,9 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     ///
     /// [`Client`]: struct.Client.html
     /// [`Server`]: struct.Server.html
-    /// [`ControlMsg::Directory`]: enum.ControlMsg.html
-    /// [`ControlMsg::Introduction`]: enum.ControlMsg.html
-    /// [`ControlMsg::Kill`]: enum.ControlMsg.html
+    /// [`ControlMsg::Directory`]: enum.ControlMsg.html#variant.Directory
+    /// [`ControlMsg::Introduction`]: enum.ControlMsg.html#variant.Introduction
+    /// [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
     /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     pub async fn new(
         server_addr: &str,
@@ -425,11 +425,11 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         });
     }
 
-    /// Spawns a `tokio` task that will handle receiving [`Kill`] messages from
-    /// the [`Server`]
+    /// Spawns a `tokio` task that will handle receiving [`ControlMsg::Kill`]
+    /// messages from the [`Server`]
     ///
     /// [`Server`]: struct.Server.html
-    /// [`Kill`]: enum.ControlMsg.html
+    /// [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
     fn recv_server_msg(
         mut reader: FramedStream<ControlMsg>,
         notifier: Arc<Notify>,

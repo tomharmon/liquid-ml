@@ -6,7 +6,7 @@
 //! constructed, calling the [`accept_new_connections`] method will allow
 //! [`Client`] nodes to also start up and connect to a distributed system. A
 //! [`Server`] may also kindly request order graceful shutdown of the
-//! system by broadcasting [`Kill`] messages to nodes.
+//! system by broadcasting [`ControlMsg::Kill`] messages to nodes.
 //!
 //! # Pre-packaged Server Binary and Server Usage
 //!
@@ -37,7 +37,7 @@
 //!
 //! [`Client`]: struct.Client.html
 //! [`Server`]: struct.Server.html
-//! [`Kill`]: enum.ControlMsg.html
+//! [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
 //! [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
 //! [`accept_new_connections`]: struct.Server.html#method.accept_new_connections
 use crate::error::LiquidError;
