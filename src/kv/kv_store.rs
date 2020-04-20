@@ -1,6 +1,6 @@
 //! The `KVStore` implementation
 use crate::error::LiquidError;
-use crate::kv::{KVMessage, KVStore, Key, Value};
+use crate::kv::{KVMessage, Key, Value};
 use crate::network::{Client, Message};
 use crate::{
     BYTES_PER_GB, BYTES_PER_KIB, KV_STORE_CACHE_SIZE_FRACTION,
@@ -19,6 +19,37 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Mutex, Notify, RwLock,
 };
+
+/// A distributed `Key`, `Value` store which is generic for type `T`. Since
+/// this is a distributed `KVStore`, `Key`s know which node the values 'belong'
+/// to.
+///
+/// Internally `KVStore`s store their data in memory as serialized blobs
+/// (`Vec<u8>`). The `KVStore` caches deserialized `Value`s into their type
+/// `T` on a least-recently used basis.
+#[derive(Debug)]
+pub struct KVStore<T> {
+    /// The data owned by this `KVStore`
+    data: RwLock<HashMap<Key, Value>>,
+    /// An `LRU` cache of deserialized values of type `T` with a hard maximum
+    /// memory limit set on construction. Not all cached values belong to this
+    /// `KVStore`, some of it may come from other distributed `KVStore`s not
+    /// running on this machine.
+    cache: Mutex<LruCache<Key, Arc<T>>>,
+    /// The `network` layer, used to send and receive messages and data with
+    /// other `KVStore`s
+    pub(crate) network: Arc<RwLock<Client<KVMessage>>>,
+    /// Used internally for processing data and messages
+    internal_notifier: Notify,
+    /// The `id` of the node this `KVStore` is running on
+    pub(crate) id: usize,
+    /// A channel to send blobs of data to a higher level component, in
+    /// `liquid-ml` this would be the `Application`
+    blob_sender: Sender<Value>,
+    /// The total amount of memory (in bytes) this `KVStore` is allowed
+    /// to keep in its cache
+    max_cache_size: u64,
+}
 
 // TODO: remove `DeserializeOwned + 'static`
 impl<

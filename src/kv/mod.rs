@@ -36,16 +36,11 @@
 //!    - `Put` message: add the given data to our internal store
 //!    - `Blob` message: send the data up a higher level similar to how
 //!       the `Client` processes messages
-use crate::network::Client;
-use lru::LruCache;
 use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::{Mutex, Notify, RwLock};
 
 mod kv_store;
+pub use crate::kv::kv_store::KVStore;
 
 /// A `Key` defines where in a `KVStore` a `Value` is stored, as well as
 /// which node (and thus which `KVStore`) 'owns' the `Value`
@@ -81,37 +76,6 @@ impl Key {
             home,
         }
     }
-}
-
-/// A distributed `Key`, `Value` store which is generic for type `T`. Since
-/// this is a distributed `KVStore`, `Key`s know which node the values 'belong'
-/// to.
-///
-/// Internally `KVStore`s store their data in memory as serialized blobs
-/// (`Vec<u8>`). The `KVStore` caches deserialized `Value`s into their type
-/// `T` on a least-recently used basis.
-#[derive(Debug)]
-pub struct KVStore<T> {
-    /// The data owned by this `KVStore`
-    data: RwLock<HashMap<Key, Value>>,
-    /// An `LRU` cache of deserialized values of type `T` with a hard maximum
-    /// memory limit set on construction. Not all cached values belong to this
-    /// `KVStore`, some of it may come from other distributed `KVStore`s not
-    /// running on this machine.
-    cache: Mutex<LruCache<Key, Arc<T>>>,
-    /// The `network` layer, used to send and receive messages and data with
-    /// other `KVStore`s
-    pub(crate) network: Arc<RwLock<Client<KVMessage>>>,
-    /// Used internally for processing data and messages
-    internal_notifier: Notify,
-    /// The `id` of the node this `KVStore` is running on
-    pub(crate) id: usize,
-    /// A channel to send blobs of data to a higher level component, in
-    /// `liquid-ml` this would be the `Application`
-    blob_sender: Sender<Value>,
-    /// The total amount of memory (in bytes) this `KVStore` is allowed
-    /// to keep in its cache
-    max_cache_size: u64,
 }
 
 /// Represents the kind of messages that can be sent between distributed
