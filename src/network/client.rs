@@ -1,8 +1,10 @@
 //! Represents a client node in a distributed system, with implementations
 //! provided for `LiquidML` use cases.
 use crate::error::LiquidError;
-use crate::network;
-use crate::network::*;
+use crate::network::{
+    existing_conn_err, increment_msg_id, message, Connection, ControlMsg,
+    FramedSink, FramedStream, Message, MessageCodec,
+};
 use futures::SinkExt;
 use log::{debug, info};
 use serde::de::DeserializeOwned;
@@ -13,6 +15,50 @@ use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc::Sender, Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
+
+/// Represents a [`Client`] node in a distributed system that is generic for
+/// type `T`, where `T` is the types of messages that can be sent between
+/// [`Client`]s
+///
+/// [`Client`]: struct.Client.html
+#[derive(Debug)]
+pub struct Client<T> {
+    /// The `id` of this [`Client`], assigned by the [`Server`] on startup
+    /// to be monotonically increasing based on the order of connections
+    ///
+    /// [`Client`]: struct.Client.html
+    /// [`Server`]: struct.Server.html
+    pub id: usize,
+    /// The `address` of this [`Client`] in the format `IP:Port`
+    ///
+    /// [`Client`]: struct.Client.html
+    pub address: String,
+    /// The id of the current message
+    pub(crate) msg_id: usize,
+    /// A directory which is a map of client id to the [`Connection`] with that
+    /// [`Client`]
+    ///
+    /// [`Connection`]: struct.Connection.html
+    /// [`Client`]: struct.Client.html
+    pub(crate) directory: HashMap<usize, Connection<T>>,
+    /// A buffered and framed message codec for sending messages to the
+    /// [`Server`]
+    ///
+    /// [`Server`]: struct.Server.html
+    _server: FramedSink<ControlMsg>,
+    /// When this [`Client`] gets a message, it uses this [`mpsc`] channel to
+    /// forward messages to whatever layer is using this [`Client`] for
+    /// networking to avoid tight coupling. The above layer will receive the
+    /// messages on the other half of this [`mpsc`] channel.
+    ///
+    /// [`Client`]: struct.Client.html
+    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
+    sender: Sender<Message<T>>,
+    /// the type of this [`Client`]
+    ///
+    /// [`Client`]: struct.Client.html
+    client_type: String,
+}
 
 // TODO: remove `DeserializeOwned + 'static`
 impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
@@ -108,7 +154,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         ))
         .await?;
         // The Server sends the addresses of all currently connected clients
-        let dir_msg = network::read_msg(&mut stream).await?;
+        let dir_msg = message::read_msg(&mut stream).await?;
         let dir = if let ControlMsg::Directory { dir } = dir_msg.msg {
             dir
         } else {
@@ -197,7 +243,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
             let sink = FramedWrite::new(writer, MessageCodec::<RT>::new());
             // read the introduction message from the new client
-            let intro = network::read_msg(&mut stream).await?;
+            let intro = message::read_msg(&mut stream).await?;
             let (address, client_type) = if let ControlMsg::Introduction {
                 address,
                 client_type,
@@ -338,7 +384,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             msg_id: self.msg_id,
             msg: message,
         };
-        network::send_msg(target_id, m, &mut self.directory).await?;
+        message::send_msg(target_id, m, &mut self.directory).await?;
         debug!("sent a message with id, {}", self.msg_id);
         self.msg_id += 1;
         Ok(())
@@ -362,7 +408,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         tokio::spawn(async move {
             loop {
                 let msg: Message<RT> =
-                    match network::read_msg(&mut reader).await {
+                    match message::read_msg(&mut reader).await {
                         Ok(x) => x,
                         Err(_) => {
                             break;
@@ -390,7 +436,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     ) {
         tokio::spawn(async move {
             let kill_msg: Message<ControlMsg> =
-                network::read_msg(&mut reader).await.unwrap();
+                message::read_msg(&mut reader).await.unwrap();
             match &kill_msg.msg {
                 ControlMsg::Kill => Ok(notifier.notify()),
                 _ => Err(LiquidError::UnexpectedMessage),

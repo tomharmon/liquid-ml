@@ -1,13 +1,31 @@
 //! Represents a server node in a distributed system, with implementations
 //! provided for `LiquidML` use cases.
 use crate::error::LiquidError;
-use crate::network;
-use crate::network::{Connection, ControlMsg, Message, MessageCodec, Server};
+use crate::network::{message, Connection, ControlMsg, Message, MessageCodec};
 use log::info;
 use std::collections::HashMap;
 use tokio::io::split;
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
+
+/// Represents a registration [`Server`] in a distributed system.
+///
+/// [`Server`]: struct.Server.html
+#[derive(Debug)]
+pub struct Server {
+    /// The `address` of this [`Server`]
+    ///
+    /// [`Server`]: struct.Server.html
+    pub(crate) address: String,
+    /// The id of the current message
+    pub(crate) msg_id: usize,
+    /// A directory which is a `HashMap` of client types to a `HashMap` of
+    /// `node_id` to a [`Connection`]
+    ///
+    /// [`Connection`]: struct.Connection.html
+    pub(crate) directory:
+        HashMap<String, HashMap<usize, Connection<ControlMsg>>>,
+}
 
 impl Server {
     /// Create a new [`Server`] running on the given `address` in the format of
@@ -39,7 +57,7 @@ impl Server {
             let mut stream = FramedRead::new(reader, MessageCodec::new());
             let sink = FramedWrite::new(writer, MessageCodec::new());
             // Receive the listening IP:Port address of the new client
-            let address = network::read_msg(&mut stream).await?;
+            let address = message::read_msg(&mut stream).await?;
             let (address, client_type) = if let ControlMsg::Introduction {
                 address,
                 client_type,
@@ -104,7 +122,7 @@ impl Server {
             msg_id: self.msg_id,
             msg: message,
         };
-        network::send_msg(
+        message::send_msg(
             target_id,
             m,
             self.directory.get_mut(client_type).unwrap(),

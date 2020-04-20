@@ -1,14 +1,70 @@
 //! Defines messages and codecs used to communicate with the network of nodes
 //! over `TCP`.
 use crate::error::LiquidError;
-use crate::network::{Message, MessageCodec};
+use crate::network::Connection;
 use crate::{BYTES_PER_KIB, MAX_FRAME_LEN_FRACTION};
 use bincode::{deserialize, serialize};
 use bytes::{Bytes, BytesMut};
+use futures::SinkExt;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use sysinfo::{RefreshKind, System, SystemExt};
-use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
+use tokio::io::{ReadHalf, WriteHalf};
+use tokio::net::TcpStream;
+use tokio::stream::StreamExt;
+use tokio_util::codec::{
+    Decoder, Encoder, FramedRead, FramedWrite, LengthDelimitedCodec,
+};
+
+/// A buffered and framed message codec for reading messages of type `T`
+pub(crate) type FramedStream<T> =
+    FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>;
+/// A buffered and framed message codec for sending messages of type `T`
+pub(crate) type FramedSink<T> =
+    FramedWrite<WriteHalf<TcpStream>, MessageCodec<T>>;
+
+/// A message that can sent between nodes for communication. The message
+/// is generic for type `T`
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Message<T> {
+    /// The id of this message
+    pub msg_id: usize,
+    /// The id of the sender
+    pub sender_id: usize,
+    /// The id of the node this message is being sent to
+    pub target_id: usize,
+    /// The body of the message
+    pub msg: T,
+}
+
+/// Control messages to facilitate communication with the registration
+/// [`Server`] and other [`Client`]s
+///
+/// [`Server`]: struct.Server.html
+/// [`Client`]: struct.Client.html
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum ControlMsg {
+    /// A directory message sent by the [`Server`] to new [`Client`]s once they
+    /// connect so that they know which other [`Client`]s of that type are
+    /// currently connected
+    ///
+    /// [`Server`]: struct.Server.html
+    /// [`Client`]: struct.Client.html
+    Directory { dir: Vec<(usize, String)> },
+    /// An introduction that a new [`Client`] sends to all other existing
+    /// [`Client`]s and the [`Server`]
+    Introduction {
+        address: String,
+        client_type: String,
+    },
+    /// A message the [`Server`] sends to [`Client`]s to inform them to shut
+    /// down
+    ///
+    /// [`Server`]: struct.Server.html
+    /// [`Client`]: struct.Client.html
+    Kill,
+}
 
 impl<T> Message<T> {
     /// Creates a new `Message`.
@@ -25,6 +81,17 @@ impl<T> Message<T> {
             msg,
         }
     }
+}
+
+/// A message encoder/decoder to help frame messages sent over `TCP`,
+/// particularly in the case of very large messages. Uses a very simple method
+/// of writing the length of the serialized message at the very start of
+/// a frame, followed by the serialized message. When decoding, this length
+/// is used to determine if a full frame has been read.
+#[derive(Debug)]
+pub(crate) struct MessageCodec<T> {
+    phantom: std::marker::PhantomData<T>,
+    pub(crate) codec: LengthDelimitedCodec,
 }
 
 impl<T> MessageCodec<T> {
@@ -75,5 +142,31 @@ impl<T: Serialize> Encoder<Message<T>> for MessageCodec<T> {
     ) -> Result<(), Self::Error> {
         let serialized = serialize(&item)?;
         Ok(self.codec.encode(Bytes::from(serialized), dst)?)
+    }
+}
+
+/// Asynchronously waits to read the next message from the given `reader`
+pub(crate) async fn read_msg<T: DeserializeOwned>(
+    reader: &mut FramedStream<T>,
+) -> Result<Message<T>, LiquidError> {
+    match reader.next().await {
+        None => Err(LiquidError::StreamClosed),
+        Some(x) => Ok(x?),
+    }
+}
+
+/// Send the given `message` to the node with the given `target_id` using
+/// the given `directory`
+pub(crate) async fn send_msg<T: Serialize>(
+    target_id: usize,
+    message: Message<T>,
+    directory: &mut HashMap<usize, Connection<T>>,
+) -> Result<(), LiquidError> {
+    match directory.get_mut(&target_id) {
+        None => Err(LiquidError::UnknownId),
+        Some(conn) => {
+            conn.sink.send(message).await?;
+            Ok(())
+        }
     }
 }
