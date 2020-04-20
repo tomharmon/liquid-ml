@@ -1,10 +1,22 @@
 //! A Schema module for managing the data types and row/column names of a
 //! DataFrame.
-
-use crate::dataframe::Schema;
 use crate::error::LiquidError;
+use deepsize::DeepSizeOf;
+use serde::{Deserialize, Serialize};
 use sorer::{dataframe::Column, schema::DataType};
 use std::collections::HashMap;
+
+/// Represents a `Schema` of a `DataFrame`
+#[derive(
+    Serialize, Deserialize, PartialEq, Clone, Debug, Default, DeepSizeOf,
+)]
+pub struct Schema {
+    /// The `DataType`s of this `Schema`
+    pub schema: Vec<DataType>,
+    /// A reverse column name to column index map for all the named columns.
+    /// Helps getting the index by column name faster.
+    pub col_names: HashMap<String, usize>,
+}
 
 /// The implementation of the `Schema` interface, which manages data types and
 /// row/column names of local and distributed data frames.

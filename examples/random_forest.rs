@@ -1,9 +1,11 @@
 use bincode::{deserialize, serialize};
 use clap::Clap;
-use liquid_ml::dataframe::{Column, LocalDataFrame, Row, Rower};
-use liquid_ml::error::LiquidError;
-use liquid_ml::kv::Key;
-use liquid_ml::liquid_ml::LiquidML;
+use liquid_ml::{
+    dataframe::{Column, LocalDataFrame, Row, Rower},
+    error::LiquidError,
+    kv::Key,
+    LiquidML,
+};
 use log::{debug, info, Level};
 use rand;
 use serde::{Deserialize, Serialize};

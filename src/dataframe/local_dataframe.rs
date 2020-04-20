@@ -1,12 +1,28 @@
 //! Defines functionality for a `LocalDataFrame`
-use crate::dataframe::{LocalDataFrame, Row, Rower, Schema};
+use crate::dataframe::{Row, Rower, Schema};
 use crate::error::LiquidError;
 use crossbeam_utils::thread;
+use deepsize::DeepSizeOf;
 use num_cpus;
+use serde::{Deserialize, Serialize};
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema, DataType};
 use std::cmp::Ordering;
 use std::convert::TryInto;
+
+/// Represents a local `DataFrame` which contains `Data` stored in a columnar
+/// format and a well-defined `Schema`
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug, DeepSizeOf)]
+pub struct LocalDataFrame {
+    /// The `Schema` of this `DataFrame`
+    pub schema: Schema,
+    /// The data of this data frame, in columnar format
+    pub data: Vec<Column>,
+    /// Number of threads for this computer
+    pub n_threads: usize,
+    /// Current row index for implementing the `Iterator` trait
+    cur_row_idx: usize,
+}
 
 /// An implementation for a `LocalDataFrame`, inspired by the data frames used
 /// in `pandas` and `R`.

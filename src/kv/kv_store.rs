@@ -1,6 +1,6 @@
 //! The `KVStore` implementation
 use crate::error::LiquidError;
-use crate::kv::{KVMessage, Key, Value};
+use crate::kv::{Key, Value};
 use crate::network::{Client, Message};
 use crate::{
     BYTES_PER_GB, BYTES_PER_KIB, KV_STORE_CACHE_SIZE_FRACTION,
@@ -11,7 +11,7 @@ use deepsize::DeepSizeOf;
 use log::{debug, error, info};
 use lru::LruCache;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use sysinfo::{RefreshKind, System, SystemExt};
@@ -49,6 +49,24 @@ pub struct KVStore<T> {
     /// The total amount of memory (in bytes) this `KVStore` is allowed
     /// to keep in its cache
     max_cache_size: u64,
+}
+
+/// Represents the kind of messages that can be sent between distributed
+/// `KVStore`s
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum KVMessage {
+    /// A message used to kindly tell other `KVStore`s to put the provided
+    /// `Key` and `Value` in their local store
+    Put(Key, Value),
+    /// A message used to request the `Value` for the given `Key` from other
+    /// `KVStore`s
+    Get(Key),
+    /// A message used to send a `Key` and its `Value` in response to `Get`
+    /// messages
+    Data(Key, Value),
+    /// A message used to share random blobs of data with other nodes. This
+    /// provides a lower level interface to facilitate other kinds of messages
+    Blob(Value),
 }
 
 // TODO: remove `DeserializeOwned + 'static`

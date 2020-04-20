@@ -1,8 +1,6 @@
 //! Defines functionality for a data frame that is split across different
 //! physical machines.
-use crate::dataframe::{
-    DistributedDFMsg, DistributedDataFrame, LocalDataFrame, Row, Rower, Schema,
-};
+use crate::dataframe::{local_dataframe::LocalDataFrame, Row, Rower, Schema};
 use crate::error::LiquidError;
 use crate::kv::{KVStore, Key};
 use crate::network::{Client, Message};
@@ -11,7 +9,7 @@ use bytecount;
 use futures::future::try_join_all;
 use log::{debug, info};
 use rand::{self, Rng};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sorer::dataframe::{Column, Data, SorTerator};
 use std::cmp;
 use std::collections::HashMap;
@@ -23,6 +21,88 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Mutex, Notify, RwLock,
 };
+
+/// Represents a distributed, immutable data frame which uses a local
+/// `KVStore` which contains a given node's owned data, and a collection of
+/// `Key`s for all the chunks in the entire data frame so that this
+/// `DistributedDataFrame` can request and operate on chunks of data that
+/// belong to other nodes. Provides convenient `map` and `filter` methods that
+/// operate on the entire distributed data frame with a given `Rower`.
+#[derive(Debug)]
+pub struct DistributedDataFrame {
+    /// The `Schema` of this `DistributedDataFrame`
+    pub schema: Schema,
+    /// The name of this `DistributedDataFrame`. Must be unique in a `LiquidML`
+    /// instance
+    pub df_name: String,
+    /// A map of the range of row indexs to the `Key`s that point to the chunk
+    /// of data with those rows, which may belong to different nodes.
+    pub df_chunk_map: HashMap<Range<usize>, Key>,
+    /// The number of rows in this entire `DistributedDataFrame`
+    pub num_rows: usize,
+    /// The id of the node this `DistributedDataFrame` is running on
+    pub node_id: usize,
+    /// How many nodes are there in this `DistributedDataFrame`?
+    pub num_nodes: usize,
+    /// What's the address of the `Server`?
+    pub server_addr: String,
+    /// What's my IP address?
+    pub my_ip: String,
+    /// Used for communication with other nodes in this `DistributedDataFrame`
+    network: Arc<RwLock<Client<DistributedDFMsg>>>,
+    /// The `KVStore`, which stores the serialized data owned by this
+    /// `DistributedDataFrame` and deserialized cached data that may or may
+    /// not belong to this node
+    kv: Arc<KVStore<LocalDataFrame>>,
+    /// Used for processing messages so that the asynchronous task running
+    /// the `process_message` function can notify other asynchronous tasks
+    /// when the `row` of this `DistributedDataFrame` is ready to use for
+    /// operations (such as returning the result to the `get_row` function
+    internal_notifier: Arc<Notify>,
+    /// Is mutated by the asynchronous `process_message` task to be a requested
+    /// row when the network responds to `GetRow` requests, to enable getter
+    /// methods for data such as `get_row`
+    row: Arc<RwLock<Row>>,
+    /// A notifier that gets notified when the `Server` has sent a `Kill`
+    /// message to this `DistributedDataFrame`'s network `Client`
+    kill_notifier: Arc<Notify>,
+    /// Used for lower level messages, such as sending arbitrary `Rower`s
+    blob_receiver: Mutex<Receiver<Vec<u8>>>,
+    /// Used for processing filter results TODO: maybe a better way to do this
+    filter_results: Mutex<Receiver<DistributedDFMsg>>,
+}
+
+/// Represents the kinds of messages sent between `DistributedDataFrame`s
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub(crate) enum DistributedDFMsg {
+    /// A messaged used to request a `Row` with the given index from another
+    /// node in a `DistributedDataFrame`
+    GetRow(usize),
+    /// A message used to respond to `GetRow` messages with the requested row
+    Row(Row),
+    /// A message used to tell the 1st node the results from using the `filter`
+    /// method. If there were no rows after filtering, then `filtered_df_key`
+    /// is `None` and `num_rows` is `0`.
+    FilterResult {
+        num_rows: usize,
+        filtered_df_key: Option<Key>,
+    },
+    /// A message used to share random blobs of data with other nodes. This
+    /// provides a lower level interface to facilitate other kinds of messages,
+    /// for example sending rowers when performing `map`/`filter`.
+    Blob(Vec<u8>),
+    /// Used to inform other nodes in a `DistributedDataFrame` the required
+    /// information for other nodes to construct a new `DistributedDataFrame`
+    /// struct that is consistent across all nodes.
+    Initialization {
+        schema: Schema,
+        df_chunk_map: HashMap<Range<usize>, Key>,
+    },
+    /// Used by nodes to co-ordinate connection to the `Server` so nodes
+    /// preserve the correct ids, and to notify node 1 when to send the
+    /// `Initialization` message
+    Ready,
+}
 
 impl DistributedDataFrame {
     /// Creates a new `DistributedDataFrame` from the given file. It is

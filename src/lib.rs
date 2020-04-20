@@ -295,7 +295,7 @@
 //!
 //! ```rust,no_run
 //! use liquid_ml::dataframe::{Data, Rower, Row};
-//! use liquid_ml::liquid_ml::LiquidML;
+//! use liquid_ml::LiquidML;
 //! use serde::{Serialize, Deserialize};
 //!
 //! #[derive(Serialize, Deserialize, Clone)]
@@ -351,7 +351,7 @@
 //!
 //! ```rust,no_run
 //! use liquid_ml::dataframe::LocalDataFrame;
-//! use liquid_ml::liquid_ml::LiquidML;
+//! use liquid_ml::LiquidML;
 //! use liquid_ml::kv::KVStore;
 //! use std::sync::Arc;
 //! use tokio::sync::RwLock;
@@ -478,8 +478,10 @@
 pub mod dataframe;
 pub mod error;
 pub mod kv;
-pub mod liquid_ml;
 pub mod network;
+
+mod liquid_ml;
+pub use crate::liquid_ml::LiquidML;
 
 pub(crate) const MAX_NUM_CACHED_VALUES: usize = 10;
 pub(crate) const BYTES_PER_KIB: f64 = 1_024.0;

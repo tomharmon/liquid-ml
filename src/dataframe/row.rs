@@ -1,9 +1,23 @@
 //! Structs and functions for working with rows of data in a `DataFrame`.
-use crate::dataframe::{Fielder, Row, Schema};
+use crate::dataframe::{Fielder, Schema};
 use crate::error::LiquidError;
+use deepsize::DeepSizeOf;
+use serde::{Deserialize, Serialize};
 use sorer::dataframe::Data;
 use sorer::schema::DataType;
 use std::ops::Index;
+
+/// Represents a single row in a `DataFrame`. Has a clone of the `DataFrame`s
+/// `Schema` and holds data as a `Vec<Data>`.
+#[derive(Serialize, Deserialize, PartialEq, Clone, Debug, DeepSizeOf)]
+pub struct Row {
+    /// A clone of the `Schema` of the `DataFrame` this `Row` is from.
+    pub(crate) schema: Schema, //Vec<DataType>,
+    /// The data of this `Row` as boxed values.
+    pub(crate) data: Vec<Data>,
+    /// The offset of this `Row` in the `DataFrame`
+    idx: Option<usize>,
+}
 
 /// Functions for creating, mutating, and getting data from `Row`s.
 impl Row {

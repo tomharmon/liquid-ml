@@ -80,10 +80,10 @@ pub(crate) fn increment_msg_id(cur_id: usize, id: usize) -> usize {
 }
 
 mod client;
-pub use crate::network::client::Client;
+pub use client::Client;
 
 mod message;
-pub use crate::network::message::{ControlMsg, Message};
+pub use message::{ControlMsg, Message};
 
 mod server;
-pub use crate::network::server::Server;
+pub use server::Server;

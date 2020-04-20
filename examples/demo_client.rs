@@ -1,13 +1,13 @@
 use clap::Clap;
-use liquid_ml::dataframe::LocalDataFrame;
-use liquid_ml::error::LiquidError;
-use liquid_ml::kv::{KVStore, Key};
-use liquid_ml::liquid_ml::LiquidML;
+use liquid_ml::{
+    dataframe::{Column, Data, LocalDataFrame},
+    error::LiquidError,
+    kv::{KVStore, Key},
+    LiquidML,
+};
 use log::Level;
 use simple_logger;
-use sorer::dataframe::{Column, Data};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// This is a simple demo client running the Milestone 1 example code.
 #[derive(Clap)]

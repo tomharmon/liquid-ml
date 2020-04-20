@@ -1,7 +1,9 @@
 use clap::Clap;
-use liquid_ml::dataframe::{Data, LocalDataFrame, Row, Rower};
-use liquid_ml::error::LiquidError;
-use liquid_ml::liquid_ml::LiquidML;
+use liquid_ml::{
+    dataframe::{Data, LocalDataFrame, Row, Rower},
+    error::LiquidError,
+    LiquidML,
+};
 use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;

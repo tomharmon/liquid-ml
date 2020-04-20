@@ -1,7 +1,5 @@
 use clap::Clap;
-use liquid_ml::error::LiquidError;
-use liquid_ml::kv::Key;
-use liquid_ml::liquid_ml::LiquidML;
+use liquid_ml::{error::LiquidError, kv::Key, LiquidML};
 use log::Level;
 use simple_logger;
 
