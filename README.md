@@ -33,37 +33,37 @@ architecture and implementation of `SoRer` may be found
 
 ## Networking
 The network layer is the lowest level component of a `liquid_ml` instance.
-It provides a simple registration [`Server`] and a network of distributed
-[`Client`]s, each with a unique ID assigned by the [`Server`]. The
-networking layer uses `TCP` to communicate. [`Client`]s are able to send
-messages directly to any other [`Client`] of the same client type after
-they register with the [`Server`].
+It provides a simple registration `Server` and a network of distributed
+`Client`s, each with a unique ID assigned by the `Server`. The
+networking layer uses `TCP` to communicate. `Client`s are able to send
+messages directly to any other `Client` of the same client type after
+they register with the `Server`.
 
-The [`Client`] is designed asynchronously so that it can listen for
-messages from the [`Server`] or any number of `Client`s (within physical
-limitations) concurrently. Messages from the [`Server`] are processed
-internally by the [`Client`], while messages from other [`Client`]s are
+The `Client` is designed asynchronously so that it can listen for
+messages from the `Server` or any number of `Client`s (within physical
+limitations) concurrently. Messages from the `Server` are processed
+internally by the `Client`, while messages from other `Client`s are
 sent over a
-[`mpsc`](https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/index.html)
-channel which is passed in during construction of the [`Client`]. This
+`mpsc`(https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/index.html)
+channel which is passed in during construction of the `Client`. This
 channel acts as a queue of messages so that they may be processed in
-whichever way a user of the [`Client`] wants. Because of this the
+whichever way a user of the `Client` wants. Because of this the
 networking layer is not tightly coupled to any system that uses it.
 
-The [`Client`] is generic for messages of type `T`. A [`Client`]
+The `Client` is generic for messages of type `T`. A `Client`
 implementation is provided for any message type that implements
 the following traits: `Send + Sync` from the standard library and
 `DeserializeOwned + Serialize` from the serialization/deserialization crate
-[`Serde`](https://crates.io/crates/serde).
+`Serde`(https://crates.io/crates/serde).
 
-[`Client`]s are also constructed with a client type so that sub-networks of
+`Client`s are also constructed with a client type so that sub-networks of
 different client types can be dynamically created. This supports the
 `liquid_ml` distributed data frame implementation.
 
 ## KV Store
-The [`KVStore`] stores blobs of serialized data that are associated with
-[`Key`]s, as well as caches deserialized values in memory. In `liquid_ml`,
-the [`KVStore`] stores [`LocalDataFrame`]s so that chunks of data frames
+The `KVStore` stores blobs of serialized data that are associated with
+`Key`s, as well as caches deserialized values in memory. In `liquid_ml`,
+the `KVStore` stores `LocalDataFrame`s so that chunks of data frames
 can be associated with different nodes in the system.
 
 Cached values that are likely no longer needed are smartly evicted using an
@@ -73,9 +73,9 @@ memory.  The `LRU` cache has a fixed size limit that is set to `1/3` of the
 total memory on each node.
 
 Caching also helps to improve performance by reducing network calls.  Each
-[`KVStore`] store implements functionality to utilize the network layer to
+`KVStore` store implements functionality to utilize the network layer to
 get data from a different node if the data is available elsewhere and not
-in this [`KVStore`].
+in this `KVStore`.
 
 
 ## Data frame
@@ -83,31 +83,31 @@ A data frame in `liquid_ml` is lightly inspired by those found in `R` or
 `pandas`, and supports optionally named columns. There are many provided
 constructors which make it easy to create any kind of data frame in
 different ways. You may analyze the data in a data frame by implementing
-the [`Rower`] trait to perform `map` or `filter` operations. These
-operations can be easily performed on either [`LocalDataFrame`]s for data
-that fits in memory or [`DistributedDataFrame`]s for data that is too
+the `Rower` trait to perform `map` or `filter` operations. These
+operations can be easily performed on either `LocalDataFrame`s for data
+that fits in memory or `DistributedDataFrame`s for data that is too
 large to fit in one machine.
 
 The `dataframe` module provides 2 implementations for a data frame:
-a [`LocalDataFrame`] and a [`DistributedDataFrame`], the differences are
+a `LocalDataFrame` and a `DistributedDataFrame`, the differences are
 further explained in the implementation section.
 
-**Note**: If you need a [`DistributedDataFrame`], it is highly recommended
-that you check out the [`LiquidML`] struct since that provides many
-convenient helper functions for working with [`DistributedDataFrame`]s.
-Using a [`DistributedDataFrame`] directly is only recommended if you really
+**Note**: If you need a `DistributedDataFrame`, it is highly recommended
+that you check out the `LiquidML` struct since that provides many
+convenient helper functions for working with `DistributedDataFrame`s.
+Using a `DistributedDataFrame` directly is only recommended if you really
 know what you are doing. There are also helpful examples of `map` and
-`filter` in the [`LiquidML`] documentation
+`filter` in the `LiquidML` documentation
 
 ## Application Layer
-The application layer, aka the [`LiquidML`] struct, is an even higher level
+The application layer, aka the `LiquidML` struct, is an even higher level
 API for writing programs to perform data analysis on the entire distributed
 system. It allows a user to create and analyze multiple
-[`DistributedDataFrame`]s without worrying about [`KVStore`]s, nodes,
+`DistributedDataFrame`s without worrying about `KVStore`s, nodes,
 networking, or any other complications of distributed systems, making it
 very easy for a user to run `map` or `filter` operations.
 
-[`LiquidML`] also provides a `run` method which takes a function and
+`LiquidML` also provides a `run` method which takes a function and
 executes that function. The signature of this user-implemented function
 is `KVStore -> ()`. This allows much lower-level access for more
 advanced users so that they may have more powerful and general usage of the
@@ -120,7 +120,7 @@ examples.
 
 ## Library Usage
 ### Tokio
-The networking layer uses [`tokio`](https://docs.rs/tokio/0.2.13/tokio/) to
+The networking layer uses `tokio`(https://docs.rs/tokio/0.2.13/tokio/) to
 use asynchronous programming to handle connections with multiple clients
 concurrently. `Tokio` is an asynchronous run time for Rust since there is
 not one included in the standard library. It also includes some faster
@@ -161,7 +161,7 @@ license.
 
 ## Networking
 
-The Networking layer consists of [`Client`] and [`Server`] structs, as well
+The Networking layer consists of `Client` and `Server` structs, as well
 as some helper functions in the `network` module.
 
 There is little handling of many of the complicated edge cases associated
@@ -171,55 +171,55 @@ is checking for connections being closed and ensuring messages are of the
 right type.
 
 ### Client
-The [`Client`] struct represents a node and does the following tasks
+The `Client` struct represents a node and does the following tasks
 asynchronously:
 1. Listen for new connections from other nodes
    (`Client::accept_new_connections`)
-2. Listen for `Kill` messages from the [`Server`]
-3. Receive messages from any other active [`Client`] using the read half of
-   a `TCPStream`. Messages are forwarded one layer up to the [`KVStore`]
-   via an [`mpsc`](https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/index.html)
+2. Listen for `Kill` messages from the `Server`
+3. Receive messages from any other active `Client` using the read half of
+   a `TCPStream`. Messages are forwarded one layer up to the `KVStore`
+   via an `mpsc`(https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/index.html)
    channel.
 
-A [`Client`] can be used to send a message directly to any other [`Client`]
+A `Client` can be used to send a message directly to any other `Client`
 of the same type at any time by using the following method:
 
 `client.send_msg(target_id: usize, message: Serialize)`
 
-When a [`Client`] is first created, it must be registered with the
-[`Server`] and with all other existing [`Client`]s.
+When a `Client` is first created, it must be registered with the
+`Server` and with all other existing `Client`s.
 
-Registration process from [`Client`] perspective:
-1. Connect to the [`Server`]
-2. Send the [`Server`] a `Message<ControlMsg::Introduction>` message
-   containing the `IP:Port` of this [`Client`]
-3. The [`Server`] will respond with the `Message<ControlMsg::Directory>`
+Registration process from `Client` perspective:
+1. Connect to the `Server`
+2. Send the `Server` a `Message<ControlMsg::Introduction>` message
+   containing the `IP:Port` of this `Client`
+3. The `Server` will respond with the `Message<ControlMsg::Directory>`
    message containing the `IP:Port` of all other currently connected
-   [`Client`]s
-4. The newly created [`Client`] connects to all other existing [`Client`]s.
+   `Client`s
+4. The newly created `Client` connects to all other existing `Client`s.
    When each connection is made:
-  - A `Message<ControlMsg::Introduction>` is sent to the other [`Client`].
-  - They are added to the `directory` of this [`Client`].
+  - A `Message<ControlMsg::Introduction>` is sent to the other `Client`.
+  - They are added to the `directory` of this `Client`.
   - An `mpsc` channel is created that is used to send messages to whatever
     is using the network layer and thus needs to process and respond to
-    messages. In `liquid_ml`, this is the [`KVStore`].
+    messages. In `liquid_ml`, this is the `KVStore`.
   - A green thread is spawned to receive future messages from the other
-    [`Client`]. When the messages are received they are sent over the `mpsc`
+    `Client`. When the messages are received they are sent over the `mpsc`
     channel.
 
 ### Server
-The [`Server`] asynchronously registers new [`Client`]s via
+The `Server` asynchronously registers new `Client`s via
 `Server::accept_new_connections` and also allows sending any
 `Message<ControlMsg>` type, such as `Kill` messages for orderly shutdown.
 
-Registration process from [`Server`] perspective:
-1. Accept an incoming `TCP` connection from a new [`Client`]
+Registration process from `Server` perspective:
+1. Accept an incoming `TCP` connection from a new `Client`
 2. Read a `Message<ControlMsg::Introduction>` message from the new
-   [`Client`] containing the `IP:Port` of the new [`Client]
-3. Reply to the new [`Client`] with a `Message<ControlMsg::Directory>`
+   `Client` containing the `IP:Port` of the new `Client]
+3. Reply to the new `Client` with a `Message<ControlMsg::Directory>`
    message
-4. Add the [`Connection`] with the new [`Client`] to the `directory` of this
-   [`Server`]
+4. Add the `Connection` with the new `Client` to the `directory` of this
+   `Server`
 5. Listen for new connections, when one arrives go to #1
 
 Due to the servers fairly simple functionality, a default implementation of
@@ -233,45 +233,45 @@ cargo run --bin server -- --address <Optional IP Address>
 If an IP is not provided the server defaults to `127.0.0.1:9000`.
 
 ## KVStore
-Internally [`KVStore`]s store their data in memory as serialized blobs
-(aka a `Vec<u8>`). The [`KVStore`] caches deserialized values into their
+Internally `KVStore`s store their data in memory as serialized blobs
+(aka a `Vec<u8>`). The `KVStore` caches deserialized values into their
 type `T` on a least-recently used basis. A hard limit for the cache size is
 set to be `1/3` the amount of total memory on the machine, though this will
 be changed to be configurable.
 
-[`KVStore`]s have an internal asynchronous message processing task since
+`KVStore`s have an internal asynchronous message processing task since
 they use the network directly and need to communicate with other
-[`KVStore`]s. The [`KVStore`] also provides a lower level interface for
+`KVStore`s. The `KVStore` also provides a lower level interface for
 network communication by exposing a method to directly send any serialized
-blob of data to any other [`KVStore`].
+blob of data to any other `KVStore`.
 
 ## DataFrame
-### [`LocalDataFrame`]
+### `LocalDataFrame`
 
-A [`LocalDataFrame`] implements the actual data storage and processing.
+A `LocalDataFrame` implements the actual data storage and processing.
 Data is held in columnar format and with a well defined schema, and the
-[`LocalDataFrame`] defines  the actual single and multi-threaded `map` and
+`LocalDataFrame` defines  the actual single and multi-threaded `map` and
 `filter` operations. It should be noted that all `map` and `filter`
 operations are row-wise processing, but data is held in columnar format
 to avoid boxed types and reduced memory usage.
 
-### [`DistributedDataFrame`]
+### `DistributedDataFrame`
 
-A [`DistributedDataFrame`] is an abstraction over a distributed system of
-nodes that run [`KVStore`]s which contain chunks of [`LocalDataFrame`]s.
-Therefore each [`DistributedDataFrame`] simply holds a pointer to a
-[`KVStore`] and a map of ranges of row indices to the [`Key`]s for the
-chunks of data with that range of row indices. A [`DistributedDataFrame`]
+A `DistributedDataFrame` is an abstraction over a distributed system of
+nodes that run `KVStore`s which contain chunks of `LocalDataFrame`s.
+Therefore each `DistributedDataFrame` simply holds a pointer to a
+`KVStore` and a map of ranges of row indices to the `Key`s for the
+chunks of data with that range of row indices. A `DistributedDataFrame`
 is immutable to make it trivial for the global state of the data frame to
 be consistent.
 
-Because of this the [`DistributedDataFrame`] implementation is mainly
+Because of this the `DistributedDataFrame` implementation is mainly
 concerned with networking and getting and putting chunks of different
-[`KVStore`]s. One of the main concerns are that creating a new
-[`DistributedDataFrame`] means distributing the [`Key`]s of all the chunks
+`KVStore`s. One of the main concerns are that creating a new
+`DistributedDataFrame` means distributing the `Key`s of all the chunks
 to all nodes.
 
-Upon creation, node 1 of a [`DistributedDataFrame`] will distribute chunks
+Upon creation, node 1 of a `DistributedDataFrame` will distribute chunks
 of data across multiple nodes from `SoR` files, iterators, and other
 convenient ways of adding data. Note that our experimental testing found
 that using the largest chunks possible to fit on each node increased
@@ -279,28 +279,28 @@ performance by over `2x`.
 
 Another is that since our experimental testing found that big
 chunks are best for `map` and `filter` performance, we can not simply use
-the [`KVStore`] to support the API of a [`DistributedDataFrame`], since
+the `KVStore` to support the API of a `DistributedDataFrame`, since
 each chunk will be too big to go over the network, so methods like `get`
-won't work unless each [`DistributedDataFrame`] has a way to (meaningfully)
-talk to other [`DistributedDataFrame`]s, which mean they need a [`Client`]
+won't work unless each `DistributedDataFrame` has a way to (meaningfully)
+talk to other `DistributedDataFrame`s, which mean they need a `Client`
 of their own.
 
-Since `id`s are assigned to [`Client`]s based on connection order to the
-[`Server`], this means we must programmatically connect based on the
-original connection order of a [`KVStore`] that is passed in.  Because of
+Since `id`s are assigned to `Client`s based on connection order to the
+`Server`, this means we must programmatically connect based on the
+original connection order of a `KVStore` that is passed in.  Because of
 this difficulty, there are no direct public constructor functions for
-creating a [`DistributedDataFrame`], there are only methods for a
-[`LiquidML`] struct to create one so that the user does not have to worry
+creating a `DistributedDataFrame`, there are only methods for a
+`LiquidML` struct to create one so that the user does not have to worry
 about this ugliness. There are definitely ways to improve this
 implementation but we do not have a lot of experience with networking and
 distributed systems (this is our first project related to the topic) and
 thus this is the best we could do in the circumstances.
 
 ## Application Layer aka `LiquidML`
-The implementation of the [`LiquidML`] struct is quite simple since it
-delegates most of the work to the [`DistributedDataFrame`]. All it does is
+The implementation of the `LiquidML` struct is quite simple since it
+delegates most of the work to the `DistributedDataFrame`. All it does is
 manage the state of its own node and allow creation and analysis of
-multiple [`DistributedDataFrame`]s.
+multiple `DistributedDataFrame`s.
 
 # Examples and Use Cases
 Please check the `examples/` directory for more fully featured examples.
@@ -317,8 +317,8 @@ assert_eq!(df.n_rows(), 2);
 ```
 
 ## Creating a `DistributedDataFrame` With `LiquidML` and Using a Simple `Rower`
-This example shows a trivial implementation of a [`Rower`] and using the
-entire [`LiquidML`] system to perform a `map` operation while being
+This example shows a trivial implementation of a `Rower` and using the
+entire `LiquidML` system to perform a `map` operation while being
 unaware of the distributed internals of the system.
 
 ```rust,no_run
@@ -408,7 +408,7 @@ the last columns is a boolean label and does not support more than
 boolean labels
 
 This program can be run as follows:
-1. Start the [`Server`] with this command: `cargo run --bin server`
+1. Start the `Server` with this command: `cargo run --bin server`
 2. Start 3 clients, each with a different `IP:Port`, with the following
    command:
 
@@ -433,7 +433,7 @@ if you would like the data file.
 The code can be found in `examples/seven_degrees.rs`
 
 This program can be run as follows:
-1. Start the [`Server`] with this command: `cargo run --bin server`
+1. Start the `Server` with this command: `cargo run --bin server`
 2. Start 3 clients, each with a different `IP:Port`, with the following
    command:
 
@@ -464,7 +464,7 @@ example itself), so "foo" and "foo," count as different words.
 The code can be found in `examples/word_count.rs`
 
 This program runs the word count example and can be run as follows:
-1. Start the [`Server`] with this command: `cargo run --bin server`
+1. Start the `Server` with this command: `cargo run --bin server`
 2. Start 3 clients, each with a different `IP:Port`, with the following
    command:
 
@@ -505,27 +505,3 @@ The third client will print `SUCCESS` at the end.
 # Road Map
 0. Build robust integration tests to define how the distributed system ks.
 1. Fix up orderly shutdown of the network layer.
-
-[`Client`]: network/struct.Client.html
-[`Server`]: network/struct.Server.html
-[`Connection`]: network/struct.Connection.html
-[`LocalDataFrame`]: dataframe/struct.LocalDataFrame.html
-[`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
-[`Rower`]: dataframe/trait.Rower.html
-[`KVStore`]: kv/struct.KVStore.html
-[`Key`]: kv/struct.Key.html
-[`Key`]: kv/type.Value.html
-[`LiquidML`]: struct.LiquidML.html
-pub mod dataframe;
-pub mod error;
-pub mod kv;
-pub mod network;
-
-mod liquid_ml;
-pub use crate::liquid_ml::LiquidML;
-
-pub(crate) const MAX_NUM_CACHED_VALUES: usize = 10;
-pub(crate) const BYTES_PER_KIB: f64 = 1_024.0;
-pub(crate) const BYTES_PER_GB: f64 = 1_073_741_824.0;
-pub(crate) const KV_STORE_CACHE_SIZE_FRACTION: f64 = 0.33;
-pub(crate) const MAX_FRAME_LEN_FRACTION: f64 = 0.8;
