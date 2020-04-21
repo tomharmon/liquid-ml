@@ -364,7 +364,26 @@
 //! comes as a pre-packaged binary in this crate.
 //! 
 //! # Examples
-//! 
+//!
+//! ## Readom Forest
+//!
+//! A distributed random forest implementation can be found at 
+//! `examples/random_forest.rs` this example demonstrates a built from scratch 
+//! random forest on our distributed platform.
+//!
+//! This is currently a very rudimentary proof of concept as it assumes that 
+//! the last columns is a boolean label and does not support more than 
+//! boolean labels 
+//!
+//! This program can be run as follows:
+//! 1. Start the `Server` with this command: `cargo run --bin server`
+//! 2. Start 3 clients, each with a different `IP:Port`, with the following
+//!    command:
+//!
+//! `
+//! cargo run --release --example random_forest -- -m <IP:Port> -d <path to sor file with data>
+//! `
+//!
 //! ## Degrees of Linus
 //!
 //! The code can be found in `src/liquid_ml/examples/seven_degrees.rs`
