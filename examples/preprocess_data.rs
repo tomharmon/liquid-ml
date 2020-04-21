@@ -6,7 +6,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 
 /// This is a simple data processing script to convert CSV files to SoR files
-/// and convert raw data to feature vectors.
+/// and convert raw data to feature vectors. It does not necessarily belong
+/// in this crate.
 #[derive(Clap)]
 #[clap(version = "1.0", author = "Tom")]
 struct Opts {

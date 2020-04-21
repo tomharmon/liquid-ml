@@ -32,6 +32,9 @@ struct Opts {
     /// The number of nodes for the distributed system
     #[clap(short = "n", long = "num_nodes", default_value = "3")]
     num_nodes: usize,
+    /// The number of degrees of Linus to calculate for the distributed system
+    #[clap(short = "d", long = "degrees", default_value = "4")]
+    degrees: usize,
     /// The name of the commits file
     #[clap(
         short = "c",
@@ -145,21 +148,6 @@ impl Rower for UserRower {
     }
 }
 
-fn count_new_lines(file_name: &str) -> usize {
-    let mut buf_reader = BufReader::new(File::open(file_name).unwrap());
-    let mut new_lines = 0;
-
-    loop {
-        let bytes_read = buf_reader.fill_buf().unwrap();
-        let len = bytes_read.len();
-        if len == 0 {
-            return new_lines;
-        };
-        new_lines += bytecount::count(bytes_read, b'\n');
-        buf_reader.consume(len);
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
@@ -167,22 +155,15 @@ async fn main() -> Result<(), LiquidError> {
     let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;
-    // NOTE: IS this table needed?
-    //app.df_from_sor("users", "/code/7degrees/users.ltgt").await?;
     app.df_from_sor("commits", &opts.commits).await?;
-    // NOTE: IS this table needed?
-    //app.df_from_sor("projects", "~/code/7degrees/projects.ltgt").await?;
 
     // assume the max of pid is <= num_lines
-    //let num_projects = count_new_lines(&opts.projects);
-    //let num_users = count_new_lines(&opts.users);
-
-    let num_projects = 125_500_000;
-    let num_users = 32_500_000;
+    let num_projects = 126_000_000;
+    let num_users = 33_000_000;
     let mut users = BitVec::repeat(false, num_users);
     users.set(4967, true);
     let mut projects = BitVec::repeat(false, num_projects);
-    for i in 0..4 {
+    for i in 0..opts.degrees {
         println!("degree {}", i);
         let mut pr = ProjectRower::new(num_projects, users, projects);
         // Node 1 will get the rower back and send it to all the other nodes

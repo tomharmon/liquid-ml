@@ -31,7 +31,15 @@
 //! nodes that run [`KVStore`]s which contain chunks of [`LocalDataFrame`]s.
 //! Therefore each [`DistributedDataFrame`] simply holds a pointer to a
 //! [`KVStore`] and a map of ranges of row indices to the [`Key`]s for the
-//! chunks of data with that range of row indices.
+//! chunks of data with that range of row indices. A [`DistributedDataFrame`]
+//! is immutable to make it trivial for the global state of the data frame to
+//! be consistent.
+//!
+//! Because of this the [`DistributedDataFrame`] implementation is mainly
+//! concerned with networking and getting and putting chunks of different
+//! [`KVStore`]s. One of the main concerns are that creating a new
+//! [`DistributedDataFrame`] means distributing the [`Key`]s of all the chunks
+//! to all nodes.
 //!
 //! Upon creation, node 1 of a [`DistributedDataFrame`] will distribute chunks
 //! of data across multiple nodes from [`SoR`] files, iterators, and other

@@ -1,6 +1,6 @@
 //! A module with methods to create, organize, and communicate with nodes in a
 //! distributed system over `TCP`, as well as implementations of [`Client`] and
-//! [`Server`] for `LiquidML`.
+//! [`Server`] for `liquid_ml`.
 //!
 //! The [`Server`] struct acts as a simple registration server. Once
 //! constructed, calling the [`accept_new_connections`] method will allow
