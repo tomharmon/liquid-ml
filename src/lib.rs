@@ -13,25 +13,17 @@
 //! extending it to apply your own analytics tools to your data in a
 //! distributed, scalable fashion.
 //!
-//! LiquidML is currently in development but the finished product will be
-//! implemented soon.
-//!
-//! **Note**: it is highly recommended that you install Rust via the
-//! `install_rust` Make target. If you have any issues with building, running,
-//! or testing the projects, make sure you run the `update_rust` Make target.
-//! Also, please use the stable channel of Rust when building the project.
-//!
-//! It is also highly recommended that you run the `doc` Make target to view
-//! the documentation get a better view of the design of the project. If you
-//! don't, it would also make Tom very sad.
-//!
+//! LiquidML is currently in the state of an MVP. Tools on top of LiquidML can 
+//! built and several examples are included in this crate to demonstrate various 
+//! use cases.
 //!
 //! # Architecture
 //! LiquidML consists of the following architectural components:
 //! - SoRer, for inferring schemas and parsing files
+//!          this is an in house format for data representation
 //! - Networking Layer, for communication over TCP
 //! - KV Store, for associating ownership of data frame chunks with nodes
-//! - DataFrame, for local and distributed data frames and UDFs
+//! - DataFrame, for local and distributed data frames 
 //! - Application Layer, for convenience of using the entire system
 //!
 //! ## SoRer
@@ -132,8 +124,7 @@
 //!
 //! The `Application` also provides a `run` method which takes a function and
 //! executes that function. The signature of this user-implemented function
-//! is `KVStore -> ()` (`()` is the unit type in Rust, and this signature
-//! is a slight simplification). This allows much lower-level access for more
+//! is `KVStore -> ()`. This allows much lower-level access for more
 //! advanced users so that they may have more powerful and general usage of the
 //! system beyond our provided implementations of `map`, and `filter`.
 //!
@@ -184,12 +175,13 @@
 //! - `clap`: for command line argument parsing
 //!
 //! ## Networking
+//!
 //! The Networking layer consists of `Client` and `Server` structs, as well as
 //! some helper functions in the `network` module.
 //!
 //! There is little handling of many of the complicated edge cases associated
 //! with distributed systems in the networking layer. It's assumed that most
-//! things happen without any errors. Some of the basic checking that is done
+//! things happen without any errors. We Some of the basic checking that is done
 //! is checking for connections being closed and ensuring messages are of the
 //! right type.
 //!
@@ -370,31 +362,21 @@
 //!
 //! The required registration server, used for co-ordination of `Client`s
 //! comes as a pre-packaged binary in this crate.
+//! 
+//! # Examples
+//! 
+//! ## Degrees of Linus
 //!
-//! # Open Questions
-//! None
-//!
-//! # Status
-//! We are done with the entire application except maybe a few minor tweaks
-//! here and there, adding a bit more documentation and examples in the data
-//! frame and application level modules, more testing, and random forest.
-//!
-//! We finished our `DistributedDataFrame` implementation and an implementation
-//! of a distributed filter since we thought it was cool.
-//!
-//! We believe our API to be complete and that it won't need to change any
-//! more for the purposes of this class project.
-//!
-//! ## Milestone 5 (Linus)
 //! The code can be found in `src/liquid_ml/examples/seven_degrees.rs`
 //!
-//! This program runs the Linus program for 4 degrees and can be run as follows:
+//! This program runs the Degrees of Linus program for 4 degrees and can be run 
+//! as follows:
 //! 1. Start the `Server` with this command: `cargo run --bin server`
 //! 2. Start 3 clients, each with a different `IP:Port`, with the following
 //!    command:
 //!
 //! `
-//! cargo run --example seven_degrees -- -m <IP:Port> -c <full path to commits file>
+//! cargo run --release --example seven_degrees -- -m <IP:Port> -c <full path to commits file>
 //! `
 //!
 //! Full description of the command line arguments available can be seen by
@@ -409,9 +391,9 @@
 //! Linus and using the full sized files.
 //!
 //! One computer was a desktop with only 8GB of RAM and an i5-4690k, the
-//! other was a (plugged in) laptop with 16GB of RAM and an i7.
+//! other was a (plugged in) laptop with 16GB of RAM and an i7-8550u.
 //!
-//! ## Milestone 4 (Word Count)
+//! ## Word Count
 //! The code can be found in `src/liquid_ml/examples/word_count.rs`
 //!
 //! This program runs the word count example and can be run as follows:
@@ -420,14 +402,14 @@
 //!    command:
 //!
 //! `
-//! cargo run --example word_count -- -m <IP:Port>
+//! cargo run --release --example word_count -- -m <IP:Port>
 //! `
 //!
-//! ## Milestone 3 (Demo client)
-//! We have implemented the example code from Milestone 1 since that is
-//! one of the goals of Milestone 3. This can be found at
-//! `src/liquid_ml/examples/demo_client.rs`.
-//!
+//! ## Simple Demo
+//! We implemented a simple demo that places soe numbres into the kv adds them
+//! and verifies that the addition was correct i.e. all numbers got inserted at 
+//! the right place, correctly.
+//! 
 //! This program runs the demo program and can be run as follows:
 //! 1. Start the `Server` with this command: `cargo run --bin server`
 //! 2. Start 3 clients, each with a different `IP:Port`, with the following
@@ -440,9 +422,7 @@
 //! We also added most of the pieces for orderly shutdown, such as `Kill`
 //! messages and a way for the `Client` to listen for these `Kill` messages
 //! from the `Server`. Our `Application` currently `await`s a `Kill` messages
-//! before it exits. It is not fully complete, however, since we need to figure
-//! out how to 'cancel' some asynchronous tasks when `Kill` messages are
-//! received (not easy in Rust, but possible).
+//! before it exits. It is not fully complete.
 //!
 //! The third client will print `SUCCESS` at the end.
 //!
