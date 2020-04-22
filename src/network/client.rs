@@ -16,47 +16,38 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc::Sender, Notify, RwLock};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-/// Represents a [`Client`] node in a distributed system that is generic for
+/// Represents a `Client` node in a distributed system that is generic for
 /// type `T`, where `T` is the types of messages that can be sent between
-/// [`Client`]s
-///
-/// [`Client`]: struct.Client.html
+/// `Client`s
 #[derive(Debug)]
 pub struct Client<T> {
-    /// The `id` of this [`Client`], assigned by the [`Server`] on startup
+    /// The `id` of this `Client`, assigned by the [`Server`] on startup
     /// to be monotonically increasing based on the order of connections
     ///
-    /// [`Client`]: struct.Client.html
     /// [`Server`]: struct.Server.html
     pub id: usize,
-    /// The `address` of this [`Client`] in the format `IP:Port`
-    ///
-    /// [`Client`]: struct.Client.html
+    /// The `address` of this `Client` in the format `IP:Port`
     pub address: String,
     /// The id of the current message
     pub(crate) msg_id: usize,
     /// A directory which is a map of client id to the [`Connection`] with that
-    /// [`Client`]
+    /// `Client`
     ///
     /// [`Connection`]: struct.Connection.html
-    /// [`Client`]: struct.Client.html
     pub(crate) directory: HashMap<usize, Connection<T>>,
     /// A buffered and framed message codec for sending messages to the
     /// [`Server`]
     ///
     /// [`Server`]: struct.Server.html
     _server: FramedSink<ControlMsg>,
-    /// When this [`Client`] gets a message, it uses this [`mpsc`] channel to
-    /// forward messages to whatever layer is using this [`Client`] for
+    /// When this `Client` gets a message, it uses this [`mpsc`] channel to
+    /// forward messages to whatever layer is using this `Client` for
     /// networking to avoid tight coupling. The above layer will receive the
     /// messages on the other half of this [`mpsc`] channel.
     ///
-    /// [`Client`]: struct.Client.html
     /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     sender: Sender<Message<T>>,
-    /// the type of this [`Client`]
-    ///
-    /// [`Client`]: struct.Client.html
+    /// the type of this `Client`
     client_type: String,
 }
 

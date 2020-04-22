@@ -64,12 +64,11 @@ use serde::{Deserialize, Serialize};
 mod kv_store;
 pub use crate::kv::kv_store::{KVMessage, KVStore};
 
-/// A [`Key`] defines where in a [`KVStore`] a [`Value`] is stored, as well as
+/// A `Key` defines where in a [`KVStore`] a [`Value`] is stored, as well as
 /// which node (and thus which [`KVStore`]) 'owns' the [`Value`]
 ///
-/// [`Key`]: struct.Key.html
 /// [`KVStore`]: struct.KVStore.html
-/// [`Value`]: type.Key.html
+/// [`Value`]: type.Value.html
 #[derive(PartialEq, Eq, Hash, Serialize, Deserialize, Debug, Clone)]
 pub struct Key {
     /// Defines where in a [`KVStore`] a value is stored
@@ -83,11 +82,10 @@ pub struct Key {
 }
 
 /// A serialized blob of data. Is associated with a [`Key`] which defines where
-/// this [`Value`] is stored in a [`KVStore`], as well as its 'owner'
+/// this `Value` is stored in a [`KVStore`], as well as its 'owner'
 ///
 /// [`Key`]: struct.Key.html
 /// [`KVStore`]: struct.KVStore.html
-/// [`Value`]: type.Key.html
 pub type Value = Vec<u8>;
 
 impl Key {

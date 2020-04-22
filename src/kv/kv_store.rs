@@ -24,47 +24,36 @@ use tokio::sync::{
 /// this is a distributed [`KVStore`], [`Key`]s know which node the values
 /// 'belong' to.
 ///
-/// Internally [`KVStore`]s store their data in memory as serialized blobs
-/// (`Vec<u8>`). The [`KVStore`] caches deserialized [`Value`]s into their type
+/// Internally `KVStore`s store their data in memory as serialized blobs
+/// (`Vec<u8>`). The `KVStore` caches deserialized [`Value`]s into their type
 /// `T` on a least-recently used basis. There is a hard limit on the cache size
 /// that is set to `1/3` the total memory of the machine.
 ///
 /// [`Key`]: struct.Key.html
-/// [`KVStore`]: struct.KVStore.html
 /// [`Value`]: type.Key.html
 #[derive(Debug)]
 pub struct KVStore<T> {
-    /// The data owned by this [`KVStore`]
-    ///
-    /// [`KVStore`]: struct.KVStore.html
+    /// The data owned by this `KVStore`
     data: RwLock<HashMap<Key, Value>>,
     /// An `LRU` cache of deserialized values of type `T` with a hard maximum
     /// memory limit set on construction. Not all cached values belong to this
-    /// [`KVStore`], some of it may come from other distributed `KVStore`s not
+    /// `KVStore`, some of it may come from other distributed `KVStore`s not
     /// running on this machine.
-    ///
-    /// [`KVStore`]: struct.KVStore.html
     cache: Mutex<LruCache<Key, Arc<T>>>,
     /// The `network` layer, used to send and receive messages and data with
-    /// other [`KVStore`]s
-    ///
-    /// [`KVStore`]: struct.KVStore.html
+    /// other `KVStore`s
     pub(crate) network: Arc<RwLock<Client<KVMessage>>>,
     /// Used internally for processing data and messages
     internal_notifier: Notify,
-    /// The `id` of the node this [`KVStore`] is running on
-    ///
-    /// [`KVStore`]: struct.KVStore.html
+    /// The `id` of the node this `KVStore` is running on
     pub(crate) id: usize,
     /// A channel to send blobs of data to a higher level component, in
     /// `liquid-ml` this would be the `LiquidML` struct
     ///
     /// [`LiquidML`]: ../struct.LiquidML.html
     blob_sender: Sender<Value>,
-    /// The total amount of memory (in bytes) this [`KVStore`] is allowed
+    /// The total amount of memory (in bytes) this `KVStore` is allowed
     /// to keep in its cache
-    ///
-    /// [`KVStore`]: struct.KVStore.html
     max_cache_size: u64,
 }
 

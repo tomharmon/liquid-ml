@@ -8,14 +8,10 @@ use tokio::io::split;
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-/// Represents a registration [`Server`] in a distributed system.
-///
-/// [`Server`]: struct.Server.html
+/// Represents a registration `Server` in a distributed system.
 #[derive(Debug)]
 pub struct Server {
-    /// The `address` of this [`Server`]
-    ///
-    /// [`Server`]: struct.Server.html
+    /// The `address` of this `Server`
     pub(crate) address: String,
     /// The id of the current message
     pub(crate) msg_id: usize,
