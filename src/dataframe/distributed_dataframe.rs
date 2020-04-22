@@ -118,7 +118,7 @@ impl DistributedDataFrame {
     /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
     ///
     /// [`LiquidML::df_from_sor`]: ../struct.LiquidML.html#method.df_from_sor
-    pub async fn from_sor(
+        pub async fn from_sor(
         server_addr: &str,
         my_ip: &str,
         file_name: &str,
@@ -127,28 +127,255 @@ impl DistributedDataFrame {
         num_nodes: usize,
         kv_blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Arc<Self>, LiquidError> {
-        // TODO: Panics if file doesn't exist
-        let total_newlines = count_new_lines(file_name);
-        let max_rows_per_node = total_newlines / num_nodes;
-        let schema = sorer::schema::infer_schema(file_name);
-        info!(
-            "Total newlines: {} max rows per node: {}",
-            total_newlines, max_rows_per_node
-        );
-        info!("Inferred schema: {:?}", schema.clone());
-        // make a chunking iterator for the sor file
-        let sor_terator =
-            SorTerator::new(file_name, schema.clone(), max_rows_per_node);
-        DistributedDataFrame::from_iter(
-            server_addr,
-            my_ip,
-            sor_terator,
-            kv,
-            df_name,
-            num_nodes,
-            kv_blob_receiver,
-        )
-        .await
+        // Figure out what node we are supposed to be. We must synchronize
+        // the creation of this DDF on this node based on the already assigned
+        // id's
+        let node_id = kv.id;
+        // initialize some other required fields of self so as not to duplicate
+        // code in if branches
+        let (blob_sender, blob_receiver) = mpsc::channel(2);
+        // used for internal messaging processing so that the asynnchronous
+        // messaging task can notify other tasks when `self.row` is ready
+        let internal_notifier = Arc::new(Notify::new());
+        // for this DDF's network client to forward messages to this DDF
+        // for processing
+        let (sender, mut receiver) = mpsc::channel(64);
+        // so that our network client can notify us when they get a Kill
+        // signal
+        let kill_notifier = Arc::new(Notify::new());
+        let df_client_type = format!("ddf-{}", df_name);
+        // for processing results of distributed filtering
+        let (filter_results_sender, filter_results) = mpsc::channel(num_nodes);
+        let filter_results = Mutex::new(filter_results);
+
+        // For this constructor, we assume the file is only on node 1
+        if node_id == 1 {
+            // connect our client right away since we want to be node 1
+            let network = Client::new(
+                server_addr,
+                my_ip,
+                None,
+                sender,
+                kill_notifier.clone(),
+                num_nodes,
+                false,
+                df_client_type.as_str(),
+            )
+            .await?;
+            assert_eq!(1, { network.read().await.id });
+            // Send a ready message to node 2 so that all the other nodes
+            // start connecting to the Server in the correct order
+            let ready_blob = serialize(&DistributedDFMsg::Ready)?;
+            kv.send_blob(node_id + 1, ready_blob).await?;
+
+            // TODO: Panics if file doesn't exist
+            let total_newlines = count_new_lines(file_name);
+            let max_rows_per_node = total_newlines / num_nodes;
+            let schema = sorer::schema::infer_schema(file_name);
+            info!(
+                "Total newlines: {} max rows per node: {}",
+                total_newlines, max_rows_per_node
+            );
+            info!("Inferred schema: {:?}", schema.clone());
+            // make a chunking iterator for the sor file
+            let sor_terator =
+                SorTerator::new(file_name, schema.clone(), max_rows_per_node);
+
+            // Distribute the chunked sor file round-robin style
+            let mut df_chunk_map = HashMap::new();
+            let mut cur_num_rows = 0;
+            {
+                // in each iteration, create a future sends a chunk to a node
+                for (chunk_idx, chunk) in sor_terator.into_iter().enumerate() {
+                    let ldf = LocalDataFrame::from(chunk);
+                    let key =
+                        Key::generate(df_name, (chunk_idx % num_nodes) + 1);
+                    // add this chunk range and key to our <range, key> map
+                    df_chunk_map.insert(
+                        Range {
+                            start: cur_num_rows,
+                            end: cur_num_rows + ldf.n_rows(),
+                        },
+                        key.clone(),
+                    );
+                    cur_num_rows += ldf.n_rows();
+
+                    // TODO: might need to do some tuning on when to join the
+                    // futures here, possibly even dynamically figure out some
+                    // value to smooth over the tradeoff between memory and
+                    // speed (right now i assume it uses a lot of memory)
+                    // add the future we make to a vec for multiplexing
+                    let cloned = kv.clone();
+                    tokio::spawn(async move {
+                        cloned.put(key.clone(), ldf).await.unwrap();
+                    });
+                }
+                // we are almost done distributing chunks
+                info!(
+                    "Finished distributing {} SoR chunks",
+                    cur_num_rows / max_rows_per_node
+                );
+            }
+            // We are done distributing chunks, now we want to make sure all
+            // ddfs are connected on the network, so we wait for a `Ready`
+            // message before sending out the `Initialization` message
+            let ready_blob =
+                { kv_blob_receiver.lock().await.recv().await.unwrap() };
+            let ready_msg = deserialize(&ready_blob)?;
+            match ready_msg {
+                DistributedDFMsg::Ready => (),
+                _ => return Err(LiquidError::UnexpectedMessage),
+            }
+            debug!("Node 1 got the final ready message");
+
+            // Create an Initialization message that holds all the information
+            // related to this DistributedDataFrame, the Schema and the map
+            // of the range of indices that each chunk holds and the `Key`
+            // associated with that chunk
+            let schema = Schema::from(schema);
+            let intro_msg = DistributedDFMsg::Initialization {
+                schema: schema.clone(),
+                df_chunk_map: df_chunk_map.clone(),
+            };
+
+            // Broadcast the initialization message to all nodes
+            {
+                network.write().await.broadcast(intro_msg).await?
+            };
+            debug!("Node 1 sent the initialization message to all nodes");
+
+            let row = Arc::new(RwLock::new(Row::new(&schema)));
+
+            let ddf = Arc::new(DistributedDataFrame {
+                schema,
+                df_name: df_name.to_string(),
+                df_chunk_map,
+                num_rows: cur_num_rows,
+                network,
+                node_id,
+                num_nodes,
+                server_addr: server_addr.to_string(),
+                my_ip: my_ip.to_string(),
+                kv,
+                internal_notifier,
+                row,
+                kill_notifier,
+                blob_receiver: Mutex::new(blob_receiver),
+                filter_results,
+            });
+
+            // spawn a tokio task to process messages
+            let ddf_clone = ddf.clone();
+            tokio::spawn(async move {
+                DistributedDataFrame::process_messages(
+                    ddf_clone,
+                    receiver,
+                    blob_sender,
+                    filter_results_sender,
+                )
+                .await
+                .unwrap();
+            });
+
+            Ok(ddf)
+        } else {
+            // Connect to the network in the correct order. First,
+            // wait for a `Ready` message as a blob over the KV blob
+            // receiver, sent to us by the previous node
+            let ready_blob =
+                { kv_blob_receiver.lock().await.recv().await.unwrap() };
+            let ready_msg = deserialize(&ready_blob)?;
+            match ready_msg {
+                DistributedDFMsg::Ready => (),
+                _ => return Err(LiquidError::UnexpectedMessage),
+            }
+            debug!("Received a ready message");
+
+            // The node before us has joined the network, it is now time
+            // to connect
+            let network = Client::new(
+                server_addr,
+                my_ip,
+                None,
+                sender,
+                kill_notifier.clone(),
+                num_nodes,
+                false,
+                df_client_type.as_str(),
+            )
+            .await?;
+            // assert that we joined in the right order (kv node id must
+            // match client node id)
+            assert_eq!(node_id, { network.read().await.id });
+
+            if node_id < num_nodes {
+                // All nodes except the last node must send a ready message
+                // to the node that comes after them to let the next node know
+                // they may join the network
+                kv.send_blob(node_id + 1, ready_blob).await?;
+            } else {
+                // if we are the last node we must tell the first node that
+                // all the other nodes are ready
+                kv.send_blob(1, ready_blob).await?;
+            }
+
+            // Node 1 will send the initialization message to our network
+            // directly, not using the KV. The Client will forward the message
+            // to us via the mpsc receiver
+            let init_msg = receiver.recv().await.unwrap();
+            // We got a message, check it was the initialization message
+            let (schema, df_chunk_map) = match init_msg.msg {
+                DistributedDFMsg::Initialization {
+                    schema,
+                    df_chunk_map,
+                } => (schema, df_chunk_map),
+                _ => return Err(LiquidError::UnexpectedMessage),
+            };
+            debug!("Got the Initialization message from Node 1");
+
+            let row = Arc::new(RwLock::new(Row::new(&schema)));
+            let num_rows = df_chunk_map.iter().fold(0, |mut acc, (k, _)| {
+                if acc > k.end {
+                    acc
+                } else {
+                    acc = k.end;
+                    acc
+                }
+            });
+
+            let ddf = Arc::new(DistributedDataFrame {
+                schema,
+                df_name: df_name.to_string(),
+                df_chunk_map,
+                num_rows,
+                network,
+                node_id,
+                num_nodes,
+                server_addr: server_addr.to_string(),
+                my_ip: my_ip.to_string(),
+                kv,
+                internal_notifier,
+                row,
+                kill_notifier,
+                blob_receiver: Mutex::new(blob_receiver),
+                filter_results,
+            });
+
+            // spawn a tokio task to process messages
+            let ddf_clone = ddf.clone();
+            tokio::spawn(async move {
+                DistributedDataFrame::process_messages(
+                    ddf_clone,
+                    receiver,
+                    blob_sender,
+                    filter_results_sender,
+                )
+                .await
+                .unwrap();
+            });
+
+            Ok(ddf)
+        }
     }
 
     /// Creates a new `DataFrame` from the given iterator. The iterator is
