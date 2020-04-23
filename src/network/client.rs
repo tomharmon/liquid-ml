@@ -233,7 +233,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         let (server_addr, my_ip, node_id, listen_addr) = {
             let unlocked = parent.read().await;
             let node_id = unlocked.id;
-            let server_addr = unlocked.server.address.to_string();
+            let server_addr = unlocked.server.address.to_string().clone();
             dbg!(&server_addr);
             let my_ip = unlocked.address.ip().to_string();
             dbg!(&my_ip);
@@ -283,7 +283,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 FramedWrite::new(writer, MessageCodec::<ControlMsg>::new());
             // wait for the ready message
             let msg = message::read_msg(&mut stream).await?;
-            assert_eq!(msg.sender_id, node_id - 1);
+            //assert_eq!(msg.sender_id, node_id);
             match msg.msg {
                 ControlMsg::Ready => (),
                 _ => return Err(LiquidError::UnexpectedMessage),
@@ -310,8 +310,18 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             if node_id < num_nodes {
                 // There is another node after us
                 let msg =
-                    Message::new(0, node_id, node_id + 1, ControlMsg::Ready);
+                    Message::new(0, node_id, node_id, ControlMsg::Ready);
                 sink.send(msg).await?;
+                let next_node_addr = {
+                    let unlocked = parent.read().await;
+                    unlocked.directory.get(&(node_id + 1)).unwrap().address
+                };
+                let next_node_socket = TcpStream::connect(next_node_addr).await?;
+                let (_, next_node_writer) = io::split(next_node_socket);
+                let mut next_node_sink =
+                    FramedWrite::new(next_node_writer, MessageCodec::<ControlMsg>::new());
+                let ready_msg = Message::new(0, node_id, node_id + 1, ControlMsg::Ready);
+                next_node_sink.send(ready_msg).await?;
                 dbg!("sent ready message to next");
             }
 
