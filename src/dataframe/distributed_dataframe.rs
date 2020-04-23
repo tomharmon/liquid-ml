@@ -118,7 +118,7 @@ impl DistributedDataFrame {
     /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
     ///
     /// [`LiquidML::df_from_sor`]: ../struct.LiquidML.html#method.df_from_sor
-    pub async fn from_sor(
+    pub(crate) async fn from_sor(
         server_addr: &str,
         my_ip: &str,
         file_name: &str,
@@ -126,7 +126,29 @@ impl DistributedDataFrame {
         df_name: &str,
         num_nodes: usize,
     ) -> Result<Arc<Self>, LiquidError> {
-        todo!()
+        // make a chunking iterator for the sor file
+        let sor_terator = if kv.id == 1 {
+            let total_newlines = count_new_lines(file_name);
+            let max_rows_per_node = total_newlines / num_nodes;
+            let schema = sorer::schema::infer_schema(file_name);
+            info!(
+                "Total newlines: {} max rows per node: {}",
+                total_newlines, max_rows_per_node
+            );
+            info!("Inferred schema: {:?}", &schema);
+            Some(SorTerator::new(file_name, schema, max_rows_per_node))
+        } else {
+            None
+        };
+        DistributedDataFrame::from_iter(
+            server_addr,
+            my_ip,
+            sor_terator,
+            kv,
+            df_name,
+            num_nodes,
+        )
+        .await
     }
 
     /// Creates a new `DataFrame` from the given iterator. The iterator is
@@ -144,10 +166,10 @@ impl DistributedDataFrame {
     /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
     ///
     /// [`LiquidML::df_from_iter`]: ../struct.LiquidML.html#method.df_from_iter
-    pub async fn from_iter(
+    pub(crate) async fn from_iter(
         server_addr: &str,
         my_ip: &str,
-        iter: impl Iterator<Item = Vec<Column>>,
+        iter: Option<impl Iterator<Item = Vec<Column>>>,
         kv: Arc<KVStore<LocalDataFrame>>,
         df_name: &str,
         num_nodes: usize,
@@ -162,10 +184,7 @@ impl DistributedDataFrame {
         let internal_notifier = Arc::new(Notify::new());
         // for this DDF's network client to forward messages to this DDF
         // for processing
-        let (sender, mut receiver): (
-            Sender<Message<DistributedDFMsg>>,
-            Receiver<Message<DistributedDFMsg>>,
-        ) = mpsc::channel(64);
+        let (sender, mut receiver) = mpsc::channel(64);
         // so that our network client can notify us when they get a Kill
         // signal
         let kill_notifier = Arc::new(Notify::new());
@@ -197,7 +216,7 @@ impl DistributedDataFrame {
                 // in each iteration, create a future sends a chunk to a node
                 let mut chunk_idx = 0;
                 let mut send_chunk_futures = Vec::new();
-                for chunk in iter.into_iter() {
+                for chunk in iter.unwrap().into_iter() {
                     if chunk_idx == 0 {
                         schema = Some(Schema::from(&chunk));
                     }
@@ -376,7 +395,7 @@ impl DistributedDataFrame {
     /// NOTE: this function currently does not verify that `data` is not
     /// jagged, which is a required invariant of the program. There is a plan
     /// to automatically fix jagged data.
-    pub async fn new(
+    pub(crate) async fn new(
         server_addr: &str,
         my_ip: &str,
         data: Option<Vec<Column>>,
@@ -386,7 +405,11 @@ impl DistributedDataFrame {
     ) -> Result<Arc<Self>, LiquidError> {
         let num_rows = if let Some(d) = &data { n_rows(d) } else { 0 };
         let chunk_size = num_rows / num_nodes;
-        let chunkerator = DataChunkerator { chunk_size, data };
+        let chunkerator = if let Some(d) = &data {
+            Some(DataChunkerator { chunk_size, data })
+        } else {
+            None
+        };
         DistributedDataFrame::from_iter(
             server_addr,
             my_ip,
