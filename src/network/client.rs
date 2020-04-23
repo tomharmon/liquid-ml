@@ -40,7 +40,7 @@ pub struct Client<T> {
     /// [`Server`]
     ///
     /// [`Server`]: struct.Server.html
-    _server: FramedSink<ControlMsg>,
+    _server: Connection<ControlMsg>,
     /// When this `Client` gets a message, it uses this [`mpsc`] channel to
     /// forward messages to whatever layer is using this `Client` for
     /// networking to avoid tight coupling. The above layer will receive the
@@ -131,11 +131,16 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         };
         // Connect to the server
         let server_stream = TcpStream::connect(server_addr).await?;
+        let server_address = server_stream.peer_addr().unwrap();
         let (reader, writer) = io::split(server_stream);
         let mut stream = FramedRead::new(reader, MessageCodec::new());
-        let mut sink = FramedWrite::new(writer, MessageCodec::new());
+        let sink = FramedWrite::new(writer, MessageCodec::new());
+        let mut _server = Connection {
+            address: server_address,
+            sink,
+        };
         // Tell the server our address
-        sink.send(Message::new(
+        _server.sink.send(Message::new(
             0,
             0,
             0,
@@ -166,7 +171,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             address: my_address.clone(),
             msg_id: dir_msg.msg_id + 1,
             directory: HashMap::new(),
-            _server: sink,
+            _server,
             sender,
             client_type: client_type.to_string(),
         };
