@@ -43,6 +43,7 @@
 use crate::error::LiquidError;
 use crate::network::message::{FramedSink, FramedStream, MessageCodec};
 use std::net::Shutdown;
+use std::net::SocketAddr;
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio_util::codec::{FramedRead, FramedWrite};
@@ -52,10 +53,10 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 /// [`Client`]: struct.Client.html
 #[derive(Debug)]
 pub(crate) struct Connection<T> {
-    /// The `IP:Port` of another [`Client`] that we're connected to
+    /// The address of another [`Client`] that we're connected to
     ///
     /// [`Client`]: struct.Client.html
-    pub(crate) address: String,
+    pub(crate) address: SocketAddr,
     /// The buffered and framed message codec used for sending messages to the
     /// other [`Client`]
     ///

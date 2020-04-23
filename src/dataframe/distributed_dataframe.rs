@@ -118,7 +118,7 @@ impl DistributedDataFrame {
     /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
     ///
     /// [`LiquidML::df_from_sor`]: ../struct.LiquidML.html#method.df_from_sor
-        pub async fn from_sor(
+    pub async fn from_sor(
         server_addr: &str,
         my_ip: &str,
         file_name: &str,

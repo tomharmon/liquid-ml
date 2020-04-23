@@ -10,6 +10,7 @@ use log::{debug, info};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
@@ -26,8 +27,8 @@ pub struct Client<T> {
     ///
     /// [`Server`]: struct.Server.html
     pub id: usize,
-    /// The `address` of this `Client` in the format `IP:Port`
-    pub address: String,
+    /// The `address` of this `Client`
+    pub address: SocketAddr,
     /// The id of the current message
     pub(crate) msg_id: usize,
     /// A directory which is a map of client id to the [`Connection`] with that
@@ -116,16 +117,16 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
         // Setup a TCPListener
         let listener;
-        let my_address = match my_port {
+        let my_address: SocketAddr = match my_port {
             Some(port) => {
                 let addr = format!("{}:{}", my_ip, port);
                 listener = TcpListener::bind(&addr).await?;
-                addr
+                addr.parse().unwrap()
             }
             None => {
                 let addr = format!("{}:0", my_ip);
                 listener = TcpListener::bind(&addr).await?;
-                listener.local_addr()?.to_string()
+                listener.local_addr()?.to_string().parse().unwrap()
             }
         };
         // Connect to the server
@@ -254,14 +255,15 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
 
             // increment the message id and check if there was an existing
             // connection
-            let is_existing_conn;
             {
                 let mut unlocked = client.write().await;
                 unlocked.msg_id =
                     increment_msg_id(unlocked.msg_id, intro.msg_id);
-                is_existing_conn =
-                    unlocked.directory.contains_key(&intro.sender_id);
             }
+            let is_existing_conn = {
+                let unlocked = client.read().await;
+                unlocked.directory.contains_key(&intro.sender_id)
+            };
 
             if is_existing_conn {
                 return existing_conn_err(stream, sink);
@@ -306,7 +308,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     #[allow(clippy::map_entry)] // clippy is being dumb
     pub(crate) async fn connect(
         &mut self,
-        client: (usize, String),
+        client: (usize, SocketAddr),
     ) -> Result<(), LiquidError> {
         // Connect to the given client
         let stream = TcpStream::connect(client.1.clone()).await?;

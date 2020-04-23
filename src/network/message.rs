@@ -9,6 +9,7 @@ use futures::SinkExt;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
@@ -51,11 +52,11 @@ pub enum ControlMsg {
     ///
     /// [`Server`]: struct.Server.html
     /// [`Client`]: struct.Client.html
-    Directory { dir: Vec<(usize, String)> },
+    Directory { dir: Vec<(usize, SocketAddr)> },
     /// An introduction that a new [`Client`] sends to all other existing
     /// [`Client`]s and the [`Server`]
     Introduction {
-        address: String,
+        address: SocketAddr,
         client_type: String,
     },
     /// A message the [`Server`] sends to [`Client`]s to inform them to shut
