@@ -271,8 +271,11 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             // wait to receive a `Ready` message from the node before us
             // TODO: this will panic if `wait_for_all_clients` was false for
             // the `parent` passed in
+            dbg!(&listen_addr);
             let mut listener = TcpListener::bind(listen_addr).await?;
+            dbg!("binded listener");
             let (socket, _) = listener.accept().await?;
+            dbg!("connected to parent");
             let (reader, writer) = io::split(socket);
             let mut stream =
                 FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
@@ -285,6 +288,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 ControlMsg::Ready => (),
                 _ => return Err(LiquidError::UnexpectedMessage),
             };
+            dbg!("got ready mesage from prev {:?}", &msg);
             // The node before us has joined the network, it is now time
             // to connect
             let network = Client::new(
@@ -308,6 +312,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 let msg =
                     Message::new(0, node_id, node_id + 1, ControlMsg::Ready);
                 sink.send(msg).await?;
+                dbg!("sent ready message to next");
             }
 
             // return the newly registered network
