@@ -568,6 +568,27 @@ impl DistributedDataFrame {
         mut rower: T,
         kv_blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Arc<Self>, LiquidError> {
+        // for this DDF's network client to forward messages to this DDF
+        // for processing
+        let (sender, mut receiver) = mpsc::channel(64);
+        // so that our network client can notify us when they get a Kill
+        // signal
+        let kill_notifier = Arc::new(Notify::new());
+        let mut rng = rand::thread_rng();
+        let r = rng.gen::<i16>();
+        let new_name = format!("{}-filtered-{}", &self.df_name, r);
+        let df_client_type = format!("ddf-{}", new_name);
+        let network: Arc<RwLock<Client<DistributedDFMsg>>> =
+            Client::register_type(
+                self.kv.network.clone(),
+                sender,
+                kill_notifier.clone(),
+                self.num_nodes,
+                &df_client_type,
+            )
+            .await?;
+        assert_eq!(self.node_id, { network.read().await.id });
+
         // get the keys for our locally owned chunks
         let my_keys: Vec<&Key> = self
             .df_chunk_map
@@ -584,22 +605,13 @@ impl DistributedDataFrame {
             let ldf = self.kv.wait_and_get(key).await?;
             filtered_ldf = filtered_ldf.combine(ldf.pfilter(&mut rower))?;
         }
+
         // initialize some other required fields of self so as not to duplicate
         // code in if branches
         let (blob_sender, blob_receiver) = mpsc::channel(2);
         // used for internal messaging processing so that the asynnchronous
         // messaging task can notify other tasks when `self.row` is ready
         let internal_notifier = Arc::new(Notify::new());
-        // for this DDF's network client to forward messages to this DDF
-        // for processing
-        let (sender, mut receiver) = mpsc::channel(64);
-        // so that our network client can notify us when they get a Kill
-        // signal
-        let kill_notifier = Arc::new(Notify::new());
-        let mut rng = rand::thread_rng();
-        let r = rng.gen::<i16>();
-        let new_name = format!("{}-filtered-{}", &self.df_name, r);
-        let df_client_type = format!("ddf-{}", new_name);
         // for processing results of distributed filtering
         let (filter_results_sender, filter_results) =
             mpsc::channel(self.num_nodes);
@@ -621,24 +633,6 @@ impl DistributedDataFrame {
         }
 
         if self.node_id == 1 {
-            // 1. start the new network client
-            // connect our client right away since we want to be node 1
-            let network = Client::new(
-                &self.server_addr,
-                &self.my_ip,
-                None,
-                sender,
-                kill_notifier.clone(),
-                self.num_nodes,
-                false,
-                df_client_type.as_str(),
-            )
-            .await?;
-            assert_eq!(1, { network.read().await.id });
-            // Send a ready message to node 2 so that all the other nodes
-            // start connecting to the Server in the correct order
-            let ready_blob = serialize(&DistributedDFMsg::Ready)?;
-            self.kv.send_blob(self.node_id + 1, ready_blob).await?;
             // 2. collect all results from other nodes (insert ours first)
             let mut df_chunk_map = HashMap::new();
             let mut cur_num_rows = 0;
@@ -752,43 +746,17 @@ impl DistributedDataFrame {
 
             Ok(ddf)
         } else {
-            // we are not the first node
-            // 1. connect to the network in the correct order by waiting
-            //    for the node before us to send a 'ready' message to our
-            //    kv's blob_receiver
-            let ready_blob =
-                { kv_blob_receiver.lock().await.recv().await.unwrap() };
-            let ready_msg = deserialize(&ready_blob)?;
-            match ready_msg {
-                DistributedDFMsg::Ready => (),
+            // Node 1 will send the initialization message to our network
+            let init_msg = receiver.recv().await.unwrap();
+            // We got a message, check it was the initialization message
+            let (schema, df_chunk_map) = match init_msg.msg {
+                DistributedDFMsg::Initialization {
+                    schema,
+                    df_chunk_map,
+                } => (schema, df_chunk_map),
                 _ => return Err(LiquidError::UnexpectedMessage),
-            }
-            debug!("Received a ready message");
-            // 2. The node before us has joined the network, it is now time
-            //    to connect
-            let network = Client::new(
-                &self.server_addr,
-                &self.my_ip,
-                None,
-                sender,
-                kill_notifier.clone(),
-                self.num_nodes,
-                false,
-                df_client_type.as_str(),
-            )
-            .await?;
-            // assert that we joined in the right order (kv node id must
-            // match client node id)
-            assert_eq!(self.node_id, { network.read().await.id });
-
-            // 2. send a ready message to the next node so they can connect, if
-            //    we are not the last node
-            if self.node_id < self.num_nodes {
-                // All nodes except the last node must send a ready message
-                // to the node that comes after them to let the next node know
-                // they may join the network
-                self.kv.send_blob(self.node_id + 1, ready_blob).await?;
-            }
+            };
+            debug!("Got the Initialization message from Node 1");
 
             // 3. send our filterresults to node 1
             let results = DistributedDFMsg::FilterResult {

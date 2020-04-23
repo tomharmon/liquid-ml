@@ -30,7 +30,7 @@ pub struct LiquidML {
     /// The id of this node, assigned by the registration [`Server`]
     ///
     /// [`Server`]: network/struct.Server.html
-    pub id: usize,
+    pub node_id: usize,
     /// A receiver for blob messages (received by the `kv`) that can be
     /// processed by the user for lower level access to the network
     pub blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
@@ -71,7 +71,7 @@ impl LiquidML {
             true,
         )
         .await;
-        let id = kv.id;
+        let node_id = kv.id;
         let (my_ip, _my_port) = {
             let mut iter = my_addr.split(':');
             let first = iter.next().unwrap();
@@ -81,7 +81,7 @@ impl LiquidML {
 
         Ok(LiquidML {
             kv,
-            id,
+            node_id,
             blob_receiver: Arc::new(Mutex::new(blob_receiver)),
             num_nodes,
             kill_notifier,
@@ -112,7 +112,7 @@ impl LiquidML {
         df_name: &str,
         data_generator: fn() -> Vec<Column>,
     ) -> Result<(), LiquidError> {
-        let data = if self.id == 1 {
+        let data = if self.node_id == 1 {
             Some(data_generator())
         } else {
             None
