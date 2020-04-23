@@ -7,12 +7,13 @@ use std::collections::HashMap;
 use tokio::io::split;
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
+use std::net::SocketAddr;
 
 /// Represents a registration `Server` in a distributed system.
 #[derive(Debug)]
 pub struct Server {
     /// The `address` of this `Server`
-    pub(crate) address: String,
+    pub(crate) address: SocketAddr,
     /// The id of the current message
     pub(crate) msg_id: usize,
     /// A directory which is a `HashMap` of client types to a `HashMap` of
@@ -32,7 +33,7 @@ impl Server {
         Ok(Server {
             msg_id: 0,
             directory: HashMap::new(),
-            address: address.to_string(),
+            address: address.parse().unwrap(),
         })
     }
 
