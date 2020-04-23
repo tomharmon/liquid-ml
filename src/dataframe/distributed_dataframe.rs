@@ -6,7 +6,6 @@ use crate::kv::{KVStore, Key};
 use crate::network::{Client, Message};
 use bincode::{deserialize, serialize};
 use bytecount;
-use futures::future::try_join_all;
 use log::{debug, info};
 use rand::{self, Rng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -215,7 +214,6 @@ impl DistributedDataFrame {
             {
                 // in each iteration, create a future sends a chunk to a node
                 let mut chunk_idx = 0;
-                let mut send_chunk_futures = Vec::new();
                 for chunk in iter.unwrap().into_iter() {
                     if chunk_idx == 0 {
                         schema = Some(Schema::from(&chunk));
@@ -240,28 +238,19 @@ impl DistributedDataFrame {
                     );
                     cur_num_rows += ldf.n_rows();
 
-                    send_chunk_futures.push(kv.put(key.clone(), ldf));
+                    let kv_ptr = kv.clone();
+                    tokio::spawn(async move {
+                        kv_ptr.put(key, ldf).await.unwrap();
+                    });
+
                     // NOTE: might need to do some tuning on when to join the
                     // futures here, possibly even dynamically figure out some
                     // value to smooth over the tradeoff between memory and
                     // speed
-                    if send_chunk_futures.len() % 2 == 0 {
-                        try_join_all(send_chunk_futures).await?;
-                        send_chunk_futures = Vec::new();
-                        info!(
-                            "Sent 2 chunks successfully, total of {} chunks",
-                            chunk_idx + 1
-                        );
-                    }
-
                     chunk_idx += 1;
                 }
 
                 // we are almost done distributing chunks
-                if !send_chunk_futures.is_empty() {
-                    // it might not have been evenly divisible by 2
-                    try_join_all(send_chunk_futures).await?;
-                }
                 info!("Finished distributing {} SoR chunks", chunk_idx);
             }
 
@@ -405,7 +394,7 @@ impl DistributedDataFrame {
     ) -> Result<Arc<Self>, LiquidError> {
         let num_rows = if let Some(d) = &data { n_rows(d) } else { 0 };
         let chunk_size = num_rows / num_nodes;
-        let chunkerator = if let Some(d) = &data {
+        let chunkerator = if data.is_some() {
             Some(DataChunkerator { chunk_size, data })
         } else {
             None
@@ -566,7 +555,6 @@ impl DistributedDataFrame {
     >(
         &self,
         mut rower: T,
-        kv_blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     ) -> Result<Arc<Self>, LiquidError> {
         // for this DDF's network client to forward messages to this DDF
         // for processing
@@ -746,19 +734,7 @@ impl DistributedDataFrame {
 
             Ok(ddf)
         } else {
-            // Node 1 will send the initialization message to our network
-            let init_msg = receiver.recv().await.unwrap();
-            // We got a message, check it was the initialization message
-            let (schema, df_chunk_map) = match init_msg.msg {
-                DistributedDFMsg::Initialization {
-                    schema,
-                    df_chunk_map,
-                } => (schema, df_chunk_map),
-                _ => return Err(LiquidError::UnexpectedMessage),
-            };
-            debug!("Got the Initialization message from Node 1");
-
-            // 3. send our filterresults to node 1
+            // send our filterresults to node 1
             let results = DistributedDFMsg::FilterResult {
                 num_rows: num_rows_left,
                 filtered_df_key: key,
@@ -766,11 +742,7 @@ impl DistributedDataFrame {
             {
                 network.write().await.send_msg(1, results).await?
             };
-
-            // 4. wait for node 1 to respond with the initialization message
             // Node 1 will send the initialization message to our network
-            // directly, not using the KV. The Client will forward the message
-            // to us via the mpsc receiver
             let init_msg = receiver.recv().await.unwrap();
             // We got a message, check it was the initialization message
             let (schema, df_chunk_map) = match init_msg.msg {

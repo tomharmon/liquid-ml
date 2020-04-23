@@ -281,7 +281,7 @@ impl LiquidML {
             Some(x) => x,
             None => return Err(LiquidError::NotPresent),
         };
-        let filtered_df = df.filter(rower, self.blob_receiver.clone()).await?;
+        let filtered_df = df.filter(rower).await?;
         self.data_frames
             .insert(filtered_df.df_name.clone(), filtered_df);
 

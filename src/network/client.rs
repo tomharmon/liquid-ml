@@ -234,9 +234,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             let unlocked = parent.read().await;
             let node_id = unlocked.id;
             let server_addr = unlocked.server.address.to_string().clone();
-            dbg!(&server_addr);
             let my_ip = unlocked.address.ip().to_string();
-            dbg!(&my_ip);
             (server_addr, my_ip, node_id, unlocked.address)
         };
         if node_id == 1 {
@@ -271,11 +269,8 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             // wait to receive a `Ready` message from the node before us
             // TODO: this will panic if `wait_for_all_clients` was false for
             // the `parent` passed in
-            dbg!(&listen_addr);
             let mut listener = TcpListener::bind(listen_addr).await?;
-            dbg!("binded listener");
             let (socket, _) = listener.accept().await?;
-            dbg!("connected to parent");
             let (reader, writer) = io::split(socket);
             let mut stream =
                 FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
@@ -288,7 +283,6 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 ControlMsg::Ready => (),
                 _ => return Err(LiquidError::UnexpectedMessage),
             };
-            dbg!("got ready mesage from prev {:?}", &msg);
             // The node before us has joined the network, it is now time
             // to connect
             let network = Client::new(
@@ -309,20 +303,22 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             // tell the next node we are ready
             if node_id < num_nodes {
                 // There is another node after us
-                let msg =
-                    Message::new(0, node_id, node_id, ControlMsg::Ready);
+                let msg = Message::new(0, node_id, node_id, ControlMsg::Ready);
                 sink.send(msg).await?;
                 let next_node_addr = {
                     let unlocked = parent.read().await;
                     unlocked.directory.get(&(node_id + 1)).unwrap().address
                 };
-                let next_node_socket = TcpStream::connect(next_node_addr).await?;
+                let next_node_socket =
+                    TcpStream::connect(next_node_addr).await?;
                 let (_, next_node_writer) = io::split(next_node_socket);
-                let mut next_node_sink =
-                    FramedWrite::new(next_node_writer, MessageCodec::<ControlMsg>::new());
-                let ready_msg = Message::new(0, node_id, node_id + 1, ControlMsg::Ready);
+                let mut next_node_sink = FramedWrite::new(
+                    next_node_writer,
+                    MessageCodec::<ControlMsg>::new(),
+                );
+                let ready_msg =
+                    Message::new(0, node_id, node_id + 1, ControlMsg::Ready);
                 next_node_sink.send(ready_msg).await?;
-                dbg!("sent ready message to next");
             }
 
             // return the newly registered network
