@@ -65,6 +65,9 @@ pub enum ControlMsg {
     /// [`Server`]: struct.Server.html
     /// [`Client`]: struct.Client.html
     Kill,
+    /// A message to notify other [`Client`]s when they are ready to register
+    /// a new [`Client`] type
+    Ready,
 }
 
 impl<T> Message<T> {

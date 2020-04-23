@@ -124,7 +124,6 @@ impl LiquidML {
             self.kv.clone(),
             df_name,
             self.num_nodes,
-            self.blob_receiver.clone(),
         )
         .await?;
         self.data_frames.insert(df_name.to_string(), ddf);
@@ -162,7 +161,6 @@ impl LiquidML {
             self.kv.clone(),
             df_name,
             self.num_nodes,
-            self.blob_receiver.clone(),
         )
         .await?;
         self.data_frames.insert(df_name.to_string(), ddf);
@@ -201,7 +199,6 @@ impl LiquidML {
             self.kv.clone(),
             df_name,
             self.num_nodes,
-            self.blob_receiver.clone(),
         )
         .await?;
         self.data_frames.insert(df_name.to_string(), ddf);

@@ -27,6 +27,8 @@ pub struct Client<T> {
     ///
     /// [`Server`]: struct.Server.html
     pub id: usize,
+    /// The number of `Client`s in the network
+    pub num_nodes: usize,
     /// The `address` of this `Client`
     pub address: SocketAddr,
     /// The id of the current message
@@ -37,10 +39,8 @@ pub struct Client<T> {
     /// [`Connection`]: struct.Connection.html
     pub(crate) directory: HashMap<usize, Connection<T>>,
     /// A buffered and framed message codec for sending messages to the
-    /// [`Server`]
-    ///
-    /// [`Server`]: struct.Server.html
-    _server: Connection<ControlMsg>,
+    /// [`Server`](struct.Server.html)
+    server: Connection<ControlMsg>,
     /// When this `Client` gets a message, it uses this [`mpsc`] channel to
     /// forward messages to whatever layer is using this `Client` for
     /// networking to avoid tight coupling. The above layer will receive the
@@ -111,7 +111,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         my_port: Option<&str>,
         sender: Sender<Message<RT>>,
         kill_notifier: Arc<Notify>,
-        num_clients: usize,
+        num_nodes: usize,
         wait_for_all_clients: bool,
         client_type: &str,
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
@@ -135,21 +135,23 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         let (reader, writer) = io::split(server_stream);
         let mut stream = FramedRead::new(reader, MessageCodec::new());
         let sink = FramedWrite::new(writer, MessageCodec::new());
-        let mut _server = Connection {
+        let mut server = Connection {
             address: server_address,
             sink,
         };
         // Tell the server our address
-        _server.sink.send(Message::new(
-            0,
-            0,
-            0,
-            ControlMsg::Introduction {
-                address: my_address.clone(),
-                client_type: client_type.to_string(),
-            },
-        ))
-        .await?;
+        server
+            .sink
+            .send(Message::new(
+                0,
+                0,
+                0,
+                ControlMsg::Introduction {
+                    address: my_address.clone(),
+                    client_type: client_type.to_string(),
+                },
+            ))
+            .await?;
         // The Server sends the addresses of all currently connected clients
         let dir_msg = message::read_msg(&mut stream).await?;
         let dir = if let ControlMsg::Directory { dir } = dir_msg.msg {
@@ -171,7 +173,8 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             address: my_address.clone(),
             msg_id: dir_msg.msg_id + 1,
             directory: HashMap::new(),
-            _server,
+            num_nodes,
+            server,
             sender,
             client_type: client_type.to_string(),
         };
@@ -191,7 +194,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             Client::accept_new_connections(
                 concurrent_client_cloned,
                 listener,
-                num_clients,
+                num_nodes,
                 wait_for_all_clients,
             )
             .await?
@@ -200,7 +203,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 Client::accept_new_connections(
                     concurrent_client_cloned,
                     listener,
-                    num_clients,
+                    num_nodes,
                     wait_for_all_clients,
                 )
                 .await
@@ -209,6 +212,107 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         }
 
         Ok(concurrent_client)
+    }
+
+    /// ## Parameters
+    /// [`Client`]: struct.Client.html
+    /// [`Server`]: struct.Server.html
+    /// [`ControlMsg::Directory`]: enum.ControlMsg.html#variant.Directory
+    /// [`ControlMsg::Introduction`]: enum.ControlMsg.html#variant.Introduction
+    /// [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
+    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
+    pub async fn register_type<
+        T: Send + Sync + DeserializeOwned + Serialize + Clone + 'static,
+    >(
+        parent: Arc<RwLock<Self>>,
+        sender: Sender<Message<T>>,
+        kill_notifier: Arc<Notify>,
+        num_nodes: usize,
+        client_type: &str,
+    ) -> Result<Arc<RwLock<Client<T>>>, LiquidError> {
+        let (server_addr, my_ip, node_id, listen_addr) = {
+            let unlocked = parent.read().await;
+            let node_id = unlocked.id;
+            let server_addr = unlocked.server.address.to_string();
+            dbg!(&server_addr);
+            let my_ip = unlocked.address.ip().to_string();
+            dbg!(&my_ip);
+            (server_addr, my_ip, node_id, unlocked.address)
+        };
+        if node_id == 1 {
+            // connect our client right away since we want to be node 1
+            let network = Client::new(
+                &server_addr,
+                &my_ip,
+                None,
+                sender,
+                kill_notifier.clone(),
+                num_nodes,
+                false,
+                client_type,
+            )
+            .await?;
+            assert_eq!(1, { network.read().await.id });
+            // Send a ready message to node 2 so that all the other nodes
+            // start connecting to the Server in the correct order
+            let node_2_addr = {
+                let unlocked = parent.read().await;
+                unlocked.directory.get(&2).unwrap().address
+            };
+            let socket = TcpStream::connect(node_2_addr).await?;
+            let (_, writer) = io::split(socket);
+            let mut sink =
+                FramedWrite::new(writer, MessageCodec::<ControlMsg>::new());
+            let msg = Message::new(0, node_id, 2, ControlMsg::Ready);
+            sink.send(msg).await?;
+            // return the newly registered network
+            Ok(network)
+        } else {
+            // wait to receive a `Ready` message from the node before us
+            // TODO: this will panic if `wait_for_all_clients` was false for
+            // the `parent` passed in
+            let mut listener = TcpListener::bind(listen_addr).await?;
+            let (socket, _) = listener.accept().await?;
+            let (reader, writer) = io::split(socket);
+            let mut stream =
+                FramedRead::new(reader, MessageCodec::<ControlMsg>::new());
+            let mut sink =
+                FramedWrite::new(writer, MessageCodec::<ControlMsg>::new());
+            // wait for the ready message
+            let msg = message::read_msg(&mut stream).await?;
+            assert_eq!(msg.sender_id, node_id - 1);
+            match msg.msg {
+                ControlMsg::Ready => (),
+                _ => return Err(LiquidError::UnexpectedMessage),
+            };
+            // The node before us has joined the network, it is now time
+            // to connect
+            let network = Client::new(
+                &server_addr,
+                &my_ip,
+                None,
+                sender,
+                kill_notifier.clone(),
+                num_nodes,
+                false,
+                client_type,
+            )
+            .await?;
+            // assert that we joined in the right order (kv node id must
+            // match client node id)
+            assert_eq!(node_id, { network.read().await.id });
+
+            // tell the next node we are ready
+            if node_id < num_nodes {
+                // There is another node after us
+                let msg =
+                    Message::new(0, node_id, node_id + 1, ControlMsg::Ready);
+                sink.send(msg).await?;
+            }
+
+            // return the newly registered network
+            Ok(network)
+        }
     }
 
     /// A blocking function that allows a [`Client`] to listen for connections
@@ -226,9 +330,12 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         num_clients: usize,
         wait_for_all_clients: bool,
     ) -> Result<(), LiquidError> {
-        let accepted_type = { client.read().await.client_type.clone() };
-        // Me + All the nodes i'm connected to
-        let mut curr_clients = 1 + { client.read().await.directory.len() };
+        let (accepted_type, mut curr_clients) = {
+            let unlocked = client.read().await;
+            let accepted_type = unlocked.client_type.clone();
+            let curr_clients = unlocked.directory.len() + 1;
+            (accepted_type, curr_clients)
+        };
         loop {
             if wait_for_all_clients && num_clients == curr_clients {
                 return Ok(());
@@ -376,12 +483,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         target_id: usize,
         message: RT,
     ) -> Result<(), LiquidError> {
-        let m = Message {
-            sender_id: self.id,
-            target_id,
-            msg_id: self.msg_id,
-            msg: message,
-        };
+        let m = Message::new(self.msg_id, self.id, target_id, message);
         message::send_msg(target_id, m, &mut self.directory).await?;
         debug!("sent a message with id, {}", self.msg_id);
         self.msg_id += 1;

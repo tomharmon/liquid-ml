@@ -4,10 +4,10 @@ use crate::error::LiquidError;
 use crate::network::{message, Connection, ControlMsg, Message, MessageCodec};
 use log::info;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use tokio::io::split;
 use tokio::net::TcpListener;
 use tokio_util::codec::{FramedRead, FramedWrite};
-use std::net::SocketAddr;
 
 /// Represents a registration `Server` in a distributed system.
 #[derive(Debug)]
@@ -113,12 +113,7 @@ impl Server {
         client_type: &str,
         message: ControlMsg,
     ) -> Result<(), LiquidError> {
-        let m = Message {
-            sender_id: 0,
-            target_id,
-            msg_id: self.msg_id,
-            msg: message,
-        };
+        let m = Message::new(self.msg_id, 0, target_id, message);
         message::send_msg(
             target_id,
             m,
