@@ -38,8 +38,7 @@ pub struct Client<T> {
     ///
     /// [`Connection`]: struct.Connection.html
     pub(crate) directory: HashMap<usize, Connection<T>>,
-    /// A buffered and framed message codec for sending messages to the
-    /// [`Server`](struct.Server.html)
+    /// The connection to the [`Server`](struct.Server.html)
     server: Connection<ControlMsg>,
     /// When this `Client` gets a message, it uses this [`mpsc`] channel to
     /// forward messages to whatever layer is using this `Client` for
@@ -48,8 +47,11 @@ pub struct Client<T> {
     ///
     /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     sender: Sender<Message<T>>,
-    /// the type of this `Client`
-    client_type: String,
+    /// The name of the network this `Client` will connect to. This is so that,
+    /// for example, two different communication networks of
+    /// `Client<DistributedDFMsg>` can be created so that separate
+    /// `DistributedDataFrame`s only talk to themselves.
+    network_name: String,
 }
 
 // TODO: remove `DeserializeOwned + 'static`
@@ -96,8 +98,9 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// - `wait_for_all_clients`: Whether to wait for `num_clients` to connect
     ///                           connect to the system before returning from
     ///                           this function.
-    /// - `client_type`: The type of [`Client`]s for this [`Client`] to connect
-    ///                  with.
+    /// - `network_name`: The name of the network to connect with, will only
+    ///                   connect with other `Client`s with the same
+    ///                   `network_name`
     ///
     /// [`Client`]: struct.Client.html
     /// [`Server`]: struct.Server.html
@@ -113,7 +116,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         kill_notifier: Arc<Notify>,
         num_nodes: usize,
         wait_for_all_clients: bool,
-        client_type: &str,
+        network_name: &str,
     ) -> Result<Arc<RwLock<Self>>, LiquidError> {
         // Setup a TCPListener
         let listener;
@@ -139,7 +142,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             address: server_address,
             sink,
         };
-        // Tell the server our address
+        // Tell the server our address and type
         server
             .sink
             .send(Message::new(
@@ -148,7 +151,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 0,
                 ControlMsg::Introduction {
                     address: my_address.clone(),
-                    client_type: client_type.to_string(),
+                    network_name: network_name.to_string(),
                 },
             ))
             .await?;
@@ -161,8 +164,8 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         };
 
         info!(
-            "Client of type {} got id {} running at address {}",
-            client_type,
+            "Client in network {} got id {} running at address {}",
+            network_name,
             dir_msg.target_id,
             my_address.clone()
         );
@@ -176,7 +179,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             num_nodes,
             server,
             sender,
-            client_type: client_type.to_string(),
+            network_name: network_name.to_string(),
         };
 
         // Connect to all the clients
@@ -214,21 +217,19 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         Ok(concurrent_client)
     }
 
-    /// ## Parameters
-    /// [`Client`]: struct.Client.html
-    /// [`Server`]: struct.Server.html
-    /// [`ControlMsg::Directory`]: enum.ControlMsg.html#variant.Directory
-    /// [`ControlMsg::Introduction`]: enum.ControlMsg.html#variant.Introduction
-    /// [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
-    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
-    pub async fn register_type<
+    /// Given an already connected `Client` of any type, register a new network
+    /// with the given `network_name` that will create a new network of
+    /// `Client`s that connect in the same order as the `parent`. The new
+    /// `Client` can only talk to `Client`s with the same `network_name` as
+    /// the new network is independent of the `parent`.
+    pub async fn register_network<
         T: Send + Sync + DeserializeOwned + Serialize + Clone + 'static,
     >(
         parent: Arc<RwLock<Self>>,
         sender: Sender<Message<T>>,
         kill_notifier: Arc<Notify>,
         num_nodes: usize,
-        client_type: &str,
+        network_name: &str,
     ) -> Result<Arc<RwLock<Client<T>>>, LiquidError> {
         let (server_addr, my_ip, node_id, listen_addr) = {
             let unlocked = parent.read().await;
@@ -247,7 +248,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 kill_notifier.clone(),
                 num_nodes,
                 false,
-                client_type,
+                network_name,
             )
             .await?;
             assert_eq!(1, { network.read().await.id });
@@ -293,7 +294,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 kill_notifier.clone(),
                 num_nodes,
                 false,
-                client_type,
+                network_name,
             )
             .await?;
             // assert that we joined in the right order (kv node id must
@@ -343,7 +344,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     ) -> Result<(), LiquidError> {
         let (accepted_type, mut curr_clients) = {
             let unlocked = client.read().await;
-            let accepted_type = unlocked.client_type.clone();
+            let accepted_type = unlocked.network_name.clone();
             let curr_clients = unlocked.directory.len() + 1;
             (accepted_type, curr_clients)
         };
@@ -359,18 +360,18 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             let sink = FramedWrite::new(writer, MessageCodec::<RT>::new());
             // read the introduction message from the new client
             let intro = message::read_msg(&mut stream).await?;
-            let (address, client_type) = if let ControlMsg::Introduction {
+            let (address, network_name) = if let ControlMsg::Introduction {
                 address,
-                client_type,
+                network_name,
             } = intro.msg
             {
-                (address, client_type)
+                (address, network_name)
             } else {
                 // we should only receive `ControlMsg::Introduction` msgs here
                 return Err(LiquidError::UnexpectedMessage);
             };
 
-            if accepted_type != client_type {
+            if accepted_type != network_name {
                 // we only want to connect with other clients that are the same
                 // type as us
                 return Err(LiquidError::UnexpectedMessage);
@@ -450,7 +451,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 0,
                 ControlMsg::Introduction {
                     address: self.address.clone(),
-                    client_type: self.client_type.clone(),
+                    network_name: self.network_name.clone(),
                 },
             ))
             .await?;
@@ -482,7 +483,6 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         }
     }
 
-    // TODO: abstract/merge with Server::send_msg, they are the same
     /// Send the given `message` to a [`Client`] with the given `target_id`.
     /// Id's are automatically assigned by a [`Server`] during the registration
     /// period based on the order of connections.

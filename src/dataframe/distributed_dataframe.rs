@@ -97,10 +97,6 @@ pub(crate) enum DistributedDFMsg {
         schema: Schema,
         df_chunk_map: HashMap<Range<usize>, Key>,
     },
-    /// Used by nodes to co-ordinate connection to the `Server` so nodes
-    /// preserve the correct ids, and to notify node 1 when to send the
-    /// `Initialization` message
-    Ready,
 }
 
 impl DistributedDataFrame {
@@ -152,11 +148,7 @@ impl DistributedDataFrame {
 
     /// Creates a new `DataFrame` from the given iterator. The iterator is
     /// used only on node 1, which calls `next` on it and distributes chunks
-    /// concurrently. Currently, only two chunks are sent concurrently to
-    /// restrict memory usage since experimental testing found that bigger
-    /// chunks was more performant for `map` and `filter`. There may be plans
-    /// to make the size of the chunks configurable in which case the number
-    /// of concurrent chunk sending tasks will also be tweaked.
+    /// concurrently.
     ///
     /// You may use this function directly to create a `DistributedDataFrame`
     /// but it is recommended to use the application layer by calling
@@ -188,19 +180,19 @@ impl DistributedDataFrame {
         // signal
         let kill_notifier = Arc::new(Notify::new());
         // so that our client only connects to clients for this dataframe
-        let df_client_type = format!("ddf-{}", df_name);
+        let df_network_name = format!("ddf-{}", df_name);
         // for processing results when distributed filtering is performed
         // on this `DistributedDataFrame`
         let (filter_results_sender, filter_results) = mpsc::channel(num_nodes);
         let filter_results = Mutex::new(filter_results);
 
         let network: Arc<RwLock<Client<DistributedDFMsg>>> =
-            Client::register_type(
+            Client::register_network(
                 kv.network.clone(),
                 sender,
                 kill_notifier.clone(),
                 num_nodes,
-                &df_client_type,
+                &df_network_name,
             )
             .await?;
         assert_eq!(node_id, { network.read().await.id });
@@ -543,12 +535,6 @@ impl DistributedDataFrame {
     /// chunks.  By default, each node will use the number of threads available
     /// on that machine.
     ///
-    /// **NOTE**: Because this creates a new `DistributedDataFrame`, the
-    /// `kv_blob_receiver` is required to be passed in. It is recommended that
-    /// you call [`LiquidML::filter`] instead of this method so that you don't
-    /// have to pass it in, though this method will remain public for users
-    /// who want lower-level access.
-    ///
     /// [`LiquidML::filter`]: ../struct.LiquidML.html#method.filter
     pub async fn filter<
         T: Rower + Clone + Send + Serialize + DeserializeOwned,
@@ -565,14 +551,14 @@ impl DistributedDataFrame {
         let mut rng = rand::thread_rng();
         let r = rng.gen::<i16>();
         let new_name = format!("{}-filtered-{}", &self.df_name, r);
-        let df_client_type = format!("ddf-{}", new_name);
+        let df_network_name = format!("ddf-{}", new_name);
         let network: Arc<RwLock<Client<DistributedDFMsg>>> =
-            Client::register_type(
+            Client::register_network(
                 self.kv.network.clone(),
                 sender,
                 kill_notifier.clone(),
                 self.num_nodes,
-                &df_client_type,
+                &df_network_name,
             )
             .await?;
         assert_eq!(self.node_id, { network.read().await.id });

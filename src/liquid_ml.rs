@@ -100,11 +100,7 @@ impl LiquidML {
     /// of this distributed `liquid_ml` system will have their `LiquidML`
     /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// **NOTE**: if `df_name` is not unique, you will not be able to access
-    ///           the old data frame that will be replaced by the new data
-    ///           frame, and the old data frame will not be removed from all
-    ///           nodes. There is a way to fix this, and may be done at a
-    ///           later date.
+    /// **NOTE**: `df_name` must be unique.
     ///
     /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_fn(
@@ -142,11 +138,7 @@ impl LiquidML {
     /// of this distributed `liquid_ml` system will have their `LiquidML`
     /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// **NOTE**: if `df_name` is not unique, you will not be able to access
-    ///           the old data frame that will be replaced by the new data
-    ///           frame, and the old data frame will not be removed from all
-    ///           nodes. There is a way to fix this, and may be done at a
-    ///           later date.
+    /// **NOTE**: `df_name` must be unique.
     ///
     /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_sor(
@@ -180,11 +172,7 @@ impl LiquidML {
     /// of this distributed `liquid_ml` system will have their `LiquidML`
     /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// **NOTE**: if `df_name` is not unique, you will not be able to access
-    ///           the old data frame that will be replaced by the new data
-    ///           frame, and the old data frame will not be removed from all
-    ///           nodes. There is a way to fix this, and may be done at a
-    ///           later date.
+    /// **NOTE**: `df_name` must be unique.
     ///
     /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_iter(

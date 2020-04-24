@@ -1,6 +1,5 @@
 use bincode::{deserialize, serialize};
 use bitvec::prelude::*;
-use bytecount;
 use clap::Clap;
 use futures::future::try_join_all;
 use liquid_ml::{
@@ -11,8 +10,6 @@ use liquid_ml::{
 use log::Level;
 use serde::{Deserialize, Serialize};
 use simple_logger;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap

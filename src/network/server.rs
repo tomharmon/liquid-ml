@@ -16,7 +16,7 @@ pub struct Server {
     pub(crate) address: SocketAddr,
     /// The id of the current message
     pub(crate) msg_id: usize,
-    /// A directory which is a `HashMap` of client types to a `HashMap` of
+    /// A directory which is a `HashMap` of network names to a `HashMap` of
     /// `node_id` to a [`Connection`]
     ///
     /// [`Connection`]: struct.Connection.html
@@ -55,12 +55,12 @@ impl Server {
             let sink = FramedWrite::new(writer, MessageCodec::new());
             // Receive the listening IP:Port address of the new client
             let address = message::read_msg(&mut stream).await?;
-            let (address, client_type) = if let ControlMsg::Introduction {
+            let (address, network_name) = if let ControlMsg::Introduction {
                 address,
-                client_type,
+                network_name,
             } = address.msg
             {
-                (address, client_type)
+                (address, network_name)
             } else {
                 return Err(LiquidError::UnexpectedMessage);
             };
@@ -71,7 +71,7 @@ impl Server {
 
             let target_id;
             let dir;
-            match self.directory.get_mut(&client_type) {
+            match self.directory.get_mut(&network_name) {
                 Some(d) => {
                     // there are some existing clients of this type
                     target_id = d.len() + 1; // node id's start at 1
@@ -86,38 +86,38 @@ impl Server {
                     dir = Vec::new();
                     let mut d = HashMap::new();
                     d.insert(target_id, conn);
-                    self.directory.insert(client_type.clone(), d);
+                    self.directory.insert(network_name.clone(), d);
                 }
             };
 
             info!(
-                "Connected to address: {:#?}, with type {:#?}, assigning id: {:#?}",
-                address.clone(),
-                client_type.clone(),
+                "Connected to address: {:#?} joining network {:#?}, assigning id: {:#?}",
+                &address,
+                &network_name,
                 target_id
             );
 
             // Send the new client the list of existing nodes.
             let dir_msg = ControlMsg::Directory { dir };
-            self.send_msg(target_id, &client_type, dir_msg).await?;
+            self.send_msg(target_id, &network_name, dir_msg).await?;
         }
     }
 
-    // TODO: abstract/merge with Client::send_msg, they are the same
-    /// Send the given `message` to a [`Client`] with the given `target_id`.
+    /// Send the given `message` to a [`Client`] running in the network with
+    /// the given `network_name` and with the given `target_id`.
     ///
     /// [`Client`]: struct.Client.html
     pub async fn send_msg(
         &mut self,
         target_id: usize,
-        client_type: &str,
+        network_name: &str,
         message: ControlMsg,
     ) -> Result<(), LiquidError> {
         let m = Message::new(self.msg_id, 0, target_id, message);
         message::send_msg(
             target_id,
             m,
-            self.directory.get_mut(client_type).unwrap(),
+            self.directory.get_mut(network_name).unwrap(),
         )
         .await?;
         self.msg_id += 1;
@@ -125,24 +125,25 @@ impl Server {
     }
 
     /// Broadcast the given `message` to all currently connected [`Clients`]
+    /// in the network with the given `network_name`
     ///
     /// [`Client`]: struct.Client.html
     pub async fn broadcast(
         &mut self,
         message: ControlMsg,
-        types: &str,
+        network_name: &str,
     ) -> Result<(), LiquidError> {
         let d: Vec<usize> = self
             .directory
             .iter()
-            .find(|(k, _)| **k == types)
+            .find(|(k, _)| **k == network_name)
             .unwrap()
             .1
             .iter()
             .map(|(k, _)| *k)
             .collect();
         for k in d {
-            self.send_msg(k, types, message.clone()).await?;
+            self.send_msg(k, network_name, message.clone()).await?;
         }
         Ok(())
     }

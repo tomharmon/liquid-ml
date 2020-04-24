@@ -57,7 +57,7 @@ pub enum ControlMsg {
     /// [`Client`]s and the [`Server`]
     Introduction {
         address: SocketAddr,
-        client_type: String,
+        network_name: String,
     },
     /// A message the [`Server`] sends to [`Client`]s to inform them to shut
     /// down
