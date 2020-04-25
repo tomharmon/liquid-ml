@@ -39,7 +39,7 @@
 //! concerned with networking and getting and putting chunks of different
 //! [`KVStore`]s. One of the main concerns are that creating a new
 //! [`DistributedDataFrame`] means distributing the [`Key`]s of all the chunks
-//! to all nodes.
+//! to all nodes and the chunks to their respective owner.
 //!
 //! Upon creation, node 1 of a [`DistributedDataFrame`] will distribute chunks
 //! of data across multiple nodes from [`SoR`] files, iterators, and other

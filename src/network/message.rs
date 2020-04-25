@@ -57,7 +57,7 @@ pub enum ControlMsg {
     /// [`Client`]s and the [`Server`]
     Introduction {
         address: SocketAddr,
-        client_type: String,
+        network_name: String,
     },
     /// A message the [`Server`] sends to [`Client`]s to inform them to shut
     /// down
@@ -65,6 +65,9 @@ pub enum ControlMsg {
     /// [`Server`]: struct.Server.html
     /// [`Client`]: struct.Client.html
     Kill,
+    /// A message to notify other [`Client`]s when they are ready to register
+    /// a new [`Client`] type
+    Ready,
 }
 
 impl<T> Message<T> {

@@ -32,14 +32,20 @@
 //! [`Client`] can be used by higher level components without being tightly
 //! coupled.
 //!
-//! [`Client`]s are stringly typed to support dynamic client type generation.
-//! [`Client`]s may only connect to other [`Client`]s of the same type.
+//! [`Client`]s join networks that are Stringly typed so as to support dynamic
+//! network generation for [`DistributedDataFrame::filter`] which creates a new
+//! network to support the new `DistributedDataFrame` that is created since
+//! they are immutable.
+//!
+//! [`Client`]s may only connect to other [`Client`]s with the same
+//! `network_name`
 //!
 //! [`Client`]: struct.Client.html
 //! [`Server`]: struct.Server.html
 //! [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
 //! [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
 //! [`accept_new_connections`]: struct.Server.html#method.accept_new_connections
+//! [`DistributedDataFrame::filter`]: (../dataframe/struct.DistributedDataFrame.html#method.filter)
 use crate::error::LiquidError;
 use crate::network::message::{FramedSink, FramedStream, MessageCodec};
 use std::net::Shutdown;

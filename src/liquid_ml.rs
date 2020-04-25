@@ -100,11 +100,7 @@ impl LiquidML {
     /// of this distributed `liquid_ml` system will have their `LiquidML`
     /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// **NOTE**: if `df_name` is not unique, you will not be able to access
-    ///           the old data frame that will be replaced by the new data
-    ///           frame, and the old data frame will not be removed from all
-    ///           nodes. There is a way to fix this, and may be done at a
-    ///           later date.
+    /// **NOTE**: `df_name` must be unique.
     ///
     /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_fn(
@@ -124,7 +120,6 @@ impl LiquidML {
             self.kv.clone(),
             df_name,
             self.num_nodes,
-            self.blob_receiver.clone(),
         )
         .await?;
         self.data_frames.insert(df_name.to_string(), ddf);
@@ -143,11 +138,7 @@ impl LiquidML {
     /// of this distributed `liquid_ml` system will have their `LiquidML`
     /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// **NOTE**: if `df_name` is not unique, you will not be able to access
-    ///           the old data frame that will be replaced by the new data
-    ///           frame, and the old data frame will not be removed from all
-    ///           nodes. There is a way to fix this, and may be done at a
-    ///           later date.
+    /// **NOTE**: `df_name` must be unique.
     ///
     /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_sor(
@@ -162,7 +153,6 @@ impl LiquidML {
             self.kv.clone(),
             df_name,
             self.num_nodes,
-            self.blob_receiver.clone(),
         )
         .await?;
         self.data_frames.insert(df_name.to_string(), ddf);
@@ -182,11 +172,7 @@ impl LiquidML {
     /// of this distributed `liquid_ml` system will have their `LiquidML`
     /// struct updated with the information of the new [`DistributedDataFrame`]
     ///
-    /// **NOTE**: if `df_name` is not unique, you will not be able to access
-    ///           the old data frame that will be replaced by the new data
-    ///           frame, and the old data frame will not be removed from all
-    ///           nodes. There is a way to fix this, and may be done at a
-    ///           later date.
+    /// **NOTE**: `df_name` must be unique.
     ///
     /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn df_from_iter(
@@ -197,11 +183,10 @@ impl LiquidML {
         let ddf = DistributedDataFrame::from_iter(
             &self.server_addr,
             &self.my_ip,
-            iter,
+            Some(iter),
             self.kv.clone(),
             df_name,
             self.num_nodes,
-            self.blob_receiver.clone(),
         )
         .await?;
         self.data_frames.insert(df_name.to_string(), ddf);
@@ -284,7 +269,7 @@ impl LiquidML {
             Some(x) => x,
             None => return Err(LiquidError::NotPresent),
         };
-        let filtered_df = df.filter(rower, self.blob_receiver.clone()).await?;
+        let filtered_df = df.filter(rower).await?;
         self.data_frames
             .insert(filtered_df.df_name.clone(), filtered_df);
 

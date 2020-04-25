@@ -56,8 +56,8 @@
 //! `DeserializeOwned + Serialize` from the serialization/deserialization crate
 //! [`Serde`](https://crates.io/crates/serde).
 //!
-//! [`Client`]s are also constructed with a client type so that sub-networks of
-//! different client types can be dynamically created. This supports the
+//! [`Client`]s are also constructed with a network name so that sub-networks
+//! of different client types can be dynamically created. This supports the
 //! `liquid_ml` distributed data frame implementation.
 //!
 //! ## KV Store
@@ -277,24 +277,23 @@
 //! that using the largest chunks possible to fit on each node increased
 //! performance by over `2x`.
 //!
-//! Another is that since our experimental testing found that big
-//! chunks are best for `map` and `filter` performance, we can not simply use
-//! the [`KVStore`] to support the API of a [`DistributedDataFrame`], since
-//! each chunk will be too big to go over the network, so methods like `get`
+//! Since our experimental testing found that big chunks are best for `map` and
+//! `filter` performance, we can not simply use the [`KVStore`] to support the
+//! API of a [`DistributedDataFrame`] by sending chunks around, since each
+//! chunk will be too big to go over the network, so methods like `get`
 //! won't work unless each [`DistributedDataFrame`] has a way to (meaningfully)
 //! talk to other [`DistributedDataFrame`]s, which mean they need a [`Client`]
 //! of their own.
 //!
-//! Since `id`s are assigned to [`Client`]s based on connection order to the
-//! [`Server`], this means we must programmatically connect based on the
+//! Therefore since `id`s are assigned to [`Client`]s based on connection order
+//! to the [`Server`], this means we must programmatically connect based on the
 //! original connection order of a [`KVStore`] that is passed in.  Because of
 //! this difficulty, there are no direct public constructor functions for
 //! creating a [`DistributedDataFrame`], there are only methods for a
 //! [`LiquidML`] struct to create one so that the user does not have to worry
 //! about this ugliness. There are definitely ways to improve this
-//! implementation but we do not have a lot of experience with networking and
-//! distributed systems (this is our first project related to the topic) and
-//! thus this is the best we could do in the circumstances.
+//! implementation, but since this is only a side project, we don't have the
+//! time to improve this aspect of the implementation.
 //!
 //! ## Application Layer aka `LiquidML`
 //! The implementation of the [`LiquidML`] struct is quite simple since it
