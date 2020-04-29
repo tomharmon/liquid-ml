@@ -40,7 +40,7 @@ struct Opts {
     #[clap(short = "m", long = "my_addr", default_value = "127.0.0.2:9002")]
     my_address: String,
     /// The number of nodes for the distributed system
-    #[clap(short = "n", long = "num_nodes", default_value = "12")]
+    #[clap(short = "n", long = "num_nodes", default_value = "4")]
     num_nodes: usize,
     /// The name of the data file
     #[clap(
@@ -50,10 +50,10 @@ struct Opts {
     )]
     data: String,
     /// The max depth of the tree
-    #[clap(long = "max_depth", default_value = "10")]
+    #[clap(long = "max_depth", default_value = "5")]
     max_depth: usize,
     /// The min size of a node to split on
-    #[clap(long = "min_size", default_value = "50000")]
+    #[clap(long = "min_size", default_value = "10000")]
     min_size: usize,
 }
 
@@ -349,7 +349,7 @@ fn predict(tree: &DecisionTree, row: &Row) -> bool {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Debug).unwrap();
+    simple_logger::init_with_level(Level::Info).unwrap();
     let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;
