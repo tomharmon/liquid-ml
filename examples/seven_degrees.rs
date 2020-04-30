@@ -148,7 +148,7 @@ impl Rower for UserRower {
 #[tokio::main]
 async fn main() -> Result<(), LiquidError> {
     let opts: Opts = Opts::parse();
-    simple_logger::init_with_level(Level::Error).unwrap();
+    simple_logger::init_with_level(Level::Info).unwrap();
     let mut app =
         LiquidML::new(&opts.my_address, &opts.server_address, opts.num_nodes)
             .await?;

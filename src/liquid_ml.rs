@@ -63,12 +63,10 @@ impl LiquidML {
         let (blob_sender, blob_receiver) = mpsc::channel(20);
         let kill_notifier = Arc::new(Notify::new());
         let kv = KVStore::new(
-            server_addr,
-            my_addr,
+            server_addr.to_string(),
+            my_addr.to_string(),
             blob_sender,
-            kill_notifier.clone(),
             num_nodes,
-            true,
         )
         .await;
         let node_id = kv.id;

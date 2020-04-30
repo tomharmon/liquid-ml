@@ -1,13 +1,14 @@
 //! The `KVStore` implementation
 use crate::error::LiquidError;
 use crate::kv::{Key, Value};
-use crate::network::{Client, Message};
+use crate::network::{Client, FramedStream};
 use crate::{
     BYTES_PER_GB, BYTES_PER_KIB, KV_STORE_CACHE_SIZE_FRACTION,
     MAX_NUM_CACHED_VALUES,
 };
 use bincode::{deserialize, serialize};
 use deepsize::DeepSizeOf;
+use futures::stream::{SelectAll, StreamExt};
 use log::{debug, error, info};
 use lru::LruCache;
 use serde::de::DeserializeOwned;
@@ -15,10 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use sysinfo::{RefreshKind, System, SystemExt};
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    Mutex, Notify, RwLock,
-};
+use tokio::sync::{mpsc::Sender, Mutex, Notify, RwLock};
 
 /// A distributed [`Key`], [`Value`] store which is generic for type `T`. Since
 /// this is a distributed [`KVStore`], [`Key`]s know which node the values
@@ -42,7 +40,7 @@ pub struct KVStore<T> {
     cache: Mutex<LruCache<Key, Arc<T>>>,
     /// The `network` layer, used to send and receive messages and data with
     /// other `KVStore`s
-    pub(crate) network: Arc<RwLock<Client<KVMessage>>>,
+    pub(crate) network: Arc<Mutex<Client<KVMessage>>>,
     /// Used internally for processing data and messages
     internal_notifier: Notify,
     /// The `id` of the node this `KVStore` is running on
@@ -133,35 +131,27 @@ impl<
     /// [`Kill`]: ../network/enum.ControlMsg.html#variant.Kill
     /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     pub async fn new(
-        server_addr: &str,
-        my_addr: &str,
+        server_addr: String,
+        my_addr: String,
         blob_sender: Sender<Value>,
-        kill_notifier: Arc<Notify>,
         num_clients: usize,
-        wait_for_all_clients: bool,
     ) -> Arc<Self> {
-        // the Receiver acts as our queue of messages from the network, and
-        // the network uses the Sender to add messages to our queue
-        let (sender, receiver) = mpsc::channel(64);
         let (my_ip, my_port) = {
             let mut iter = my_addr.split(':');
             let first = iter.next().unwrap();
             let second = iter.next().unwrap();
-            (first, second)
+            (first.to_string(), second.to_string())
         };
-        let network = Client::new(
+        let (network, read_streams, _kill_notifier) = Client::new(
             server_addr,
             my_ip,
             Some(my_port),
-            sender,
-            kill_notifier,
             num_clients,
-            wait_for_all_clients,
-            "kvstore",
+            "kvstore".to_string(),
         )
         .await
         .unwrap();
-        let id = { network.read().await.id };
+        let id = { network.lock().await.id };
 
         let memo_info_kind = RefreshKind::new().with_memory();
         let sys = System::new_with_specifics(memo_info_kind);
@@ -186,7 +176,9 @@ impl<
 
         let kv_clone = kv.clone();
         tokio::spawn(async move {
-            KVStore::process_messages(kv_clone, receiver).await.unwrap();
+            KVStore::process_messages(kv_clone, read_streams)
+                .await
+                .unwrap();
         });
 
         kv
@@ -269,7 +261,7 @@ impl<
             // request it from another `KVStore` by sending a `get` message
             {
                 self.network
-                    .write()
+                    .lock()
                     .await
                     .send_msg(key.home, KVMessage::Get(key.clone()))
                     .await?;
@@ -317,7 +309,7 @@ impl<
         } else {
             let target_id = key.home;
             let msg = KVMessage::Put(key, serial);
-            self.network.write().await.send_msg(target_id, msg).await?;
+            self.network.lock().await.send_msg(target_id, msg).await?;
             Ok(None)
         }
     }
@@ -333,7 +325,7 @@ impl<
         blob: Value,
     ) -> Result<(), LiquidError> {
         self.network
-            .write()
+            .lock()
             .await
             .send_msg(target_id, KVMessage::Blob(blob))
             .await
@@ -366,11 +358,10 @@ impl<
     /// [`KVStore`]: struct.KVStore.html
     pub(crate) async fn process_messages(
         self: Arc<Self>,
-        mut receiver: Receiver<Message<KVMessage>>,
+        mut streams: SelectAll<FramedStream<KVMessage>>,
     ) -> Result<(), LiquidError> {
-        loop {
-            let msg = receiver.recv().await.unwrap();
-            let mut sender_clone = self.blob_sender.clone();
+        while let Some(Ok(msg)) = streams.next().await {
+            let mut blob_sender_clone = self.blob_sender.clone();
             let kv = self.clone();
             tokio::spawn(async move {
                 debug!("Processing a message with id: {:#?}", msg.msg_id);
@@ -380,7 +371,7 @@ impl<
                         let v = kv.wait_and_get_raw(&k).await.unwrap();
                         let response = KVMessage::Data(k, v);
                         kv.network
-                            .write()
+                            .lock()
                             .await
                             .send_msg(msg.sender_id, response)
                             .await
@@ -403,11 +394,12 @@ impl<
                         kv.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
-                        sender_clone.send(v).await.unwrap();
+                        blob_sender_clone.send(v).await.unwrap();
                     }
                 }
             });
         }
+        Ok(())
     }
 
     /// Gets serialized blobs out of this [`KVStore`]

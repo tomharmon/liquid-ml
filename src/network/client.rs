@@ -5,7 +5,10 @@ use crate::network::{
     existing_conn_err, increment_msg_id, message, Connection, ControlMsg,
     FramedSink, FramedStream, Message, MessageCodec,
 };
-use futures::SinkExt;
+use futures::{
+    stream::{self, SelectAll},
+    SinkExt,
+};
 use log::{debug, info};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -14,7 +17,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{mpsc::Sender, Notify, RwLock};
+use tokio::sync::{Mutex, Notify};
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 /// Represents a `Client` node in a distributed system that is generic for
@@ -40,13 +43,6 @@ pub struct Client<T> {
     pub(crate) directory: HashMap<usize, Connection<T>>,
     /// The connection to the [`Server`](struct.Server.html)
     server: Connection<ControlMsg>,
-    /// When this `Client` gets a message, it uses this [`mpsc`] channel to
-    /// forward messages to whatever layer is using this `Client` for
-    /// networking to avoid tight coupling. The above layer will receive the
-    /// messages on the other half of this [`mpsc`] channel.
-    ///
-    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
-    sender: Sender<Message<T>>,
     /// The name of the network this `Client` will connect to. This is so that,
     /// for example, two different communication networks of
     /// `Client<DistributedDFMsg>` can be created so that separate
@@ -69,9 +65,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     ///    the addresses of all other currently connected [`Client`]s with a
     ///    type that matches this [`Client`]s `client_type`
     /// 4. Connects to all other existing [`Client`]s of our `client_type`,
-    ///    spawning a Tokio task for each connection. The task will read
-    ///    messages from the connection and and forward it over the sending
-    ///    half of an [`mpsc`] channel with the given `sender`.
+    ///    spawning a Tokio task for each connection.
     ///
     /// Creating a new [`Client`] returns an `Arc<RwLock<Self>>` so that
     /// the layer above the [`Client`] can use it concurrently.
@@ -82,22 +76,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// - `my_port`: An optional port for this [`Client`] to listen for new
     ///              connections. If its `None`, uses the OS to randomly assign
     ///              a port.
-    /// - `sender`: The sending half of an [`mpsc`] channel, for forwarding
-    ///             messages to a higher level component that is using this
-    ///             [`Client`] so that this component may process the message
-    ///             however it wants to. You must create this [`mpsc`] channel
-    ///             before constructing a [`Client`], pass in the sending half,
-    ///             and hold onto the receiving half so you may process
-    ///             messages the [`Client`] receives.
-    /// - `kill_notifier`: Created outside of this [`Client`] and passed in
-    ///                    during construction so that the higher level
-    ///                    component using this [`Client`] can be notified when
-    ///                    a [`ControlMsg::Kill`] message is received from the
-    ///                    [`Server`] so that orderly shut down may be
-    ///                    performed.
-    /// - `wait_for_all_clients`: Whether to wait for `num_clients` to connect
-    ///                           connect to the system before returning from
-    ///                           this function.
+    /// - `num_nodes`: The number of nodes in the network.
     /// - `network_name`: The name of the network to connect with, will only
     ///                   connect with other `Client`s with the same
     ///                   `network_name`
@@ -107,17 +86,16 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// [`ControlMsg::Directory`]: enum.ControlMsg.html#variant.Directory
     /// [`ControlMsg::Introduction`]: enum.ControlMsg.html#variant.Introduction
     /// [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
-    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     pub async fn new(
-        server_addr: &str,
-        my_ip: &str,
-        my_port: Option<&str>,
-        sender: Sender<Message<RT>>,
-        kill_notifier: Arc<Notify>,
+        server_addr: String,
+        my_ip: String,
+        my_port: Option<String>,
         num_nodes: usize,
-        wait_for_all_clients: bool,
-        network_name: &str,
-    ) -> Result<Arc<RwLock<Self>>, LiquidError> {
+        network_name: String,
+    ) -> Result<
+        (Arc<Mutex<Self>>, SelectAll<FramedStream<RT>>, Arc<Notify>),
+        LiquidError,
+    > {
         // Setup a TCPListener
         let listener;
         let my_address: SocketAddr = match my_port {
@@ -155,7 +133,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 },
             ))
             .await?;
-        // The Server sends the addresses of all currently connected clients
+        // Server responds with the addresses of all currently connected clients
         let dir_msg = message::read_msg(&mut stream).await?;
         let dir = if let ControlMsg::Directory { dir } = dir_msg.msg {
             dir
@@ -165,9 +143,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
 
         info!(
             "Client in network {} got id {} running at address {}",
-            network_name,
-            dir_msg.target_id,
-            my_address.clone()
+            network_name, dir_msg.target_id, &my_address
         );
 
         // initialize `self`
@@ -178,43 +154,27 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             directory: HashMap::new(),
             num_nodes,
             server,
-            sender,
             network_name: network_name.to_string(),
         };
 
-        // Connect to all the clients
-        for addr in dir {
-            c.connect(addr).await?;
+        // Connect to all the currently existing clients
+        let mut conns = vec![];
+        // note this is done serially and could be done concurrently, but
+        // it doesn't make a difference since there will only ever be a
+        // (relatively) small number of nodes
+        for (id, addr) in dir.into_iter() {
+            conns.push(c.connect(id, addr).await?);
         }
+        let read_streams = stream::select_all(conns.into_iter());
 
         // Listen for further messages from the Server, e.g. `Kill` messages
-        Client::<ControlMsg>::recv_server_msg(stream, kill_notifier);
+        let kill_notifier = Arc::new(Notify::new());
+        Client::<ControlMsg>::recv_server_msg(stream, kill_notifier.clone());
+        // block until all the other clients start up and connect to us
+        Client::accept_new_connections(&mut c, listener, num_nodes).await?;
 
-        // spawn a tokio task for accepting connections from new clients
-        let concurrent_client = Arc::new(RwLock::new(c));
-        let concurrent_client_cloned = concurrent_client.clone();
-        if wait_for_all_clients {
-            Client::accept_new_connections(
-                concurrent_client_cloned,
-                listener,
-                num_nodes,
-                wait_for_all_clients,
-            )
-            .await?
-        } else {
-            tokio::spawn(async move {
-                Client::accept_new_connections(
-                    concurrent_client_cloned,
-                    listener,
-                    num_nodes,
-                    wait_for_all_clients,
-                )
-                .await
-                .unwrap();
-            });
-        }
-
-        Ok(concurrent_client)
+        let concurrent_client = Arc::new(Mutex::new(c));
+        Ok((concurrent_client, read_streams, kill_notifier))
     }
 
     /// Given an already connected `Client` of any type, register a new network
@@ -225,37 +185,40 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     pub async fn register_network<
         T: Send + Sync + DeserializeOwned + Serialize + Clone + 'static,
     >(
-        parent: Arc<RwLock<Self>>,
-        sender: Sender<Message<T>>,
-        kill_notifier: Arc<Notify>,
-        num_nodes: usize,
-        network_name: &str,
-    ) -> Result<Arc<RwLock<Client<T>>>, LiquidError> {
-        let (server_addr, my_ip, node_id, listen_addr) = {
-            let unlocked = parent.read().await;
+        parent: Arc<Mutex<Self>>,
+        network_name: String,
+    ) -> Result<
+        (
+            Arc<Mutex<Client<T>>>,
+            SelectAll<FramedStream<T>>,
+            Arc<Notify>,
+        ),
+        LiquidError,
+    > {
+        let (server_addr, my_ip, node_id, listen_addr, num_nodes) = {
+            let unlocked = parent.lock().await;
             let node_id = unlocked.id;
             let server_addr = unlocked.server.address.to_string().clone();
             let my_ip = unlocked.address.ip().to_string();
-            (server_addr, my_ip, node_id, unlocked.address)
+            let num_nodes = unlocked.num_nodes;
+            (server_addr, my_ip, node_id, unlocked.address, num_nodes)
         };
         if node_id == 1 {
             // connect our client right away since we want to be node 1
-            let network = Client::new(
-                &server_addr,
-                &my_ip,
-                None,
-                sender,
-                kill_notifier.clone(),
-                num_nodes,
-                false,
-                network_name,
-            )
-            .await?;
-            assert_eq!(1, { network.read().await.id });
+            let jh = tokio::spawn(async move {
+                Client::<T>::new(
+                    server_addr,
+                    my_ip,
+                    None,
+                    num_nodes,
+                    network_name,
+                )
+                .await
+            });
             // Send a ready message to node 2 so that all the other nodes
             // start connecting to the Server in the correct order
             let node_2_addr = {
-                let unlocked = parent.read().await;
+                let unlocked = parent.lock().await;
                 unlocked.directory.get(&2).unwrap().address
             };
             let socket = TcpStream::connect(node_2_addr).await?;
@@ -264,8 +227,11 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 FramedWrite::new(writer, MessageCodec::<ControlMsg>::new());
             let msg = Message::new(0, node_id, 2, ControlMsg::Ready);
             sink.send(msg).await?;
+            // TODO: await join handle
+            let (network, read_streams, kill_notifier) = jh.await.unwrap()?;
+            assert_eq!(1, { network.lock().await.id });
             // return the newly registered network
-            Ok(network)
+            Ok((network, read_streams, kill_notifier))
         } else {
             // wait to receive a `Ready` message from the node before us
             // TODO: this will panic if `wait_for_all_clients` was false for
@@ -286,20 +252,17 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             };
             // The node before us has joined the network, it is now time
             // to connect
-            let network = Client::new(
-                &server_addr,
-                &my_ip,
-                None,
-                sender,
-                kill_notifier.clone(),
-                num_nodes,
-                false,
-                network_name,
-            )
-            .await?;
-            // assert that we joined in the right order (kv node id must
-            // match client node id)
-            assert_eq!(node_id, { network.read().await.id });
+            // TODO: spawn tokio task, store join handle
+            let client_join_handle = tokio::spawn(async move {
+                Client::<T>::new(
+                    server_addr,
+                    my_ip,
+                    None,
+                    num_nodes,
+                    network_name,
+                )
+                .await
+            });
 
             // tell the next node we are ready
             if node_id < num_nodes {
@@ -307,7 +270,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 let msg = Message::new(0, node_id, node_id, ControlMsg::Ready);
                 sink.send(msg).await?;
                 let next_node_addr = {
-                    let unlocked = parent.read().await;
+                    let unlocked = parent.lock().await;
                     unlocked.directory.get(&(node_id + 1)).unwrap().address
                 };
                 let next_node_socket =
@@ -321,9 +284,15 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                     Message::new(0, node_id, node_id + 1, ControlMsg::Ready);
                 next_node_sink.send(ready_msg).await?;
             }
+            // TODO: await join handle
+            let (network, read_streams, kill_notifier) =
+                client_join_handle.await.unwrap()?;
+            // assert that we joined in the right order (kv node id must
+            // match client node id)
+            assert_eq!(node_id, { network.lock().await.id });
 
             // return the newly registered network
-            Ok(network)
+            Ok((network, read_streams, kill_notifier))
         }
     }
 
@@ -337,20 +306,16 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// [`Client`]: struct.Client.html
     /// [`Connection`]: struct.Connection.html
     async fn accept_new_connections(
-        client: Arc<RwLock<Self>>,
+        &mut self,
         mut listener: TcpListener,
         num_clients: usize,
-        wait_for_all_clients: bool,
-    ) -> Result<(), LiquidError> {
-        let (accepted_type, mut curr_clients) = {
-            let unlocked = client.read().await;
-            let accepted_type = unlocked.network_name.clone();
-            let curr_clients = unlocked.directory.len() + 1;
-            (accepted_type, curr_clients)
-        };
+    ) -> Result<Vec<FramedStream<RT>>, LiquidError> {
+        let accepted_type = self.network_name.clone();
+        let mut curr_clients = self.directory.len() + 1;
+        let mut streams = vec![];
         loop {
-            if wait_for_all_clients && num_clients == curr_clients {
-                return Ok(());
+            if num_clients == curr_clients {
+                return Ok(streams);
             }
             // wait on connections from new clients
             let (socket, _) = listener.accept().await?;
@@ -379,18 +344,12 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
 
             // increment the message id and check if there was an existing
             // connection
-            {
-                let mut unlocked = client.write().await;
-                unlocked.msg_id =
-                    increment_msg_id(unlocked.msg_id, intro.msg_id);
-            }
-            let is_existing_conn = {
-                let unlocked = client.read().await;
-                unlocked.directory.contains_key(&intro.sender_id)
-            };
+            self.msg_id = increment_msg_id(self.msg_id, intro.msg_id);
+            let is_existing_conn =
+                self.directory.contains_key(&intro.sender_id);
 
             if is_existing_conn {
-                return existing_conn_err(stream, sink);
+                return Err(existing_conn_err(stream, sink));
             }
 
             // Add the connection with the new client to this directory
@@ -398,9 +357,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 address: address.clone(),
                 sink,
             };
-            {
-                client.write().await.directory.insert(intro.sender_id, conn);
-            }
+            self.directory.insert(intro.sender_id, conn);
             // NOTE: Not unsafe because message codec has no fields and
             // can be converted to a different type without losing meaning
             let new_stream = unsafe {
@@ -408,10 +365,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                     stream,
                 )
             };
-            // spawn a tokio task to handle new messages from the client
-            // that we just connected to
-            let new_sender = { client.read().await.sender.clone() };
-            Client::recv_msg(new_sender, new_stream);
+            streams.push(new_stream);
             info!(
                 "Connected to id: {:#?} at address: {:#?}",
                 intro.sender_id, address
@@ -430,20 +384,21 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// [`Connection`]: struct.Connection.html
     /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     #[allow(clippy::map_entry)] // clippy is being dumb
-    pub(crate) async fn connect(
+    async fn connect(
         &mut self,
-        client: (usize, SocketAddr),
-    ) -> Result<(), LiquidError> {
+        client_id: usize,
+        client_addr: SocketAddr,
+    ) -> Result<FramedStream<RT>, LiquidError> {
         // Connect to the given client
-        let stream = TcpStream::connect(client.1.clone()).await?;
+        let stream = TcpStream::connect(&client_addr).await?;
         let (reader, writer) = io::split(stream);
         let stream = FramedRead::new(reader, MessageCodec::<RT>::new());
         let mut sink =
             FramedWrite::new(writer, MessageCodec::<ControlMsg>::new());
 
-        // Make the connection struct which holds the stream for sending msgs
-        if self.directory.contains_key(&client.0) {
-            existing_conn_err(stream, sink)
+        // Make the connection struct which holds the sink for sending msgs
+        if self.directory.contains_key(&client_id) {
+            Err(existing_conn_err(stream, sink))
         } else {
             sink.send(Message::new(
                 self.msg_id,
@@ -463,23 +418,20 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 )
             };
             let conn = Connection {
-                address: client.1.clone(),
+                address: client_addr.clone(),
                 sink,
             };
+            info!(
+                "Connected to id: {:#?} at address: {:#?}",
+                client_id, client_addr
+            );
             // Add the connection to our directory
-            self.directory.insert(client.0, conn);
-            // spawn a tokio task to handle new messages from the client
-            // that we just connected to
-            Client::recv_msg(self.sender.clone(), stream);
+            self.directory.insert(client_id, conn);
             // send the client our id and address so they can add us to
             // their directory
             self.msg_id += 1;
-            info!(
-                "Connected to id: {:#?} at address: {:#?}",
-                client.0, client.1
-            );
 
-            Ok(())
+            Ok(stream)
         }
     }
 
@@ -508,32 +460,6 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             self.send_msg(k, message.clone()).await?;
         }
         Ok(())
-    }
-
-    /// Spawns a `Tokio` task to read messages from the given `reader` and
-    /// forward messages over the given `sender` so the message may be
-    /// processed.
-    fn recv_msg(mut sender: Sender<Message<RT>>, mut reader: FramedStream<RT>) {
-        // TODO: need to properly increment message id but that means self
-        // needs to be 'static or mutex'd
-        tokio::spawn(async move {
-            loop {
-                let msg: Message<RT> =
-                    match message::read_msg(&mut reader).await {
-                        Ok(x) => x,
-                        Err(_) => {
-                            break;
-                        }
-                    };
-                //        self.msg_id = increment_msg_id(self.msg_id, s.msg_id);
-                let id = msg.msg_id;
-                sender.send(msg).await.unwrap_or_else(|_| panic!());
-                debug!(
-                    "Got a msg with id: {} and added it to process queue",
-                    id
-                );
-            }
-        });
     }
 
     /// Spawns a `tokio` task that will handle receiving [`ControlMsg::Kill`]

@@ -47,7 +47,7 @@
 //! [`accept_new_connections`]: struct.Server.html#method.accept_new_connections
 //! [`DistributedDataFrame::filter`]: (../dataframe/struct.DistributedDataFrame.html#method.filter)
 use crate::error::LiquidError;
-use crate::network::message::{FramedSink, FramedStream, MessageCodec};
+use crate::network::message::FramedSink;
 use std::net::Shutdown;
 use std::net::SocketAddr;
 use tokio::io::{ReadHalf, WriteHalf};
@@ -73,13 +73,13 @@ pub(crate) struct Connection<T> {
 pub(crate) fn existing_conn_err<T, U>(
     stream: FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>,
     sink: FramedWrite<WriteHalf<TcpStream>, MessageCodec<U>>,
-) -> Result<(), LiquidError> {
+) -> LiquidError {
     // Already have an open connection to this client, shut
     // down the one we just created.
     let reader = stream.into_inner();
     let unsplit = reader.unsplit(sink.into_inner());
-    unsplit.shutdown(Shutdown::Both)?;
-    Err(LiquidError::ReconnectionError)
+    unsplit.shutdown(Shutdown::Both).unwrap();
+    LiquidError::ReconnectionError
 }
 
 pub(crate) fn increment_msg_id(cur_id: usize, id: usize) -> usize {
@@ -90,7 +90,8 @@ mod client;
 pub use client::Client;
 
 mod message;
-pub use message::{ControlMsg, Message};
+pub(crate) use message::FramedStream;
+pub use message::{ControlMsg, Message, MessageCodec};
 
 mod server;
 pub use server::Server;

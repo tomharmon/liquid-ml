@@ -93,7 +93,7 @@ impl<T> Message<T> {
 /// a frame, followed by the serialized message. When decoding, this length
 /// is used to determine if a full frame has been read.
 #[derive(Debug)]
-pub(crate) struct MessageCodec<T> {
+pub struct MessageCodec<T> {
     phantom: std::marker::PhantomData<T>,
     pub(crate) codec: LengthDelimitedCodec,
 }

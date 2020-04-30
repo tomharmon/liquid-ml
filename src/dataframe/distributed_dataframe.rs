@@ -3,9 +3,10 @@
 use crate::dataframe::{local_dataframe::LocalDataFrame, Row, Rower, Schema};
 use crate::error::LiquidError;
 use crate::kv::{KVStore, Key};
-use crate::network::{Client, Message};
+use crate::network::{Client, FramedStream};
 use bincode::{deserialize, serialize};
 use bytecount;
+use futures::stream::{SelectAll, StreamExt};
 use log::{debug, info};
 use rand::{self, Rng};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -48,7 +49,7 @@ pub struct DistributedDataFrame {
     /// What's my IP address?
     pub my_ip: String,
     /// Used for communication with other nodes in this `DistributedDataFrame`
-    network: Arc<RwLock<Client<DistributedDFMsg>>>,
+    network: Arc<Mutex<Client<DistributedDFMsg>>>,
     /// The `KVStore`, which stores the serialized data owned by this
     /// `DistributedDataFrame` and deserialized cached data that may or may
     /// not belong to this node
@@ -173,9 +174,6 @@ impl DistributedDataFrame {
         // used for internal messaging processing so that the asynchronous
         // messaging task can notify other tasks when `self.row` is ready
         let internal_notifier = Arc::new(Notify::new());
-        // for this DDF's network client to forward messages to this DDF
-        // for processing
-        let (sender, mut receiver) = mpsc::channel(64);
         // so that our network client can notify us when they get a Kill
         // signal
         let kill_notifier = Arc::new(Notify::new());
@@ -186,16 +184,13 @@ impl DistributedDataFrame {
         let (filter_results_sender, filter_results) = mpsc::channel(num_nodes);
         let filter_results = Mutex::new(filter_results);
 
-        let network: Arc<RwLock<Client<DistributedDFMsg>>> =
+        let (network, mut read_streams, _kill_notifier) =
             Client::register_network(
                 kv.network.clone(),
-                sender,
-                kill_notifier.clone(),
-                num_nodes,
-                &df_network_name,
+                df_network_name.to_string(),
             )
             .await?;
-        assert_eq!(node_id, { network.read().await.id });
+        assert_eq!(node_id, { network.lock().await.id });
 
         // Node 1 is responsible for sending out chunks
         if node_id == 1 {
@@ -258,7 +253,7 @@ impl DistributedDataFrame {
 
             // Broadcast the initialization message to all nodes
             {
-                network.write().await.broadcast(intro_msg).await?
+                network.lock().await.broadcast(intro_msg).await?
             };
             debug!("Node 1 sent the initialization message to all nodes");
 
@@ -287,7 +282,7 @@ impl DistributedDataFrame {
             tokio::spawn(async move {
                 DistributedDataFrame::process_messages(
                     ddf_clone,
-                    receiver,
+                    read_streams,
                     blob_sender,
                     filter_results_sender,
                 )
@@ -298,7 +293,7 @@ impl DistributedDataFrame {
             Ok(ddf)
         } else {
             // Node 1 will send the initialization message to our network
-            let init_msg = receiver.recv().await.unwrap();
+            let init_msg = read_streams.next().await.unwrap()?;
             // We got a message, check it was the initialization message
             let (schema, df_chunk_map) = match init_msg.msg {
                 DistributedDFMsg::Initialization {
@@ -342,7 +337,7 @@ impl DistributedDataFrame {
             tokio::spawn(async move {
                 DistributedDataFrame::process_messages(
                     ddf_clone,
-                    receiver,
+                    read_streams,
                     blob_sender,
                     filter_results_sender,
                 )
@@ -434,7 +429,7 @@ impl DistributedDataFrame {
                     let get_msg = DistributedDFMsg::GetRow(index);
                     {
                         self.network
-                            .write()
+                            .lock()
                             .await
                             .send_msg(key.home, get_msg)
                             .await?;
@@ -494,20 +489,25 @@ impl DistributedDataFrame {
             let ldf = self.kv.wait_and_get(key).await?;
             rower = ldf.pmap(rower);
         }
-        debug!("Finished mapping local chunk(s)");
+        dbg!("Finished mapping local chunk(s)");
         if self.node_id == self.num_nodes {
             // we are the last node
+            dbg!("trying to send blob");
             self.send_blob(self.node_id - 1, &rower).await?;
-            debug!("Last node sent its results");
+            dbg!("Last node sent its results");
             Ok(None)
         } else {
+            dbg!("trying to receive a blob");
             let blob =
                 { self.blob_receiver.lock().await.recv().await.unwrap() };
+            dbg!("got the blob");
             let external_rower: T = deserialize(&blob[..])?;
             rower = rower.join(external_rower);
             debug!("Received a resulting rower and joined it with local rower");
             if self.node_id != 1 {
+                dbg!("trying to send a blob");
                 self.send_blob(self.node_id - 1, &rower).await?;
+                dbg!("sent a blob");
                 debug!("Forwarded the combined rower");
                 Ok(None)
             } else {
@@ -542,9 +542,6 @@ impl DistributedDataFrame {
         &self,
         mut rower: T,
     ) -> Result<Arc<Self>, LiquidError> {
-        // for this DDF's network client to forward messages to this DDF
-        // for processing
-        let (sender, mut receiver) = mpsc::channel(64);
         // so that our network client can notify us when they get a Kill
         // signal
         let kill_notifier = Arc::new(Notify::new());
@@ -552,16 +549,13 @@ impl DistributedDataFrame {
         let r = rng.gen::<i16>();
         let new_name = format!("{}-filtered-{}", &self.df_name, r);
         let df_network_name = format!("ddf-{}", new_name);
-        let network: Arc<RwLock<Client<DistributedDFMsg>>> =
+        let (network, mut read_streams, _kill_notifier) =
             Client::register_network(
                 self.kv.network.clone(),
-                sender,
-                kill_notifier.clone(),
-                self.num_nodes,
-                &df_network_name,
+                df_network_name.to_string(),
             )
             .await?;
-        assert_eq!(self.node_id, { network.read().await.id });
+        assert_eq!(self.node_id, { network.lock().await.id });
 
         // get the keys for our locally owned chunks
         let my_keys: Vec<&Key> = self
@@ -672,7 +666,7 @@ impl DistributedDataFrame {
 
             // Broadcast the initialization message to all nodes
             {
-                network.write().await.broadcast(intro_msg).await?
+                network.lock().await.broadcast(intro_msg).await?
             };
             debug!("Node 1 sent the initialization message to all nodes");
 
@@ -710,7 +704,7 @@ impl DistributedDataFrame {
             tokio::spawn(async move {
                 DistributedDataFrame::process_messages(
                     ddf_clone,
-                    receiver,
+                    read_streams,
                     blob_sender,
                     filter_results_sender,
                 )
@@ -726,10 +720,10 @@ impl DistributedDataFrame {
                 filtered_df_key: key,
             };
             {
-                network.write().await.send_msg(1, results).await?
+                network.lock().await.send_msg(1, results).await?
             };
             // Node 1 will send the initialization message to our network
-            let init_msg = receiver.recv().await.unwrap();
+            let init_msg = read_streams.next().await.unwrap()?;
             // We got a message, check it was the initialization message
             let (schema, df_chunk_map) = match init_msg.msg {
                 DistributedDFMsg::Initialization {
@@ -774,7 +768,7 @@ impl DistributedDataFrame {
             tokio::spawn(async move {
                 DistributedDataFrame::process_messages(
                     ddf_clone,
-                    receiver,
+                    read_streams,
                     blob_sender,
                     filter_results_sender,
                 )
@@ -807,7 +801,7 @@ impl DistributedDataFrame {
     ) -> Result<(), LiquidError> {
         let blob = serialize(blob)?;
         self.network
-            .write()
+            .lock()
             .await
             .send_msg(target_id, DistributedDFMsg::Blob(blob))
             .await
@@ -820,28 +814,22 @@ impl DistributedDataFrame {
     /// concurrently.
     async fn process_messages(
         ddf: Arc<DistributedDataFrame>,
-        mut receiver: Receiver<Message<DistributedDFMsg>>,
+        mut read_streams: SelectAll<FramedStream<DistributedDFMsg>>,
         blob_sender: Sender<Vec<u8>>,
         filter_results_sender: Sender<DistributedDFMsg>,
     ) -> Result<(), LiquidError> {
-        let ddf2 = ddf.clone();
-        tokio::spawn(async move {
-            loop {
-                let msg = receiver.recv().await.unwrap();
-                let ddf3 = ddf2.clone();
-                let mut blob_sender_clone = blob_sender.clone();
-                let mut filter_res_sender = filter_results_sender.clone();
-                tokio::spawn(async move {
-                    debug!(
-                        "DDF processing a message with id: {:#?}",
-                        msg.msg_id
-                    );
-                    match msg.msg {
+        while let Some(Ok(msg)) = read_streams.next().await {
+            let mut blob_sender_clone = blob_sender.clone();
+            let mut filter_res_sender = filter_results_sender.clone();
+            let ddf2 = ddf.clone();
+            tokio::spawn(async move {
+                dbg!("DDF processing a message with id: {:#?}", msg.msg_id);
+                match msg.msg {
                         DistributedDFMsg::GetRow(row_idx) => {
-                            let r = ddf3.get_row(row_idx).await.unwrap();
+                            let r = ddf2.get_row(row_idx).await.unwrap();
                             {
-                                ddf3.network
-                                    .write()
+                                ddf2.network
+                                    .lock()
                                     .await
                                     .send_msg(
                                         msg.sender_id,
@@ -853,9 +841,9 @@ impl DistributedDataFrame {
                         },
                         DistributedDFMsg::Row(row) => {
                             {
-                                *ddf3.row.write().await = row;
+                                *ddf2.row.write().await = row;
                             }
-                            ddf3.internal_notifier.notify();
+                            ddf2.internal_notifier.notify();
                         },
                         DistributedDFMsg::Blob(blob) => {
                             blob_sender_clone.send(blob).await.unwrap();
@@ -865,9 +853,9 @@ impl DistributedDataFrame {
                         }
                         _ => panic!("Should always happen before message process loop is started"),
                     }
-                });
-            }
-        });
+            });
+        }
+
         Ok(())
     }
 }
