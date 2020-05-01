@@ -158,20 +158,23 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         };
 
         // Connect to all the currently existing clients
-        let mut conns = vec![];
+        let mut existing_conns = vec![];
         // note this is done serially and could be done concurrently, but
         // it doesn't make a difference since there will only ever be a
         // (relatively) small number of nodes
         for (id, addr) in dir.into_iter() {
-            conns.push(c.connect(id, addr).await?);
+            existing_conns.push(c.connect(id, addr).await?);
         }
-        let read_streams = stream::select_all(conns.into_iter());
 
         // Listen for further messages from the Server, e.g. `Kill` messages
         let kill_notifier = Arc::new(Notify::new());
         Client::<ControlMsg>::recv_server_msg(stream, kill_notifier.clone());
         // block until all the other clients start up and connect to us
-        Client::accept_new_connections(&mut c, listener, num_nodes).await?;
+        let new_conns =
+            Client::accept_new_connections(&mut c, listener, num_nodes).await?;
+        let read_streams = stream::select_all(
+            existing_conns.into_iter().chain(new_conns.into_iter()),
+        );
 
         let concurrent_client = Arc::new(Mutex::new(c));
         Ok((concurrent_client, read_streams, kill_notifier))

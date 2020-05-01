@@ -489,25 +489,19 @@ impl DistributedDataFrame {
             let ldf = self.kv.wait_and_get(key).await?;
             rower = ldf.pmap(rower);
         }
-        dbg!("Finished mapping local chunk(s)");
         if self.node_id == self.num_nodes {
             // we are the last node
-            dbg!("trying to send blob");
             self.send_blob(self.node_id - 1, &rower).await?;
-            dbg!("Last node sent its results");
+            debug!("Last node sent its results");
             Ok(None)
         } else {
-            dbg!("trying to receive a blob");
             let blob =
                 { self.blob_receiver.lock().await.recv().await.unwrap() };
-            dbg!("got the blob");
             let external_rower: T = deserialize(&blob[..])?;
             rower = rower.join(external_rower);
             debug!("Received a resulting rower and joined it with local rower");
             if self.node_id != 1 {
-                dbg!("trying to send a blob");
                 self.send_blob(self.node_id - 1, &rower).await?;
-                dbg!("sent a blob");
                 debug!("Forwarded the combined rower");
                 Ok(None)
             } else {
@@ -807,6 +801,7 @@ impl DistributedDataFrame {
             .await
     }
 
+    // TODO: graceful shutdown handling of individual streams in the `SelectAll`
     /// Spawns a `tokio` task that processes `DistributedDFMsg` messages
     /// When a message is received, a new `tokio` task is spawned to
     /// handle processing of that message to reduce blocking of the message
@@ -823,7 +818,6 @@ impl DistributedDataFrame {
             let mut filter_res_sender = filter_results_sender.clone();
             let ddf2 = ddf.clone();
             tokio::spawn(async move {
-                dbg!("DDF processing a message with id: {:#?}", msg.msg_id);
                 match msg.msg {
                         DistributedDFMsg::GetRow(row_idx) => {
                             let r = ddf2.get_row(row_idx).await.unwrap();

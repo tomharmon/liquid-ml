@@ -331,6 +331,7 @@ impl<
             .await
     }
 
+    // TODO: graceful shutdown handling of individual streams in the `SelectAll`
     /// Processes messages from the queue that is populated by a [`Client`].
     ///
     /// This method processes the messages by doing the following:
@@ -364,7 +365,6 @@ impl<
             let mut blob_sender_clone = self.blob_sender.clone();
             let kv = self.clone();
             tokio::spawn(async move {
-                debug!("Processing a message with id: {:#?}", msg.msg_id);
                 match msg.msg {
                     KVMessage::Get(k) => {
                         // This must wait until it has the data to respond
