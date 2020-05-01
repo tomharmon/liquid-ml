@@ -22,11 +22,13 @@ use tokio_util::codec::{FramedRead, FramedWrite};
 
 /// Represents a `Client` node in a distributed system that is generic for
 /// type `T`, where `T` is the types of messages that can be sent between
-/// `Client`s
+/// `Client`s. Allows directed communication to any other node that shares the
+/// `Client`'s `client_type`, which enables increased concurrency due to
+/// decreased lock contention.
 #[derive(Debug)]
 pub struct Client<T> {
     /// The `id` of this `Client`, assigned by the [`Server`] on startup
-    /// to be monotonically increasing based on the order of connections
+    /// and is monotonically increasing based on the order of connections
     ///
     /// [`Server`]: struct.Server.html
     pub id: usize,
@@ -47,6 +49,10 @@ pub struct Client<T> {
     /// for example, two different communication networks of
     /// `Client<DistributedDFMsg>` can be created so that separate
     /// `DistributedDataFrame`s only talk to themselves.
+    ///
+    /// This allows increased concurrency since each `Client` owned by
+    /// different components have their own `Mutex` around them, instead of a
+    /// single `Client` with one `Mutex`.
     network_name: String,
 }
 
@@ -54,23 +60,12 @@ pub struct Client<T> {
 impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     Client<RT>
 {
-    /// Create a new [`Client`] of a given `client_type` that runs at `my_ip`
-    /// and `my_port`
+    /// Create a new [`Client`] and connect to all other nodes in the network
+    /// with the given `network_name`. If you wish to create multiple networks
+    /// **and** preserve the `node_id`s assigned by the [`Server`], you should
+    /// check out the [register_network] method
     ///
-    /// Constructing the [`Client`] does these things:
-    /// 1. Connects to the [`Server`]
-    /// 2. Sends the server a [`ControlMsg::Introduction`] containing our `IP`,
-    ///    `port`, and `client_type`
-    /// 3. The [`Server`] responds with a [`ControlMsg::Directory`], containing
-    ///    the addresses of all other currently connected [`Client`]s with a
-    ///    type that matches this [`Client`]s `client_type`
-    /// 4. Connects to all other existing [`Client`]s of our `client_type`,
-    ///    spawning a Tokio task for each connection.
-    ///
-    /// Creating a new [`Client`] returns an `Arc<RwLock<Self>>` so that
-    /// the layer above the [`Client`] can use it concurrently.
-    ///
-    /// ## Parameters
+    /// # Parameters
     /// - `server_addr`: The address of the [`Server`] in `IP:Port` format
     /// - `my_ip`: The `IP` of this [`Client`]
     /// - `my_port`: An optional port for this [`Client`] to listen for new
@@ -80,12 +75,30 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
     /// - `network_name`: The name of the network to connect with, will only
     ///                   connect with other `Client`s with the same
     ///                   `network_name`
+    /// # Returned Values
+    /// This function returns a tuple of three things, the first element is the
+    /// `Client`, which can then be used to send messages to any other node
+    /// with the `send_msg` method.  The second element is a struct that
+    /// implements [`StreamExt`] and combines the streams of all messages from
+    /// all other nodes (unordered), which you can use to easily process
+    /// messages like this:
+    ///
+    /// ```ignore
+    /// while let Some(Ok(msg)) = streams.next().await {
+    ///     // ... process the message here according to your use case
+    /// }
+    /// ```
+    ///
+    /// The third element is a notifier that will only be notified when the
+    /// [`Server`] sends a `ControlMsg::Kill` message to the `Client`.
     ///
     /// [`Client`]: struct.Client.html
     /// [`Server`]: struct.Server.html
+    /// [`StreamExt`]: https://docs.rs/futures/0.3.4/futures/stream/trait.StreamExt.html
     /// [`ControlMsg::Directory`]: enum.ControlMsg.html#variant.Directory
     /// [`ControlMsg::Introduction`]: enum.ControlMsg.html#variant.Introduction
     /// [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
+    /// [`register_network`]: struct.Client.html#method.register_network
     pub async fn new(
         server_addr: String,
         my_ip: String,
@@ -182,9 +195,12 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
 
     /// Given an already connected `Client` of any type, register a new network
     /// with the given `network_name` that will create a new network of
-    /// `Client`s that connect in the same order as the `parent`. The new
-    /// `Client` can only talk to `Client`s with the same `network_name` as
-    /// the new network is independent of the `parent`.
+    /// `Client`s that preserve `node_id`s across all nodes by connecting in
+    /// the same order as the `parent`. The new `Client` can only talk to
+    /// `Client`s with the same `network_name` as the new network is
+    /// independent of the `parent`.
+    ///
+    /// The tuple returned is the same as in the `Client::new` function.
     pub async fn register_network<
         T: Send + Sync + DeserializeOwned + Serialize + Clone + 'static,
     >(
@@ -230,14 +246,12 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 FramedWrite::new(writer, MessageCodec::<ControlMsg>::new());
             let msg = Message::new(0, node_id, 2, ControlMsg::Ready);
             sink.send(msg).await?;
-            // TODO: await join handle
             let (network, read_streams, kill_notifier) = jh.await.unwrap()?;
             assert_eq!(1, { network.lock().await.id });
             // return the newly registered network
             Ok((network, read_streams, kill_notifier))
         } else {
             // wait to receive a `Ready` message from the node before us
-            // TODO: this will panic if `wait_for_all_clients` was false for
             // the `parent` passed in
             let mut listener = TcpListener::bind(listen_addr).await?;
             let (socket, _) = listener.accept().await?;
@@ -255,7 +269,6 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             };
             // The node before us has joined the network, it is now time
             // to connect
-            // TODO: spawn tokio task, store join handle
             let client_join_handle = tokio::spawn(async move {
                 Client::<T>::new(
                     server_addr,
@@ -287,7 +300,6 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                     Message::new(0, node_id, node_id + 1, ControlMsg::Ready);
                 next_node_sink.send(ready_msg).await?;
             }
-            // TODO: await join handle
             let (network, read_streams, kill_notifier) =
                 client_join_handle.await.unwrap()?;
             // assert that we joined in the right order (kv node id must
@@ -299,14 +311,11 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         }
     }
 
-    /// A blocking function that allows a [`Client`] to listen for connections
-    /// from newly started [`Client`]s. When a new [`Client`] connects to this
-    /// [`Client`], we add the [`Connection`] to its directory and call spawn a
-    /// `tokio` task to receive messages from the connection when they arrive
-    /// so that messages may be forwarded over the `sender` given to us during
-    /// construction.
+    /// Waits and accepts any connection from newly started `Client`s until
+    /// this `Client` has connected to all nodes.  When a new `Client` connects
+    /// to this `Client`, we add the [`Connection`] to its directory so we can
+    /// later send messages to it if we want to.
     ///
-    /// [`Client`]: struct.Client.html
     /// [`Connection`]: struct.Connection.html
     async fn accept_new_connections(
         &mut self,
@@ -374,15 +383,12 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         }
     }
 
-    /// Connects a running [`Client`] with a [`Client`] running at the given
+    /// Connects this `Client` with the `Client` running at the given
     /// `(id, IP:Port)`. After connecting, adds the [`Connection`] to the other
-    /// [`Client`] to our directory. Finally, spawns a Tokio task to read
-    /// further messages from the [`Client`] and forward them via the [`mpsc`]
-    /// channel.
+    /// `Client` to our directory for sending messages. The returned
+    /// `FramedStream<RT>` is used for reading messages via the `Stream` trait.
     ///
-    /// [`Client`]: struct.Client.html
     /// [`Connection`]: struct.Connection.html
-    /// [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
     #[allow(clippy::map_entry)] // clippy is being dumb
     async fn connect(
         &mut self,
@@ -435,11 +441,10 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         }
     }
 
-    /// Send the given `message` to a [`Client`] with the given `target_id`.
+    /// Send the given `message` to a `Client` with the given `target_id`.
     /// Id's are automatically assigned by a [`Server`] during the registration
     /// period based on the order of connections.
     ///
-    /// [`Client`]: struct.Client.html
     /// [`Server`]: struct.Server.html
     pub async fn send_msg(
         &mut self,

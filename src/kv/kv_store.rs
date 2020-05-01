@@ -19,7 +19,7 @@ use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::sync::{mpsc::Sender, Mutex, Notify, RwLock};
 
 /// A distributed [`Key`], [`Value`] store which is generic for type `T`. Since
-/// this is a distributed [`KVStore`], [`Key`]s know which node the values
+/// this is a distributed `KVStore`, [`Key`]s know which node the values
 /// 'belong' to.
 ///
 /// Internally `KVStore`s store their data in memory as serialized blobs

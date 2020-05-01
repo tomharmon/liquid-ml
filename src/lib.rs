@@ -39,44 +39,11 @@
 //! messages directly to any other [`Client`] of the same client type after
 //! they register with the [`Server`].
 //!
-//! The [`Client`] is designed asynchronously so that it can listen for
-//! messages from the [`Server`] or any number of `Client`s (within physical
-//! limitations) concurrently. Messages from the [`Server`] are processed
-//! internally by the [`Client`], while messages from other [`Client`]s are
-//! sent over a
-//! [`mpsc`](https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/index.html)
-//! channel which is passed in during construction of the [`Client`]. This
-//! channel acts as a queue of messages so that they may be processed in
-//! whichever way a user of the [`Client`] wants. Because of this the
-//! networking layer is not tightly coupled to any system that uses it.
-//!
-//! The [`Client`] is generic for messages of type `T`. A [`Client`]
-//! implementation is provided for any message type that implements
-//! the following traits: `Send + Sync` from the standard library and
-//! `DeserializeOwned + Serialize` from the serialization/deserialization crate
-//! [`Serde`](https://crates.io/crates/serde).
-//!
-//! [`Client`]s are also constructed with a network name so that sub-networks
-//! of different client types can be dynamically created. This supports the
-//! `liquid_ml` distributed data frame implementation.
-//!
 //! ## KV Store
 //! The [`KVStore`] stores blobs of serialized data that are associated with
 //! [`Key`]s, as well as caches deserialized values in memory. In `liquid_ml`,
 //! the [`KVStore`] stores [`LocalDataFrame`]s so that chunks of data frames
 //! can be associated with different nodes in the system.
-//!
-//! Cached values that are likely no longer needed are smartly evicted using an
-//! `LRU` map to avoid running out of memory since `liquid_ml` is designed to
-//! be run using data sets that are much larger than what would fit into
-//! memory.  The `LRU` cache has a fixed size limit that is set to `1/3` of the
-//! total memory on each node.
-//!
-//! Caching also helps to improve performance by reducing network calls.  Each
-//! [`KVStore`] store implements functionality to utilize the network layer to
-//! get data from a different node if the data is available elsewhere and not
-//! in this [`KVStore`].
-//!
 //!
 //! ## Data frame
 //! A data frame in `liquid_ml` is lightly inspired by those found in `R` or
@@ -118,47 +85,6 @@
 //!
 //! # Implementation
 //!
-//! ## Library Usage
-//! ### Tokio
-//! The networking layer uses [`tokio`](https://docs.rs/tokio/0.2.13/tokio/) to
-//! use asynchronous programming to handle connections with multiple clients
-//! concurrently. `Tokio` is an asynchronous run time for Rust since there is
-//! not one included in the standard library. It also includes some faster
-//! synchronization primitives that are faster than those in the standard
-//! library (e.g. `RwLock`). `Tokio` is open source under an MIT license.
-//!
-//! ### Bincode
-//! `Bincode` is a crate for encoding and decoding using a binary serialization
-//! strategy. It is extremely fast and is developed by Mozilla, though it is
-//! open source under an MIT license.
-//!
-//! ### Serde
-//! `Serde` is a framework for serializing and deserializing Rust data
-//! structures efficiently and generally. `Serde` is open source under an MIT
-//! license.
-//!
-//!
-//! ### Miscellaneous
-//! - `lru`: provides a Least Recently Used map, since one is not available
-//!    in the Rust standard library anymore. `lru` is heavily based on the
-//!    original standard library implementation (they're practically the same).
-//! - `thiserror`: helpful for defining error types
-//! - `num_cpus`: provides a function to find the number of logical cores
-//!    available on a machine
-//! - `futures`: used for the `SinkExt` trait (used for sending messages over
-//!    TCP). `tokio` defines the `StreamExt` trait (used for reading messages
-//!    over TCP). These traits are split across crates because of the split in
-//!    the Rust eco-system because it took a while for `async`/`await` to
-//!    become stabilized.  It is a pain to have both imports but everyone in
-//!    the ecosystem has to deal with it.
-//! - `crossbeam-utils`: used to get around some limitations of lifetimes when
-//!    spawning threads. Threads spawned with the Rust standard library have a
-//!    lifetime of static `'static`, but `crossbeam-utils` provides a way to
-//!    spawn threads with a shorter lifetime.
-//! - `bytes`: an efficient buffer used for networking (used to be a part of
-//!   `tokio`, but got separated out due to its general usefulness)
-//! - `clap`: for command line argument parsing
-//!
 //! ## Networking
 //!
 //! The Networking layer consists of [`Client`] and [`Server`] structs, as well
@@ -166,61 +92,33 @@
 //!
 //! There is little handling of many of the complicated edge cases associated
 //! with distributed systems in the networking layer. It's assumed that most
-//! things happen without any errors. We Some of the basic checking that is done
-//! is checking for connections being closed and ensuring messages are of the
-//! right type.
+//! things happen without any errors, although some basic error checking is
+//! done, such as checking for connections being closed, etc.
 //!
 //! ### Client
-//! The [`Client`] struct represents a node and does the following tasks
-//! asynchronously:
-//! 1. Listen for new connections from other nodes
-//!    (`Client::accept_new_connections`)
-//! 2. Listen for `Kill` messages from the [`Server`]
-//! 3. Receive messages from any other active [`Client`] using the read half of
-//!    a `TCPStream`. Messages are forwarded one layer up to the [`KVStore`]
-//!    via an [`mpsc`](https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/index.html)
-//!    channel.
-//!
 //! A [`Client`] can be used to send a message directly to any other [`Client`]
 //! of the same type at any time by using the following method:
 //!
 //! `client.send_msg(target_id: usize, message: Serialize)`
 //!
 //! When a [`Client`] is first created, it must be registered with the
-//! [`Server`] and with all other existing [`Client`]s.
+//! [`Server`] and connect with all other existing [`Client`]s.
 //!
 //! Registration process from [`Client`] perspective:
 //! 1. Connect to the [`Server`]
 //! 2. Send the [`Server`] a `Message<ControlMsg::Introduction>` message
-//!    containing the `IP:Port` of this [`Client`]
+//!    containing the `IP:Port` and `network_name` for this [`Client`]
 //! 3. The [`Server`] will respond with the `Message<ControlMsg::Directory>`
 //!    message containing the `IP:Port` of all other currently connected
-//!    [`Client`]s
+//!    [`Client`]s in that network.
 //! 4. The newly created [`Client`] connects to all other existing [`Client`]s.
-//!    When each connection is made:
-//!   - A `Message<ControlMsg::Introduction>` is sent to the other [`Client`].
-//!   - They are added to the `directory` of this [`Client`].
-//!   - An `mpsc` channel is created that is used to send messages to whatever
-//!     is using the network layer and thus needs to process and respond to
-//!     messages. In `liquid_ml`, this is the [`KVStore`].
-//!   - A green thread is spawned to receive future messages from the other
-//!     [`Client`]. When the messages are received they are sent over the `mpsc`
-//!     channel.
+//! 5. The `Client` waits for all other `Client`s that have not yet started to
+//!    connect to it, unless we have connected to all the nodes.
 //!
 //! ### Server
 //! The [`Server`] asynchronously registers new [`Client`]s via
 //! `Server::accept_new_connections` and also allows sending any
 //! `Message<ControlMsg>` type, such as `Kill` messages for orderly shutdown.
-//!
-//! Registration process from [`Server`] perspective:
-//! 1. Accept an incoming `TCP` connection from a new [`Client`]
-//! 2. Read a `Message<ControlMsg::Introduction>` message from the new
-//!    [`Client`] containing the `IP:Port` of the new [`Client]
-//! 3. Reply to the new [`Client`] with a `Message<ControlMsg::Directory>`
-//!    message
-//! 4. Add the [`Connection`] with the new [`Client`] to the `directory` of this
-//!    [`Server`]
-//! 5. Listen for new connections, when one arrives go to #1
 //!
 //! Due to the servers fairly simple functionality, a default implementation of
 //! a server comes packaged with the `LiquidML` system and can be started by
@@ -285,16 +183,6 @@
 //! talk to other [`DistributedDataFrame`]s, which mean they need a [`Client`]
 //! of their own.
 //!
-//! Therefore since `id`s are assigned to [`Client`]s based on connection order
-//! to the [`Server`], this means we must programmatically connect based on the
-//! original connection order of a [`KVStore`] that is passed in.  Because of
-//! this difficulty, there are no direct public constructor functions for
-//! creating a [`DistributedDataFrame`], there are only methods for a
-//! [`LiquidML`] struct to create one so that the user does not have to worry
-//! about this ugliness. There are definitely ways to improve this
-//! implementation, but since this is only a side project, we don't have the
-//! time to improve this aspect of the implementation.
-//!
 //! ## Application Layer aka `LiquidML`
 //! The implementation of the [`LiquidML`] struct is quite simple since it
 //! delegates most of the work to the [`DistributedDataFrame`]. All it does is
@@ -304,16 +192,6 @@
 //! # Examples and Use Cases
 //! Please check the `examples/` directory for more fully featured examples.
 //!
-//!
-//! ## Creating a `LocalDataFrame` from a SoR file:
-//!
-//! ```rust
-//! use liquid_ml::dataframe::LocalDataFrame;
-//!
-//! let df = LocalDataFrame::from_sor("tests/test.sor", 0, 1000);
-//! assert_eq!(df.n_cols(), 4);
-//! assert_eq!(df.n_rows(), 2);
-//! ```
 //!
 //! ## Creating a `DistributedDataFrame` With `LiquidML` and Using a Simple `Rower`
 //! This example shows a trivial implementation of a [`Rower`] and using the
@@ -479,9 +357,8 @@
 //! `
 //!
 //! ## Simple Demo
-//! We implemented a simple demo that places some numbers into the `kv` adds
-//! them and verifies that the addition was correct i.e. all numbers got
-//! inserted at the right place, correctly.
+//! We implemented a trivial demo that places some numbers into the `kv` adds
+//! them and verifies that the addition was correct.
 //!
 //! This program runs the demo program and can be run as follows:
 //! 1. Start the `Server` with this command: `cargo run --bin server`

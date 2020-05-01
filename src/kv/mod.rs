@@ -24,27 +24,7 @@
 //!    (and other use cases) in a
 //!    [`DistributedDataFrame`](../dataframe/struct.DistributedDataFrame.html)
 //!
-//! # Message Processing
 //!
-//! The [`KVStore`] processes messages from the [`network`] by doing the
-//! following:
-//! 1. Asynchronously await new messages from the [`Client`] that are
-//!    sent over an [`mpsc`] channel.
-//! 2. Spawn an asynchronous `tokio::task` to respond to the newly
-//!    received message so as to not block further message processing.
-//! 3. Based on the message type, do the following:
-//!    - [`Get`](enum.KVMessage.html#variant.Get) message: call
-//!       [`wait_and_get`] to get the data, either internally from this
-//!       [`KVStore`] or externally over the network from another one. Once we
-//!       have the data, respond with a [`Data`] message containing the
-//!       requested data.
-//!    - [`Data`] message: Deserialize the data and put it into our cache
-//!    - [`Put`] message: add the given data to our internal store
-//!    - [`Blob`] message: send the data up a higher level similar to how
-//!       the [`Client`] processes messages
-//!
-//! [`network`]: ../network/index.html
-//! [`Client`]: ../network/struct.Client.html
 //!
 //! [`Key`]: struct.Key.html
 //! [`Value`]: type.Key.html
@@ -57,7 +37,6 @@
 //! [`Data`]: enum.KVMessage.html#variant.Data
 //! [`Put`]: enum.KVMessage.html#variant.Put
 //! [`Blob`]: enum.KVMessage.html#variant.Blob
-//! [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
 use rand::{self, Rng};
 use serde::{Deserialize, Serialize};
 

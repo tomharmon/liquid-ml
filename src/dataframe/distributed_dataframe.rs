@@ -21,9 +21,10 @@ use tokio::sync::{
     Mutex, Notify, RwLock,
 };
 
-/// Represents a distributed, immutable data frame. Provides convenient `map`
-/// and `filter` methods that operate on the entire distributed data frame
-/// with a given [`Rower`]
+/// Represents a distributed, immutable data frame which contains data stored
+/// in a columnar format and a well defined [`Schema`]. Provides convenient
+/// `map` and `filter` methods that operate on the entire distributed data
+/// frame (ie, across different machines) with a given [`Rower`]
 ///
 /// [`Rower`]: trait.Rower.html
 #[derive(Debug)]
@@ -105,14 +106,6 @@ impl DistributedDataFrame {
     /// Node 1 will then parse that file and distribute chunks to other nodes
     /// over the network, so if network latency is a concern you should not
     /// use this method.
-    ///
-    /// You may use this function directly to create a `DistributedDataFrame`
-    /// but it is recommended to use the application layer by calling
-    /// [`LiquidML::df_from_sor`] instead. Doing so will pass in many of the
-    /// required parameters for you, particularly the ones that are required
-    /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
-    ///
-    /// [`LiquidML::df_from_sor`]: ../struct.LiquidML.html#method.df_from_sor
     pub(crate) async fn from_sor(
         server_addr: &str,
         my_ip: &str,
@@ -149,14 +142,6 @@ impl DistributedDataFrame {
     /// Creates a new `DataFrame` from the given iterator. The iterator is
     /// used only on node 1, which calls `next` on it and distributes chunks
     /// concurrently.
-    ///
-    /// You may use this function directly to create a `DistributedDataFrame`
-    /// but it is recommended to use the application layer by calling
-    /// [`LiquidML::df_from_iter`] instead. Doing so will pass in many of the
-    /// required parameters for you, particularly the ones that are required
-    /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
-    ///
-    /// [`LiquidML::df_from_iter`]: ../struct.LiquidML.html#method.df_from_iter
     pub(crate) async fn from_iter(
         server_addr: &str,
         my_ip: &str,
@@ -357,14 +342,6 @@ impl DistributedDataFrame {
     /// `filter`. Node 1 is responsible for distributing the data, and thus
     /// `data` should only be `Some` on node 1.
     ///
-    /// You may use this function directly to create a `DistributedDataFrame`
-    /// but it is recommended to use the application layer by calling
-    /// [`LiquidML::df_from_fn`] instead. Doing so will pass in many of the
-    /// required parameters for you, particularly the ones that are required
-    /// for the distributed system, such as the `kv` and the `kv_blob_receiver`
-    ///
-    /// [`LiquidML::df_from_fn`]: ../struct.LiquidML.html#method.df_from_fn
-    ///
     /// NOTE: this function currently does not verify that `data` is not
     /// jagged, which is a required invariant of the program. There is a plan
     /// to automatically fix jagged data.
@@ -526,7 +503,9 @@ impl DistributedDataFrame {
     /// chunks.  By default, each node will use the number of threads available
     /// on that machine.
     ///
-    /// [`LiquidML::filter`]: ../struct.LiquidML.html#method.filter
+    /// It is possible to re-write this to use a bit map of the rows that
+    /// should remain in the filtered result, but currently this just clones
+    /// the rows.
     pub async fn filter<
         T: Rower + Clone + Send + Serialize + DeserializeOwned,
     >(
