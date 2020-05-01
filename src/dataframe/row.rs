@@ -138,7 +138,7 @@ impl Row {
     /// Get the current index of this `Row`. Is `Some` if the index has been
     /// set, and is `None` otherwise.
     pub fn get_idx(&self) -> Option<usize> {
-        self.idx.clone()
+        self.idx
     }
 
     /// Get a reference of the boxed value at the given `idx`.

@@ -38,8 +38,7 @@ impl Schema {
         data_type: DataType,
         col_name: Option<String>,
     ) -> Result<(), LiquidError> {
-        if col_name.is_some() {
-            let name = col_name.unwrap();
+        if let Some(name) = col_name {
             if !self.col_names.contains_key(&name) {
                 self.col_names.insert(name, self.schema.len());
             } else {

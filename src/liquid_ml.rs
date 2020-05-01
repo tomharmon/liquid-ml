@@ -31,8 +31,8 @@ pub struct LiquidML {
     ///
     /// [`Server`]: network/struct.Server.html
     pub node_id: usize,
-    /// A receiver for blob messages (received by the `kv`) that can be
-    /// processed by the user for lower level access to the network
+    /// A receiver for blob messages that can be processed by the user for
+    /// lower level access to the network
     pub blob_receiver: Arc<Mutex<Receiver<Vec<u8>>>>,
     /// The number of nodes in this network
     pub num_nodes: usize,
@@ -63,12 +63,10 @@ impl LiquidML {
         let (blob_sender, blob_receiver) = mpsc::channel(20);
         let kill_notifier = Arc::new(Notify::new());
         let kv = KVStore::new(
-            server_addr,
-            my_addr,
+            server_addr.to_string(),
+            my_addr.to_string(),
             blob_sender,
-            kill_notifier.clone(),
             num_nodes,
-            true,
         )
         .await;
         let node_id = kv.id;
@@ -256,6 +254,10 @@ impl LiquidML {
     /// A local `pfilter` is used on each node to filter over that nodes'
     /// chunks.  By default, each node will use the number of threads available
     /// on that machine.
+    ///
+    /// It is possible to re-write this to use a bit map of the rows that
+    /// should remain in the filtered result, but currently this just clones
+    /// the rows.
     ///
     /// [`DistributedDataFrame`]: dataframe/struct.DistributedDataFrame.html
     pub async fn filter<

@@ -21,33 +21,35 @@
 //!
 //! # [`Client`] Design
 //!
-//! The [`Client`] is designed so that it can perform various networking
-//! operations asynchronously and thus it can listen for messages from the
-//! [`Server`] or any number of [`Client`]s (within physical limitations)
-//! concurrently.
+//! The [`Client`] is designed with concurrency in mind and can be used to
+//! send directed communication to any other node.
 //!
-//! Messages from the [`Server`] are processed internally by the [`Client`],
-//! while messages from other [`Client`]s are sent over a [`mpsc`] channel
-//! (which is passed in during construction) for processing. Because of this a
-//! [`Client`] can be used by higher level components without being tightly
-//! coupled.
+//! [`Client`]s are `String`-ly typed so as to support dynamic network
+//! generation. If you wish to create multiple networks **and** preserve the
+//! `node_id`s assigned by the [`Server`], you should check out
+//! [`Client::register_network`], otherwise the [`Client::new`] function should
+//! suffice.
 //!
-//! [`Client`]s join networks that are Stringly typed so as to support dynamic
-//! network generation for [`DistributedDataFrame::filter`] which creates a new
-//! network to support the new `DistributedDataFrame` that is created since
-//! they are immutable.
+//! Processing messages received by the `Client` can by done like this with
+//! the [`SelectAll`] struct that is returned by [`Client::register_network`]
+//! or [`Client::new`]:
 //!
-//! [`Client`]s may only connect to other [`Client`]s with the same
-//! `network_name`
+//! ```ignore
+//! while let Some(Ok(msg)) = streams.next().await {
+//!     // ... process the message here according to your use case
+//! }
+//! ```
+//!
 //!
 //! [`Client`]: struct.Client.html
 //! [`Server`]: struct.Server.html
 //! [`ControlMsg::Kill`]: enum.ControlMsg.html#variant.Kill
-//! [`mpsc`]: https://docs.rs/tokio/0.2.18/tokio/sync/mpsc/fn.channel.html
 //! [`accept_new_connections`]: struct.Server.html#method.accept_new_connections
-//! [`DistributedDataFrame::filter`]: (../dataframe/struct.DistributedDataFrame.html#method.filter)
+//! [`Client::register_network`]: struct.Client.html#method.register_network
+//! [`Client::new`]: struct.Client.html#method.new
+//! [`SelectAll`]: https://docs.rs/futures/0.3.4/futures/stream/struct.SelectAll.html
 use crate::error::LiquidError;
-use crate::network::message::{FramedSink, FramedStream, MessageCodec};
+use crate::network::message::FramedSink;
 use std::net::Shutdown;
 use std::net::SocketAddr;
 use tokio::io::{ReadHalf, WriteHalf};
@@ -73,13 +75,13 @@ pub(crate) struct Connection<T> {
 pub(crate) fn existing_conn_err<T, U>(
     stream: FramedRead<ReadHalf<TcpStream>, MessageCodec<T>>,
     sink: FramedWrite<WriteHalf<TcpStream>, MessageCodec<U>>,
-) -> Result<(), LiquidError> {
+) -> LiquidError {
     // Already have an open connection to this client, shut
     // down the one we just created.
     let reader = stream.into_inner();
     let unsplit = reader.unsplit(sink.into_inner());
-    unsplit.shutdown(Shutdown::Both)?;
-    Err(LiquidError::ReconnectionError)
+    unsplit.shutdown(Shutdown::Both).unwrap();
+    LiquidError::ReconnectionError
 }
 
 pub(crate) fn increment_msg_id(cur_id: usize, id: usize) -> usize {
@@ -90,7 +92,8 @@ mod client;
 pub use client::Client;
 
 mod message;
-pub use message::{ControlMsg, Message};
+pub(crate) use message::FramedStream;
+pub use message::{ControlMsg, Message, MessageCodec};
 
 mod server;
 pub use server::Server;

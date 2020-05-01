@@ -16,8 +16,8 @@ pub struct Server {
     pub(crate) address: SocketAddr,
     /// The id of the current message
     pub(crate) msg_id: usize,
-    /// A directory which is a `HashMap` of network names to a `HashMap` of
-    /// `node_id` to a [`Connection`]
+    /// A directory which is a `HashMap` of network names to that network,
+    /// (a `HashMap` of `node_id` to a [`Connection`]).
     ///
     /// [`Connection`]: struct.Connection.html
     pub(crate) directory:
@@ -25,10 +25,8 @@ pub struct Server {
 }
 
 impl Server {
-    /// Create a new [`Server`] running on the given `address` in the format of
+    /// Create a new `Server` running on the given `address` in the format of
     /// `IP:Port`.
-    ///
-    /// [`Server`]: struct.Server.html
     pub async fn new(address: &str) -> Result<Self, LiquidError> {
         Ok(Server {
             msg_id: 0,
@@ -37,13 +35,13 @@ impl Server {
         })
     }
 
-    /// A blocking function that allows a [`Server`] to listen for connections
+    /// A blocking function that allows a `Server` to listen for connections
     /// from newly started [`Client`]s. When a new [`Client`] connects to this
-    /// [`Server`], we add the connection to our directory, but do
-    /// not listen for further messages from the [`Client`] since this is not
-    /// required for performing simple registration.
+    /// `Server`, we add the connection to our directory for sending
+    /// `ControlMsg::Kill` messages, but do not listen for further messages
+    /// from the [`Client`] since this is not required for performing simple
+    /// registration.
     ///
-    /// [`Server`]: struct.Server.html
     /// [`Client`]: struct.Client.html
     pub async fn accept_new_connections(&mut self) -> Result<(), LiquidError> {
         let mut listener = TcpListener::bind(&self.address).await?;
@@ -64,10 +62,7 @@ impl Server {
             } else {
                 return Err(LiquidError::UnexpectedMessage);
             };
-            let conn = Connection {
-                address: address.clone(),
-                sink,
-            };
+            let conn = Connection { address, sink };
 
             let target_id;
             let dir;
@@ -75,10 +70,7 @@ impl Server {
                 Some(d) => {
                     // there are some existing clients of this type
                     target_id = d.len() + 1; // node id's start at 1
-                    dir = d
-                        .iter()
-                        .map(|(k, v)| (*k, v.address.clone()))
-                        .collect();
+                    dir = d.iter().map(|(k, v)| (*k, v.address)).collect();
                     d.insert(target_id, conn);
                 }
                 None => {

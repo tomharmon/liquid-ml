@@ -75,6 +75,7 @@
 //! [`DistributedDataFrame`]: struct.DistributedDataFrame.html
 //! [`LiquidML`]: ../struct.LiquidML.html
 //! [`KVStore`]: ../kv/struct.KVStore.html
+//! [`Key`]: ../kv/struct.Key.html
 //! [`SoR`]: https://docs.rs/sorer
 //! [`from_sor`]: struct.DistributedDataFrame.html#method.from_sor
 //! [`from_iter`]: struct.DistributedDataFrame.html#method.from_iter
