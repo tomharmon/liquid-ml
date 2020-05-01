@@ -6,7 +6,6 @@ use clap::Clap;
 use liquid_ml::error::LiquidError;
 use liquid_ml::network::Server;
 use log::Level;
-use simple_logger;
 
 /// This is a simple registration server for a `liquid_ml` system and comes
 /// packaged with the `liquid_ml` system. This needs to be running to

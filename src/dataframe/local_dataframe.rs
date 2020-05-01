@@ -3,7 +3,6 @@ use crate::dataframe::{Row, Rower, Schema};
 use crate::error::LiquidError;
 use crossbeam_utils::thread;
 use deepsize::DeepSizeOf;
-use num_cpus;
 use serde::{Deserialize, Serialize};
 use sorer::dataframe::{from_file, Column, Data};
 use sorer::schema::{infer_schema, DataType};
@@ -505,7 +504,7 @@ impl LocalDataFrame {
 
     /// Return the number of rows in this `DataFrame`.
     pub fn n_rows(&self) -> usize {
-        if self.data.len() == 0 {
+        if self.data.is_empty() {
             0
         } else {
             self.data[0].len()
@@ -609,7 +608,7 @@ impl std::fmt::Display for LocalDataFrame {
             for j in 0..self.n_cols() {
                 write!(f, "<{}>", self.get(j, i).unwrap())?;
             }
-            write!(f, "\n")?;
+            writeln!(f)?;
         }
         Ok(())
     }

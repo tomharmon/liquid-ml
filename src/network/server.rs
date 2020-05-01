@@ -64,10 +64,7 @@ impl Server {
             } else {
                 return Err(LiquidError::UnexpectedMessage);
             };
-            let conn = Connection {
-                address: address.clone(),
-                sink,
-            };
+            let conn = Connection { address, sink };
 
             let target_id;
             let dir;
@@ -75,10 +72,7 @@ impl Server {
                 Some(d) => {
                     // there are some existing clients of this type
                     target_id = d.len() + 1; // node id's start at 1
-                    dir = d
-                        .iter()
-                        .map(|(k, v)| (*k, v.address.clone()))
-                        .collect();
+                    dir = d.iter().map(|(k, v)| (*k, v.address)).collect();
                     d.insert(target_id, conn);
                 }
                 None => {

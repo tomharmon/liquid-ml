@@ -331,7 +331,6 @@ impl<
             .await
     }
 
-    // TODO: graceful shutdown handling of individual streams in the `SelectAll`
     /// Processes messages from the queue that is populated by a [`Client`].
     ///
     /// This method processes the messages by doing the following:
@@ -388,9 +387,7 @@ impl<
                             panic!();
                         }
                         debug!("Put key: {:#?} into KVStore", k.clone());
-                        {
-                            kv.data.write().await.insert(k, v)
-                        };
+                        kv.data.write().await.insert(k, v);
                         kv.internal_notifier.notify();
                     }
                     KVMessage::Blob(v) => {
@@ -399,6 +396,7 @@ impl<
                 }
             });
         }
+        dbg!("no longer processing");
         Ok(())
     }
 

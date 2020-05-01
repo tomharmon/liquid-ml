@@ -128,7 +128,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 0,
                 0,
                 ControlMsg::Introduction {
-                    address: my_address.clone(),
+                    address: my_address,
                     network_name: network_name.to_string(),
                 },
             ))
@@ -149,7 +149,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         // initialize `self`
         let mut c = Client {
             id: dir_msg.target_id,
-            address: my_address.clone(),
+            address: my_address,
             msg_id: dir_msg.msg_id + 1,
             directory: HashMap::new(),
             num_nodes,
@@ -201,7 +201,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
         let (server_addr, my_ip, node_id, listen_addr, num_nodes) = {
             let unlocked = parent.lock().await;
             let node_id = unlocked.id;
-            let server_addr = unlocked.server.address.to_string().clone();
+            let server_addr = unlocked.server.address.to_string();
             let my_ip = unlocked.address.ip().to_string();
             let num_nodes = unlocked.num_nodes;
             (server_addr, my_ip, node_id, unlocked.address, num_nodes)
@@ -356,10 +356,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             }
 
             // Add the connection with the new client to this directory
-            let conn = Connection {
-                address: address.clone(),
-                sink,
-            };
+            let conn = Connection { address, sink };
             self.directory.insert(intro.sender_id, conn);
             // NOTE: Not unsafe because message codec has no fields and
             // can be converted to a different type without losing meaning
@@ -408,7 +405,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 self.id,
                 0,
                 ControlMsg::Introduction {
-                    address: self.address.clone(),
+                    address: self.address,
                     network_name: self.network_name.clone(),
                 },
             ))
@@ -421,7 +418,7 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
                 )
             };
             let conn = Connection {
-                address: client_addr.clone(),
+                address: client_addr,
                 sink,
             };
             info!(
@@ -478,7 +475,10 @@ impl<RT: Send + Sync + DeserializeOwned + Serialize + Clone + 'static>
             let kill_msg: Message<ControlMsg> =
                 message::read_msg(&mut reader).await.unwrap();
             match &kill_msg.msg {
-                ControlMsg::Kill => Ok(notifier.notify()),
+                ControlMsg::Kill => {
+                    notifier.notify();
+                    Ok(())
+                }
                 _ => Err(LiquidError::UnexpectedMessage),
             }
         });

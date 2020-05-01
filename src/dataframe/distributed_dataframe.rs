@@ -5,7 +5,6 @@ use crate::error::LiquidError;
 use crate::kv::{KVStore, Key};
 use crate::network::{Client, FramedStream};
 use bincode::{deserialize, serialize};
-use bytecount;
 use futures::stream::{SelectAll, StreamExt};
 use log::{debug, info};
 use rand::{self, Rng};
@@ -252,9 +251,7 @@ impl DistributedDataFrame {
             };
 
             // Broadcast the initialization message to all nodes
-            {
-                network.lock().await.broadcast(intro_msg).await?
-            };
+            network.lock().await.broadcast(intro_msg).await?;
             debug!("Node 1 sent the initialization message to all nodes");
 
             let row = Arc::new(RwLock::new(Row::new(&schema)));
@@ -598,19 +595,16 @@ impl DistributedDataFrame {
             // 2. collect all results from other nodes (insert ours first)
             let mut df_chunk_map = HashMap::new();
             let mut cur_num_rows = 0;
-            match key {
-                Some(k) => {
-                    df_chunk_map.insert(
-                        Range {
-                            start: cur_num_rows,
-                            end: cur_num_rows + num_rows_left,
-                        },
-                        k,
-                    );
-                    cur_num_rows += num_rows_left;
-                }
-                None => (),
-            };
+            if let Some(key) = key {
+                df_chunk_map.insert(
+                    Range {
+                        start: cur_num_rows,
+                        end: cur_num_rows + num_rows_left,
+                    },
+                    key,
+                );
+                cur_num_rows += num_rows_left;
+            }
 
             let mut results_received = 1;
             // TODO: maybe a better way to pass around these results
@@ -659,9 +653,7 @@ impl DistributedDataFrame {
             };
 
             // Broadcast the initialization message to all nodes
-            {
-                network.lock().await.broadcast(intro_msg).await?
-            };
+            network.lock().await.broadcast(intro_msg).await?;
             debug!("Node 1 sent the initialization message to all nodes");
 
             // 4. initialize self
@@ -713,9 +705,7 @@ impl DistributedDataFrame {
                 num_rows: num_rows_left,
                 filtered_df_key: key,
             };
-            {
-                network.lock().await.send_msg(1, results).await?
-            };
+            network.lock().await.send_msg(1, results).await?;
             // Node 1 will send the initialization message to our network
             let init_msg = read_streams.next().await.unwrap()?;
             // We got a message, check it was the initialization message
@@ -801,7 +791,6 @@ impl DistributedDataFrame {
             .await
     }
 
-    // TODO: graceful shutdown handling of individual streams in the `SelectAll`
     /// Spawns a `tokio` task that processes `DistributedDFMsg` messages
     /// When a message is received, a new `tokio` task is spawned to
     /// handle processing of that message to reduce blocking of the message
@@ -906,7 +895,7 @@ impl Iterator for DataChunkerator {
     }
 }
 
-fn n_rows(data: &Vec<Column>) -> usize {
+fn n_rows(data: &[Column]) -> usize {
     match data.get(0) {
         None => 0,
         Some(x) => match x {
