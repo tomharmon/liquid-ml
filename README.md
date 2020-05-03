@@ -379,10 +379,15 @@ cargo run --example demo_client -- --help
 The third client will print `SUCCESS` at the end.
 
 # Road Map
-clean up
-- add back function that builds from sor, assuming file is on every node
+This project is no longer in active development since it served its purpose
+as a learning tool and the developers no longer have the bandwidth to improve
+upon it. However, here are the items we consider most important that would
+be good improvements:
+
+- add back function that builds from sor, assuming file is on every node (to
+  remove most of the networking latency when testing/debugging)
 - `.sor` -> `.csv`
 - replace copy+pasted code (due to type checking of primitive types) with macro
 - Testing (esp would be good around chunking to ensure no off by one errors)
 - investigate if we should use `tokio::spawn_blocking` anywhere
-- bitmap for filter results
+- Use a bitmap for filter results instead of cloning rows
