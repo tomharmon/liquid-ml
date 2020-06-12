@@ -18,6 +18,34 @@ pub struct Row {
     idx: Option<usize>,
 }
 
+macro_rules! row_setter {
+    ($func_name:ident, $type:ty, $sorer_type:ident) => {
+        /// Sets the field in this `Row` at the given `col_idx` to have the given
+        /// `data`. The `DataType` at the `col_idx` must be an `Int` or it will
+        /// return a `TypeMismatch` error.
+        pub fn $func_name(
+            &mut self,
+            col_idx: usize,
+            data: $type,
+        ) -> Result<(), LiquidError> {
+            match self.schema.schema.get(col_idx) {
+                Some(DataType::$sorer_type) => {
+                    match self.data.get(col_idx).unwrap() {
+                        Data::Null | Data::$sorer_type(_) => {
+                            *self.data.get_mut(col_idx).unwrap() =
+                                Data::$sorer_type(data);
+                            Ok(())
+                        }
+                        _ => panic!("Something is horribly wrong"),
+                    }
+                }
+                None => Err(LiquidError::ColIndexOutOfBounds),
+                _ => Err(LiquidError::TypeMismatch),
+            }
+        }
+    };
+}
+
 /// Functions for creating, mutating, and getting data from `Row`s.
 impl Row {
     /// Constructs a new `Row` with the given `Schema` and fills it with
@@ -35,89 +63,10 @@ impl Row {
         }
     }
 
-    /// Sets the field in this `Row` at the given `col_idx` to have the given
-    /// `data`. The `DataType` at the `col_idx` must be an `Int` or it will
-    /// return a `TypeMismatch` error.
-    pub fn set_int(
-        &mut self,
-        col_idx: usize,
-        data: i64,
-    ) -> Result<(), LiquidError> {
-        match self.schema.schema.get(col_idx) {
-            Some(DataType::Int) => match self.data.get(col_idx).unwrap() {
-                Data::Null | Data::Int(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::Int(data);
-                    Ok(())
-                }
-                _ => panic!("Something is horribly wrong"),
-            },
-            None => Err(LiquidError::ColIndexOutOfBounds),
-            _ => Err(LiquidError::TypeMismatch),
-        }
-    }
-
-    /// Sets the field in this `Row` at the given `col_idx` to have the given
-    /// `data`. The `DataType` at the `col_idx` must be a `Float` or it will
-    /// return a `TypeMismatch` error.
-    pub fn set_float(
-        &mut self,
-        col_idx: usize,
-        data: f64,
-    ) -> Result<(), LiquidError> {
-        match self.schema.schema.get(col_idx) {
-            Some(DataType::Float) => match self.data.get(col_idx).unwrap() {
-                Data::Null | Data::Float(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::Float(data);
-                    Ok(())
-                }
-                _ => panic!("Something is horribly wrong"),
-            },
-            None => Err(LiquidError::ColIndexOutOfBounds),
-            _ => Err(LiquidError::TypeMismatch),
-        }
-    }
-
-    /// Sets the field in this `Row` at the given `col_idx` to have the given
-    /// `data`. The `DataType` at the `col_idx` must be a `Bool` or it will
-    /// return a `TypeMismatch` error.
-    pub fn set_bool(
-        &mut self,
-        col_idx: usize,
-        data: bool,
-    ) -> Result<(), LiquidError> {
-        match self.schema.schema.get(col_idx) {
-            Some(DataType::Bool) => match self.data.get(col_idx).unwrap() {
-                Data::Null | Data::Bool(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::Bool(data);
-                    Ok(())
-                }
-                _ => panic!("Something is horribly wrong"),
-            },
-            None => Err(LiquidError::ColIndexOutOfBounds),
-            _ => Err(LiquidError::TypeMismatch),
-        }
-    }
-
-    /// Sets the field in this `Row` at the given `col_idx` to have the given
-    /// `data`. The `DataType` at the `col_idx` must be a `String` or it will
-    /// return a `TypeMismatch` error.
-    pub fn set_string(
-        &mut self,
-        col_idx: usize,
-        data: String,
-    ) -> Result<(), LiquidError> {
-        match self.schema.schema.get(col_idx) {
-            Some(DataType::String) => match self.data.get(col_idx).unwrap() {
-                Data::Null | Data::String(_) => {
-                    *self.data.get_mut(col_idx).unwrap() = Data::String(data);
-                    Ok(())
-                }
-                _ => panic!("Something is horribly wrong"),
-            },
-            None => Err(LiquidError::ColIndexOutOfBounds),
-            _ => Err(LiquidError::TypeMismatch),
-        }
-    }
+    row_setter!(set_int, i64, Int);
+    row_setter!(set_float, f64, Float);
+    row_setter!(set_bool, bool, Bool);
+    row_setter!(set_string, String, String);
 
     /// Sets the field in this `Row` at the given `col_idx` to be `Null`.
     pub fn set_null(&mut self, col_idx: usize) -> Result<(), LiquidError> {

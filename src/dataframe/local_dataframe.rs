@@ -24,6 +24,38 @@ pub struct LocalDataFrame {
     cur_row_idx: usize,
 }
 
+macro_rules! setter {
+    ($func_name:ident, $type:ty, $sorer_type:ident) => {
+        /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
+        /// to be changed to the given `data`.
+        pub fn $func_name(
+            &mut self,
+            col_idx: usize,
+            row_idx: usize,
+            data: $type,
+        ) -> Result<(), LiquidError> {
+            match self.schema.schema.get(col_idx) {
+                Some(DataType::$sorer_type) => {
+                    match self.data.get_mut(col_idx) {
+                        Some(Column::$sorer_type(col)) => {
+                            match col.get_mut(row_idx) {
+                                Some(d) => {
+                                    *d = Some(data);
+                                    Ok(())
+                                }
+                                None => Err(LiquidError::RowIndexOutOfBounds),
+                            }
+                        }
+                        None => Err(LiquidError::ColIndexOutOfBounds),
+                        _ => panic!("Something is horribly wrong"),
+                    }
+                }
+                _ => Err(LiquidError::TypeMismatch),
+            }
+        }
+    };
+}
+
 /// An implementation for a `LocalDataFrame`, inspired by the data frames used
 /// in `pandas` and `R`.
 impl LocalDataFrame {
@@ -150,9 +182,9 @@ impl LocalDataFrame {
         row_idx: usize,
     ) -> Result<Data, LiquidError> {
         // Note that yes this is really ugly, but no it can't be abstracted
-        // (must match on the types) and it is for performance so that we don't
-        // have to box/unbox values when constructing the DataFrame and mapping
-        // over it
+        // without macros (must match on the types) and it is for performance
+        // so that we don't have to box/unbox values when constructing the
+        // DataFrame and mapping over it
         match self.data.get(col_idx) {
             Some(Column::Int(col)) => match col.get(row_idx) {
                 Some(optional_data) => match optional_data {
@@ -200,101 +232,10 @@ impl LocalDataFrame {
         self.schema.col_name(col_idx)
     }
 
-    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
-    /// to be changed to the given `data`.
-    pub fn set_int(
-        &mut self,
-        col_idx: usize,
-        row_idx: usize,
-        data: i64,
-    ) -> Result<(), LiquidError> {
-        match self.schema.schema.get(col_idx) {
-            Some(DataType::Int) => match self.data.get_mut(col_idx) {
-                Some(Column::Int(col)) => match col.get_mut(row_idx) {
-                    Some(d) => {
-                        *d = Some(data);
-                        Ok(())
-                    }
-                    None => Err(LiquidError::RowIndexOutOfBounds),
-                },
-                None => Err(LiquidError::ColIndexOutOfBounds),
-                _ => panic!("Something is horribly wrong"),
-            },
-            _ => Err(LiquidError::TypeMismatch),
-        }
-    }
-
-    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
-    /// to be changed to the given `data`.
-    pub fn set_float(
-        &mut self,
-        col_idx: usize,
-        row_idx: usize,
-        data: f64,
-    ) -> Result<(), LiquidError> {
-        match self.schema.schema.get(col_idx) {
-            Some(DataType::Float) => match self.data.get_mut(col_idx) {
-                Some(Column::Float(col)) => match col.get_mut(row_idx) {
-                    Some(d) => {
-                        *d = Some(data);
-                        Ok(())
-                    }
-                    None => Err(LiquidError::RowIndexOutOfBounds),
-                },
-                None => Err(LiquidError::ColIndexOutOfBounds),
-                _ => panic!("Something is horribly wrong"),
-            },
-            _ => Err(LiquidError::TypeMismatch),
-        }
-    }
-
-    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
-    /// to be changed to the given `data`.
-    pub fn set_bool(
-        &mut self,
-        col_idx: usize,
-        row_idx: usize,
-        data: bool,
-    ) -> Result<(), LiquidError> {
-        match self.schema.schema.get(col_idx) {
-            Some(DataType::Bool) => match self.data.get_mut(col_idx) {
-                Some(Column::Bool(col)) => match col.get_mut(row_idx) {
-                    Some(d) => {
-                        *d = Some(data);
-                        Ok(())
-                    }
-                    None => Err(LiquidError::RowIndexOutOfBounds),
-                },
-                None => Err(LiquidError::ColIndexOutOfBounds),
-                _ => panic!("Something is horribly wrong"),
-            },
-            _ => Err(LiquidError::TypeMismatch),
-        }
-    }
-
-    /// Mutates the value in this `DataFrame` at the given `col_idx, row_idx`
-    /// to be changed to the given `data`.
-    pub fn set_string(
-        &mut self,
-        col_idx: usize,
-        row_idx: usize,
-        data: String,
-    ) -> Result<(), LiquidError> {
-        match self.schema.schema.get(col_idx) {
-            Some(DataType::String) => match self.data.get_mut(col_idx) {
-                Some(Column::String(col)) => match col.get_mut(row_idx) {
-                    Some(d) => {
-                        *d = Some(data);
-                        Ok(())
-                    }
-                    None => Err(LiquidError::RowIndexOutOfBounds),
-                },
-                None => Err(LiquidError::ColIndexOutOfBounds),
-                _ => panic!("Something is horribly wrong"),
-            },
-            _ => Err(LiquidError::TypeMismatch),
-        }
-    }
+    setter!(set_string, String, String);
+    setter!(set_bool, bool, Bool);
+    setter!(set_float, f64, Float);
+    setter!(set_int, i64, Int);
 
     /// Set the fields of the given `Row` struct with values from this
     /// `DataFrame` at the given `row_index`.
