@@ -2,7 +2,7 @@
 //! implementation of a registration server. This needs to be running to
 //! facilitate connections between different nodes in the system. Refer to the
 //! [`network`](../liquid_ml/network/index.html) module for further information.
-use clap::Clap;
+use clap::Parser;
 use liquid_ml::error::LiquidError;
 use liquid_ml::network::Server;
 use log::Level;
@@ -11,11 +11,11 @@ use log::Level;
 /// packaged with the `liquid_ml` system. This needs to be running to
 /// facilitate connections between different nodes in the system, and each
 /// node must be given the `IP:Port` address of the server.
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
     /// The `IP:Port` at which this server must run
-    #[clap(short = "a", long = "address", default_value = "127.0.0.1:9000")]
+    #[clap(short = 'a', long = "address", default_value = "127.0.0.1:9000")]
     address: String,
 }
 

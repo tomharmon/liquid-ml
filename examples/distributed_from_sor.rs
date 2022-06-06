@@ -1,22 +1,22 @@
-use clap::Clap;
+use clap::Parser;
 use liquid_ml::{error::LiquidError, kv::Key, LiquidML};
 use log::Level;
 use simple_logger;
 
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
     /// The IP:Port at which the registration server is running
     #[clap(
-        short = "s",
+        short = 's',
         long = "server_addr",
         default_value = "127.0.0.1:9000"
     )]
     server_address: String,
     /// The IP:Port at which this application must run
-    #[clap(short = "m", long = "my_addr", default_value = "127.0.0.2:9002")]
+    #[clap(short = 'm', long = "my_addr", default_value = "127.0.0.2:9002")]
     my_address: String,
 }
 

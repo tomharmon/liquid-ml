@@ -1,5 +1,5 @@
 use chrono::{Datelike, NaiveDateTime, Timelike};
-use clap::Clap;
+use clap::Parser;
 use csv::Reader;
 use serde::Deserialize;
 use std::fs::File;
@@ -8,19 +8,19 @@ use std::io::{BufWriter, Write};
 /// This is a simple data processing script to convert CSV files to SoR files
 /// and convert raw data to feature vectors. It does not necessarily belong
 /// in this crate.
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "1.0", author = "Tom")]
 struct Opts {
     /// The name of the CSV input file
     #[clap(
-        short = "i",
+        short = 'i',
         long = "input_file",
         default_value = "/home/tom/Downloads/spy.csv"
     )]
     input_file: String,
     /// The name of the output file
     #[clap(
-        short = "o",
+        short = 'o',
         long = "output_file",
         default_value = "/home/tom/Downloads/spy_processed.sor"
     )]

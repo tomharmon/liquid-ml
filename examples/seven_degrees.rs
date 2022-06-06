@@ -1,6 +1,6 @@
 use bincode::{deserialize, serialize};
 use bitvec::prelude::*;
-use clap::Clap;
+use clap::Parser;
 use futures::future::try_join_all;
 use liquid_ml::{
     dataframe::{Data, Row, Rower},
@@ -13,42 +13,42 @@ use simple_logger;
 
 /// This is a simple example showing how to load a sor file from disk and
 /// distribute it across nodes, and perform pmap
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
     /// The IP:Port at which the registration server is running
     #[clap(
-        short = "s",
+        short = 's',
         long = "server_addr",
         default_value = "127.0.0.1:9000"
     )]
     server_address: String,
     /// The IP:Port at which this application must run
-    #[clap(short = "m", long = "my_addr", default_value = "127.0.0.2:9002")]
+    #[clap(short = 'm', long = "my_addr", default_value = "127.0.0.2:9002")]
     my_address: String,
     /// The number of nodes for the distributed system
-    #[clap(short = "n", long = "num_nodes", default_value = "3")]
+    #[clap(short = 'n', long = "num_nodes", default_value = "3")]
     num_nodes: usize,
     /// The number of degrees of Linus to calculate for the distributed system
-    #[clap(short = "d", long = "degrees", default_value = "4")]
+    #[clap(short = 'd', long = "degrees", default_value = "4")]
     degrees: usize,
     /// The name of the commits file
     #[clap(
-        short = "c",
+        short = 'c',
         long = "commits",
         default_value = "/home/tom/code/7degrees/commits.ltgt"
     )]
     commits: String,
     /// The name of the projects file
     #[clap(
-        short = "p",
+        short = 'p',
         long = "projects",
         default_value = "/home/tom/code/7degrees/projects.ltgt"
     )]
     _projects: String,
     /// The name of the users file
     #[clap(
-        short = "u",
+        short = 'u',
         long = "users",
         default_value = "/home/tom/code/7degrees/users.ltgt"
     )]

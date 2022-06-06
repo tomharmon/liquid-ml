@@ -1,16 +1,16 @@
-use clap::Clap;
+use clap::Parser;
 use liquid_ml::dataframe::{Column, LocalDataFrame, Row, Rower};
 use liquid_ml::error::LiquidError;
 use rand;
 use serde::{Deserialize, Serialize};
 
 /// This example builds and evaluates a binary classification decision tree
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
     /// The name of the data file
     #[clap(
-        short = "d",
+        short = 'd',
         long = "data",
         default_value = "examples/banknote.sor"
     )]

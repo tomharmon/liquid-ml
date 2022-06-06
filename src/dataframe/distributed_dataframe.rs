@@ -65,7 +65,7 @@ pub struct DistributedDataFrame {
     row: Arc<RwLock<Row>>,
     /// A notifier that gets notified when the `Server` has sent a `Kill`
     /// message to this `DistributedDataFrame`'s network `Client`
-    kill_notifier: Arc<Notify>,
+    _kill_notifier: Arc<Notify>,
     /// Used for lower level messages, such as sending arbitrary `Rower`s
     blob_receiver: Mutex<Receiver<Vec<u8>>>,
     /// Used for processing filter results TODO: maybe a better way to do this
@@ -118,7 +118,7 @@ impl DistributedDataFrame {
         let sor_terator = if kv.id == 1 {
             let total_newlines = count_new_lines(file_name);
             let max_rows_per_node = total_newlines / num_nodes;
-            let schema = sorer::schema::infer_schema(file_name);
+            let schema = sorer::schema::infer_schema(file_name)?;
             info!(
                 "Total newlines: {} max rows per node: {}",
                 total_newlines, max_rows_per_node
@@ -160,7 +160,7 @@ impl DistributedDataFrame {
         let internal_notifier = Arc::new(Notify::new());
         // so that our network client can notify us when they get a Kill
         // signal
-        let kill_notifier = Arc::new(Notify::new());
+        let _kill_notifier = Arc::new(Notify::new());
         // so that our client only connects to clients for this dataframe
         let df_network_name = format!("ddf-{}", df_name);
         // for processing results when distributed filtering is performed
@@ -168,7 +168,7 @@ impl DistributedDataFrame {
         let (filter_results_sender, filter_results) = mpsc::channel(num_nodes);
         let filter_results = Mutex::new(filter_results);
 
-        let (network, mut read_streams, _kill_notifier) =
+        let (network, mut read_streams, __kill_notifier) =
             Client::register_network(
                 kv.network.clone(),
                 df_network_name.to_string(),
@@ -254,7 +254,7 @@ impl DistributedDataFrame {
                 kv,
                 internal_notifier,
                 row,
-                kill_notifier,
+                _kill_notifier,
                 blob_receiver: Mutex::new(blob_receiver),
                 filter_results,
             });
@@ -309,7 +309,7 @@ impl DistributedDataFrame {
                 kv,
                 internal_notifier,
                 row,
-                kill_notifier,
+                _kill_notifier,
                 blob_receiver: Mutex::new(blob_receiver),
                 filter_results,
             });
@@ -412,7 +412,7 @@ impl DistributedDataFrame {
                     // message processing task
                     self.internal_notifier.notified().await;
                     // self.row is now set
-                    Ok({ self.row.read().await.clone() })
+                    Ok(self.row.read().await.clone())
                 }
             }
             None => Err(LiquidError::RowIndexOutOfBounds),
@@ -514,12 +514,12 @@ impl DistributedDataFrame {
     ) -> Result<Arc<Self>, LiquidError> {
         // so that our network client can notify us when they get a Kill
         // signal
-        let kill_notifier = Arc::new(Notify::new());
+        let _kill_notifier = Arc::new(Notify::new());
         let mut rng = rand::thread_rng();
         let r = rng.gen::<i16>();
         let new_name = format!("{}-filtered-{}", &self.df_name, r);
         let df_network_name = format!("ddf-{}", new_name);
-        let (network, mut read_streams, _kill_notifier) =
+        let (network, mut read_streams, __kill_notifier) =
             Client::register_network(
                 self.kv.network.clone(),
                 df_network_name.to_string(),
@@ -659,7 +659,7 @@ impl DistributedDataFrame {
                 kv: self.kv.clone(),
                 internal_notifier,
                 row,
-                kill_notifier,
+                _kill_notifier,
                 blob_receiver: Mutex::new(blob_receiver),
                 filter_results,
             });
@@ -721,7 +721,7 @@ impl DistributedDataFrame {
                 kv: self.kv.clone(),
                 internal_notifier,
                 row,
-                kill_notifier,
+                _kill_notifier,
                 blob_receiver: Mutex::new(blob_receiver),
                 filter_results,
             });

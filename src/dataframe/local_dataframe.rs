@@ -64,7 +64,7 @@ impl LocalDataFrame {
     /// reads `len` bytes of the file, starting at the given byte offset
     /// `from`.
     pub fn from_sor(file_name: &str, from: usize, len: usize) -> Self {
-        let schema = Schema::from(infer_schema(file_name));
+        let schema = Schema::from(infer_schema(file_name).expect("Could not infer schema for {file_name:?}"));
         let n_threads = num_cpus::get();
         let data =
             from_file(file_name, schema.schema.clone(), from, len, n_threads);

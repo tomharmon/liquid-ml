@@ -1,5 +1,5 @@
 use bincode::{deserialize, serialize};
-use clap::Clap;
+use clap::Parser;
 use liquid_ml::{
     dataframe::{Column, LocalDataFrame, Row, Rower},
     error::LiquidError,
@@ -26,25 +26,25 @@ use std::sync::Arc;
 /// data around on all nodes but would greatly improve the accuracy of the
 /// model. We have not yet performed testing to compare these two approaches
 /// but it would be nice to do.
-#[derive(Clap)]
+#[derive(Parser)]
 #[clap(version = "1.0", author = "Samedh G. & Thomas H.")]
 struct Opts {
     /// The IP:Port at which the registration server is running
     #[clap(
-        short = "s",
+        short = 's',
         long = "server_addr",
         default_value = "127.0.0.1:9000"
     )]
     server_address: String,
     /// The IP:Port at which this application must run
-    #[clap(short = "m", long = "my_addr", default_value = "127.0.0.2:9002")]
+    #[clap(short = 'm', long = "my_addr", default_value = "127.0.0.2:9002")]
     my_address: String,
     /// The number of nodes for the distributed system
-    #[clap(short = "n", long = "num_nodes", default_value = "4")]
+    #[clap(short = 'n', long = "num_nodes", default_value = "4")]
     num_nodes: usize,
     /// The name of the data file
     #[clap(
-        short = "d",
+        short = 'd',
         long = "data",
         default_value = "examples/banknote.sor"
     )]
