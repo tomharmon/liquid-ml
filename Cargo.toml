@@ -3,6 +3,8 @@ name = "liquid-ml"
 version = "0.1.0"
 authors = ["Thomas Harmon <harmon.t@husky.neu.edu>", "Samedh Gupta <gupta.sam@husky.neu.edu>"]
 edition = "2018"
+description = "A university project to build a distributed compute system for UDFs"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
